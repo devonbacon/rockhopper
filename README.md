@@ -82,6 +82,13 @@ From the command line, after `--`:
 - `host`: a server with you playing on it.
 - `join=address:port`, with `name=` and `role=soldier|commander`.
 
+The dedicated server runs on a Debian box: `tools/deploy_server.sh
+[user@host] [port]` (from a machine with ssh access) installs Godot's
+Linux build there, clones or pulls this repo, and runs it headless as a
+systemd user service, restarting on failure. Run it again after pushing
+to update. Logs: `journalctl --user -u rockhopper -f` on the box. The
+port is UDP.
+
 Debug: `probe=builder|walker|stander` scripts a joined client, for
 checking a server headlessly.
 
