@@ -55,7 +55,7 @@ func _physics_process(delta: float) -> void:
 	_load.visible = cargo > 0
 	match task:
 		Task.PARKED:
-			_drive_to(_park_point(), 1.0, delta)
+			_drive_to(park_point(), 1.0, delta)
 			rig = game.pick_rig(self)
 			if rig:
 				task = Task.OUTBOUND
@@ -95,8 +95,8 @@ func damage(amount: float) -> void:
 	_flash = 1.0
 
 
-func _park_point() -> Vector3:
-	var angle := slot * 1.3 + 0.6
+func park_point() -> Vector3:
+	var angle := 2.2 + slot * 0.75
 	return game.pod.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 6.5
 
 

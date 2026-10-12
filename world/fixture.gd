@@ -34,6 +34,8 @@ var drilled := 0.0
 var stalled := ""
 
 var light: OmniLight3D
+## The pod's screen.
+var screen: PodScreen
 var _bulb: StandardMaterial3D
 var _beacon: OmniLight3D
 var _beacon_bulb: StandardMaterial3D
@@ -122,10 +124,20 @@ func _build_pod() -> void:
 	torus.outer_radius = 1.62
 	_add_mesh(torus, stripe, Vector3(0, 1.0, 0))
 	var cells := _material(Color(0.08, 0.12, 0.3), 0.6, 0.2)
-	for side in [-1.0, 1.0]:
-		var box := BoxMesh.new()
-		box.size = Vector3(0.06, 1.6, 1.0)
-		_add_mesh(box, cells, Vector3(side * 1.55, 2.0, 0)).rotation.z = side * 0.12
+	var box := BoxMesh.new()
+	box.size = Vector3(0.06, 1.6, 1.0)
+	_add_mesh(box, cells, Vector3(-1.55, 2.0, 0)).rotation.z = -0.12
+	# The screen faces out of the +x side, leaning back with the hull.
+	var lean := atan2(0.4, 3.0)
+	var out := Vector3(cos(lean), sin(lean), 0.0)
+	var up := Vector3(-sin(lean), cos(lean), 0.0)
+	var screen_basis := Basis(up.cross(out), up, out)
+	var frame := BoxMesh.new()
+	frame.size = Vector3(PodScreen.SIZE.x + 0.12, PodScreen.SIZE.y + 0.12, 0.06)
+	_add_mesh(frame, _material(Color(0.2, 0.21, 0.24), 0.6, 0.4), Vector3(1.34, 2.1, 0)).basis = screen_basis
+	screen = PodScreen.new()
+	screen.transform = Transform3D(screen_basis, Vector3(1.34, 2.1, 0) + out * 0.035)
+	add_child(screen)
 	for i in 3:
 		var leg := BoxMesh.new()
 		leg.size = Vector3(0.15, 1.6, 0.15)

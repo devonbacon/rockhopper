@@ -3,7 +3,7 @@ extends CanvasLayer
 ## Readouts. Top left, meters for health, the battery, suit warmth and
 ## the jetpack. Top right, the pod's launch clock and a strip of the next
 ## day and night where you're standing. Bottom, the ore banked in the pod
-## and in your pockets, the rovers, and the hotbar. In the middle, a
+## and in your pockets, and the rovers. In the middle, a
 ## crosshair that fills as you hold E, what E would do, a marker for the
 ## pod pinned to the screen's edge when it's out of view, and markers on
 ## drill rigs, with how full they are and why they've stopped. Holding Q
@@ -22,9 +22,8 @@ const NIGHT_COLOR := Color(0.1, 0.13, 0.24)
 const POD_COLOR := Color(1.0, 0.55, 0.25)
 const ALERT := Color(1.0, 0.4, 0.3)
 const HEALTH_COLOR := Color(1.0, 0.35, 0.35)
-const SLOTS := [&"lamp", &"panel", &"drill", &"rover"]
 const FORECAST_STEPS := 120
-const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"drill": "Drill rig", &"rover": "Rover"}
+const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"drill": "Drill rig"}
 
 var game: Game
 
@@ -36,7 +35,6 @@ var _ore: Label
 var _carried: Label
 var _rovers: Label
 var _notice: Label
-var _slots := {}
 var _hint: Label
 var _prompt: Label
 var _overlay: Control
@@ -229,12 +227,6 @@ func _build_bottom() -> void:
 	var ore_panel := _panel(ore_column)
 	ore_panel.custom_minimum_size = Vector2(210, 104)
 	row.add_child(ore_panel)
-	for i in SLOTS.size():
-		var slot := Control.new()
-		slot.custom_minimum_size = Vector2(104, 104)
-		slot.draw.connect(_draw_slot.bind(slot, SLOTS[i], i + 1))
-		row.add_child(slot)
-		_slots[SLOTS[i]] = slot
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -255,26 +247,10 @@ func _update_bottom() -> void:
 		if rover.task != Rover.Task.PARKED:
 			out += 1
 	_rovers.text = "%d rovers, %d out" % [game.rovers.size(), out]
-	for slot: Control in _slots.values():
-		slot.queue_redraw()
 	if game.player.tool != &"":
-		_hint.text = "[LMB] build    [RMB] or [%d] put away" % (SLOTS.find(game.player.tool) + 1)
+		_hint.text = "%s in hand    [LMB] build    [RMB] put away" % NAMES[game.player.tool]
 	else:
 		_hint.text = "[LMB] fire    [E] use    [Hold Q] build    [F] headlamp    [Esc] free the mouse"
-
-
-func _draw_slot(slot: Control, kind: StringName, key: int) -> void:
-	var rect := Rect2(Vector2.ZERO, slot.size)
-	var selected := game.player.tool == kind and kind != &"rover"
-	var affordable: bool = game.stock >= Fixture.COST[kind]
-	slot.draw_rect(rect, PANEL)
-	slot.draw_rect(rect.grow(-1), DAY_COLOR if selected else EDGE, false, 3.0 if selected else 1.5)
-	var font := slot.get_theme_default_font()
-	slot.draw_string(font, Vector2(8, 20), str(key), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, DIM)
-	var tint := Color.WHITE if affordable else Color(1, 1, 1, 0.3)
-	_draw_icon(slot, kind, Vector2(slot.size.x * 0.5, 44), tint)
-	slot.draw_string(font, Vector2(0, 82), NAMES[kind], HORIZONTAL_ALIGNMENT_CENTER, slot.size.x, 15, Color.WHITE * tint)
-	slot.draw_string(font, Vector2(0, 98), "%d ore" % Fixture.COST[kind], HORIZONTAL_ALIGNMENT_CENTER, slot.size.x, 13, ORE_COLOR if affordable else ALERT)
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
@@ -282,14 +258,7 @@ func _draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tint: Col
 	var white := Color(0.88, 0.88, 0.86) * tint
 	var gold := Color(0.85, 0.62, 0.22) * tint
 	var dark := Color(0.15, 0.15, 0.17) * tint
-	if kind == &"rover":
-		canvas.draw_rect(Rect2(centre + Vector2(-24, -10), Vector2(48, 14)), white)
-		canvas.draw_rect(Rect2(centre + Vector2(-18, 4), Vector2(36, 5)), gold)
-		canvas.draw_line(centre + Vector2(14, -10), centre + Vector2(14, -22), white, 2.5)
-		canvas.draw_rect(Rect2(centre + Vector2(9, -26), Vector2(11, 6)), white)
-		for x in [-17, 0, 17]:
-			canvas.draw_circle(centre + Vector2(x, 13), 6, dark)
-	elif kind == &"drill":
+	if kind == &"drill":
 		canvas.draw_line(centre + Vector2(-20, 20), centre + Vector2(0, -16), white, 3.0)
 		canvas.draw_line(centre + Vector2(20, 20), centre + Vector2(0, -16), white, 3.0)
 		canvas.draw_line(centre + Vector2(0, -12), centre + Vector2(0, 22), Color(0.5, 0.5, 0.52) * tint, 3.0)
@@ -352,8 +321,6 @@ func _draw_radial(centre: Vector2) -> void:
 		_draw_icon(_overlay, kind, at - Vector2(0, 14), Color.WHITE if affordable else Color(1, 1, 1, 0.3))
 		_overlay.draw_string(font, at + Vector2(-70, 34), NAMES[kind], HORIZONTAL_ALIGNMENT_CENTER, 140, 15, Color.WHITE)
 		var cost := "%d ore" % Fixture.COST[kind]
-		if kind == &"rover":
-			cost += ", printed now"
 		_overlay.draw_string(font, at + Vector2(-70, 50), cost, HORIZONTAL_ALIGNMENT_CENTER, 140, 13, ORE_COLOR if affordable else ALERT)
 	var middle := "Put away" if player.tool != &"" else "Nothing"
 	_overlay.draw_string(font, centre + Vector2(-50, 5), middle, HORIZONTAL_ALIGNMENT_CENTER, 100, 14, Color.WHITE if player.radial_choice < 0 else DIM)

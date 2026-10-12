@@ -280,7 +280,8 @@ func deliver(amount: int) -> void:
 	stock += amount
 
 
-## Prints a rover at the pod from the bank, if there's enough in it.
+## Prints a rover at the pod from the bank, if there's enough in it. Done
+## from the pod's screen.
 func print_rover() -> bool:
 	if stock < Fixture.COST[&"rover"]:
 		return false
@@ -373,8 +374,7 @@ func _add_rover() -> void:
 	rover.game = self
 	rover.slot = rovers.size()
 	add_child(rover)
-	var angle := rover.slot * 1.3 + 0.6
-	rover.global_position = pod.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 6.5
+	rover.global_position = rover.park_point()
 	rovers.push_back(rover)
 
 
@@ -454,6 +454,7 @@ func _place_pod() -> void:
 			break
 	pod = Fixture.make(&"pod", landing[0] - Vector3.UP * 0.4, Vector3.UP)
 	add_child(pod)
+	pod.screen.game = self
 
 
 ## Big outcrops that never run out, spread well apart, none too near the
@@ -523,7 +524,7 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 
 
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
-## cave, rig (builds one on the deposit nearest the pod and stands you by
+## cave|screen, rig (builds one on the deposit nearest the pod and stands you by
 ## it), lamps=N (around you), spiders=N (in front of you), tool=,
 ## radial=N (the build menu up, N chosen, -1 for none), pitch=
 ## degrees, and shot=path.png and shot_at=seconds to save a screenshot and
@@ -537,6 +538,10 @@ func _debug_setup() -> void:
 			overview.look_at_from_position(Vector3(0, 110, 120), Vector3(0, 0, 5))
 			overview.make_current()
 			player.process_mode = Node.PROCESS_MODE_DISABLED
+		"screen":
+			var front: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 2.6
+			var spot: Array = terrain.surface_point(front)
+			place_player(spot[0] + Vector3.UP * 0.3, pod.screen.global_position)
 		"cave":
 			var chamber := terrain.chambers[0]
 			var floor_point: Array = terrain.surface_point(Vector3(chamber.x, 0, chamber.z))

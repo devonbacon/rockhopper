@@ -3,12 +3,12 @@ extends CharacterBody3D
 ## You, in first person, on the crater floor.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
-## the jetpack, which refills on the ground. Left mouse fires, unless a
-## lamp, panel or drill rig's in hand (1, 2 and 3), when it builds one; a
-## rig goes over a deposit. Right-click puts it away. 4 prints a rover at
-## the pod. Holding Q brings up the same choices on a radial menu: move the
-## mouse towards one and let go of Q, or let go in the middle to put
-## what's in hand away. E is use: tap it at the pod to hand in ore, or at a rig to
+## the jetpack, which refills on the ground. Holding Q brings up the radial
+## build menu: move the mouse towards a lamp, panel or drill rig and let go
+## of Q to take it in hand, or let go in the middle to put it away. Left
+## mouse fires, or with something in hand, builds it; a rig goes over a
+## deposit. Right-click puts it away. E is use: tap it at the pod to hand
+## in ore, on a button on the pod's screen to press it, or at a rig to
 ## empty its hopper; hold it on ore or a deposit to mine it, or on a lamp,
 ## panel or rig to pick it back up. F toggles the headlamp.
 
@@ -36,7 +36,7 @@ const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
 ## What the radial menu offers, clockwise from the top.
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"drill", &"rover"]
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"drill"]
 ## How far the mouse has to move from the middle to pick, and how far the
 ## pointer can go.
 const RADIAL_DEAD := 40.0
@@ -165,10 +165,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_ESCAPE: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-			KEY_1: _choose(&"" if tool == &"lamp" else &"lamp")
-			KEY_2: _choose(&"" if tool == &"panel" else &"panel")
-			KEY_3: _choose(&"" if tool == &"drill" else &"drill")
-			KEY_4: _choose(&"rover")
 			KEY_F: headlamp.visible = !headlamp.visible
 
 
@@ -244,7 +240,14 @@ func _use(delta: float) -> void:
 		_use_held = 0.0
 	prompt = ""
 	progress = 0.0
+	game.pod.screen.hover = &""
 	if !target:
+		return
+	if target.kind == &"pod" and target.screen.aim(camera.global_position, -camera.global_basis.z):
+		var labels := {&"rover": "Print a rover", &"hand_in": "Hand in ore"}
+		prompt = ("[E] " + labels[target.screen.hover]) if target.screen.hover != &"" else ""
+		if pressed:
+			target.screen.press()
 		return
 	match target.kind:
 		&"deposit":
@@ -315,12 +318,9 @@ func _build() -> void:
 		game.build(tool, hit.position, hit.normal)
 
 
-## Takes a lamp, panel or rig in hand (or nothing), or prints a rover.
+## Takes a lamp, panel or rig in hand, or nothing.
 func _choose(kind: StringName) -> void:
-	if kind == &"rover":
-		_say("Rover printed at the pod" if game.print_rover() else "Not enough ore in the pod for a rover")
-	else:
-		tool = kind
+	tool = kind
 
 
 func _say(text: String) -> void:

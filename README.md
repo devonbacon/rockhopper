@@ -25,8 +25,8 @@ the pod while there's power. In the dark it cools, and in 45 seconds
 you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
-Lamps (1 ore), panels (2), drill rigs (3) and rovers (4) are paid for
-from the bank, and picking something back up refunds it. What's in the
+Lamps (1 ore), panels (2), drill rigs (3) and rovers (4, printed from
+the pod's screen) are paid for from the bank, and picking something back up refunds it. What's in the
 bank when the pod launches, after twelve minutes, is the score (the
 quota is 100). Be beside the pod then, or be left behind.
 
@@ -55,10 +55,12 @@ hurt you for a few seconds.
   empty its hopper into your pockets. Hold on ore or a deposit to mine
   it, or on a lamp, panel or rig to pick it up.
 - **Build:** hold Q for the radial menu, move the mouse towards a lamp,
-  panel, drill rig or rover and let go of Q (or let go in the middle to
-  put away what's in hand). 1-4 pick the same directly. Then left-click
-  the ground, or for a rig, the deposit; right-click puts it away. A
-  rover's printed at the pod as soon as you pick it.
+  panel or drill rig and let go of Q (or let go in the middle to put
+  away what's in hand). Then left-click the ground, or for a rig, the
+  deposit; right-click puts it away.
+- **The pod's screen:** look at a button on it and press E, to print a
+  rover (4 ore) or hand in what you carry. It also shows what's banked,
+  the rovers, the battery and the launch clock.
 - **F** toggles the headlamp. **Esc** frees the mouse; click to take it
   back.
 - **R** after a mission: a new map. **Shift+R:** the same one.
@@ -83,7 +85,7 @@ User arguments after `--`, e.g.
 - `seed=N`: the map.
 - `time=S`: start S seconds in (`time=150` is dusk).
 - `view=overview` looks down on the whole crater; `view=cave` stands
-  you in a cave.
+  you in a cave; `view=screen` in front of the pod's screen.
 - `rig` builds a rig on the deposit nearest the pod and stands you
   beside it.
 - `lamps=N` builds N lamps around you.
@@ -102,6 +104,7 @@ User arguments after `--`, e.g.
   from it for rovers. No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, lamps, panels and rigs.
+- `world/pod_screen.gd`, `world/screen.gdshader`: the pod's screen.
 - `world/rover.gd`: the haulers.
 - `world/spider.gd`: the spiders.
 - `player/player.gd`: you.
