@@ -50,7 +50,10 @@ hurt you for a few seconds.
 
 - **Move:** mouse looks, WASD walks, Shift runs. Space jumps; hold it
   in the air for the jetpack, which refills on the ground.
-- **Fire:** left mouse, held, when nothing's in hand.
+- **Fire:** left mouse, held, when nothing's in hand. Shots land in a
+  cone (the crosshair's ticks) that widens as you fire, move or jump, and
+  settles back. Hold right mouse to aim down the sights: zoomed, much
+  tighter, but slow on your feet.
 - **Use (E):** tap at the pod to hand in what you carry, or at a rig to
   empty its hopper into your pockets. Hold on ore or a deposit to mine
   it, or on a lamp, panel or rig to pick it up.
@@ -65,8 +68,8 @@ hurt you for a few seconds.
   stops it where it is, GO HOME drives it back to park, unloading what
   it carries, until you tell it to haul again. It also shows what the
   rover's doing, its cargo and its hull.
-- **F** toggles the headlamp. **Esc** frees the mouse; click to take it
-  back.
+- **F** toggles the headlamp. **Esc** pauses (Resume, New map, Quit);
+  Esc again resumes.
 - **R** after a mission: a new map. **Shift+R:** the same one.
 
 The sunset/sunrise clock and the strip under it look along where the sun
@@ -98,6 +101,7 @@ User arguments after `--`, e.g.
 - `tool=lamp`, `tool=panel` or `tool=drill` starts with it in hand.
 - `radial=N` holds the build menu up with item N chosen (-1 for none).
 - `pitch=D` tilts your view by D degrees.
+- `aim` holds aim down the sights; `pause` starts paused.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.
 

@@ -42,6 +42,7 @@ var _outcome: PanelContainer
 var _outcome_text: Label
 var _frost_material: ShaderMaterial
 var _hurt_material: ShaderMaterial
+var _pause: Control
 ## Where you stand, whether the sun reaches you at even steps over the next
 ## turn, refreshed every so often.
 var _forecast: Array[bool] = []
@@ -49,6 +50,7 @@ var _forecast_age := 99.0
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_frost_material = ShaderMaterial.new()
 	_frost_material.shader = load("res://ui/frost.gdshader")
 	var frost := ColorRect.new()
@@ -82,6 +84,49 @@ func _ready() -> void:
 	_outcome = _panel(_outcome_text, 28)
 	_place(_outcome, Vector2(0.5, 0.4), Vector2.ZERO, Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BOTH)
 	add_child(_outcome)
+	_build_pause()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and !event.echo and event.physical_keycode == KEY_ESCAPE:
+		set_paused(!get_tree().paused)
+		get_viewport().set_input_as_handled()
+
+
+func set_paused(paused: bool) -> void:
+	get_tree().paused = paused
+	_pause.visible = paused
+	var playing := game.state == Game.State.PLAYING
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if !paused and playing else Input.MOUSE_MODE_VISIBLE
+
+
+func _build_pause() -> void:
+	_pause = ColorRect.new()
+	_pause.color = Color(0, 0, 0, 0.55)
+	_pause.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pause.visible = false
+	add_child(_pause)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	var title := _label(34)
+	title.text = "PAUSED"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(title)
+	for entry: Array in [["Resume", func() -> void: set_paused(false)],
+			["New map", func() -> void:
+				get_tree().paused = false
+				get_tree().reload_current_scene()],
+			["Quit", func() -> void: get_tree().quit()]]:
+		var button := Button.new()
+		button.text = entry[0]
+		button.custom_minimum_size = Vector2(260, 48)
+		button.add_theme_font_size_override("font_size", 20)
+		button.pressed.connect(entry[1])
+		column.add_child(button)
+	var panel := _panel(column, 24)
+	_place(panel, Vector2(0.5, 0.45), Vector2.ZERO, Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BOTH)
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	_pause.add_child(panel)
 
 
 func _process(delta: float) -> void:
@@ -250,7 +295,7 @@ func _update_bottom() -> void:
 	if game.player.tool != &"":
 		_hint.text = "%s in hand    [LMB] build    [RMB] put away" % NAMES[game.player.tool]
 	else:
-		_hint.text = "[LMB] fire    [E] use    [Hold Q] build    [F] headlamp    [Esc] free the mouse"
+		_hint.text = "[LMB] fire    [RMB] aim    [E] use    [Hold Q] build    [F] headlamp    [Esc] pause"
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
@@ -283,6 +328,11 @@ func _draw_overlay() -> void:
 	var centre := _overlay.size * 0.5
 	var player := game.player
 	_overlay.draw_circle(centre, 2.5, Color(1, 1, 1, 0.85))
+	if player.tool == &"" and !player.radial_open:
+		var camera := player.camera
+		var bloom := tan(deg_to_rad(player.spread)) / tan(deg_to_rad(camera.fov * 0.5)) * _overlay.size.y * 0.5 + 5.0
+		for side in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+			_overlay.draw_line(centre + side * bloom, centre + side * (bloom + 8.0), Color(1, 1, 1, 0.8), 2.0)
 	if player.progress > 0.0:
 		_overlay.draw_arc(centre, 16, 0, TAU, 32, Color(1, 1, 1, 0.15), 3.0)
 		_overlay.draw_arc(centre, 16, -PI * 0.5, -PI * 0.5 + TAU * minf(player.progress, 1.0), 32, ORE_COLOR, 3.0)

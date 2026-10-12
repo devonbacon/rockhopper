@@ -32,6 +32,20 @@ const PICK_UP_TIME := 0.5
 ## you, in case the jetpack gets you up it.
 const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
 const FIRE_EVERY := 0.14
+const FOV := 80.0
+const ADS_FOV := 52.0
+const ADS_SPEED := 2.4
+const HIP_GUN := Vector3(0.2, -0.17, -0.36)
+const ADS_GUN := Vector3(0.0, -0.1, -0.3)
+## Bloom, in degrees: the cone shots land in. It rests wider moving, grows
+## with each shot, and settles back.
+const HIP_SPREAD := 1.2
+const ADS_SPREAD := 0.15
+const MOVING_SPREAD := 2.5
+const HIP_KICK := 0.9
+const ADS_KICK := 0.35
+const MAX_SPREAD := 7.0
+const SETTLE := 9.0
 const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
@@ -72,6 +86,10 @@ var _radial_aim := Vector2.ZERO
 var _screen: Screen
 var _cooldown := 0.0
 var _recoil := 0.0
+var aiming := false
+var debug_aim := false
+var spread := HIP_SPREAD
+var _ads := 0.0
 var _gun: Node3D
 var _muzzle: Node3D
 var _muzzle_light: OmniLight3D
@@ -93,7 +111,7 @@ func _ready() -> void:
 	_head.position.y = HEIGHT - 0.15
 	add_child(_head)
 	camera = Camera3D.new()
-	camera.fov = 80.0
+	camera.fov = FOV
 	camera.near = 0.05
 	camera.far = 1500.0
 	_head.add_child(camera)
@@ -154,8 +172,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				radial_choice = roundi(turn / (TAU / BUILD.size())) % BUILD.size()
 		return
 	if event is InputEventMouseMotion and captured:
-		rotate_object_local(Vector3.UP, -event.relative.x * SENSITIVITY)
-		look(clampf(_pitch - event.relative.y * SENSITIVITY, -1.5, 1.5))
+		var sensitivity := SENSITIVITY * camera.fov / FOV
+		rotate_object_local(Vector3.UP, -event.relative.x * sensitivity)
+		look(clampf(_pitch - event.relative.y * sensitivity, -1.5, 1.5))
 	elif event is InputEventMouseButton and event.pressed:
 		if !captured:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -165,7 +184,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			tool = &""
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
-			KEY_ESCAPE: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 			KEY_F: headlamp.visible = !headlamp.visible
 
 
@@ -177,7 +195,11 @@ func _physics_process(delta: float) -> void:
 	var input := Vector2.ZERO
 	if playing:
 		input = Vector2(_axis(KEY_D, KEY_A), _axis(KEY_W, KEY_S)).limit_length(1.0)
-	var speed := RUN if Input.is_physical_key_pressed(KEY_SHIFT) else WALK
+	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	aiming = playing and (debug_aim or captured and tool == &"" and !radial_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
+	_ads = move_toward(_ads, 1.0 if aiming else 0.0, delta * 7.0)
+	camera.fov = lerpf(FOV, ADS_FOV, _ads)
+	var speed := ADS_SPEED if aiming else (RUN if Input.is_physical_key_pressed(KEY_SHIFT) else WALK)
 	var wish := (global_basis.x * input.x - global_basis.z * input.y) * speed
 	var jump_held := playing and Input.is_physical_key_pressed(KEY_SPACE)
 	jetting = false
@@ -206,7 +228,12 @@ func _physics_process(delta: float) -> void:
 	_cooldown = maxf(0.0, _cooldown - delta)
 	_recoil = maxf(0.0, _recoil - delta * 12.0)
 	_muzzle_light.light_energy = _recoil * 3.0
-	_gun.position.z = -0.36 + _recoil * 0.04
+	_gun.position = HIP_GUN.lerp(ADS_GUN, _ads) + Vector3(0, 0, _recoil * 0.04)
+	var moving := clampf(Vector2(velocity.x, velocity.z).length() / RUN, 0.0, 1.0)
+	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
+	if !is_on_floor():
+		rest += 2.0
+	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
 	if playing:
 		_use(delta)
 		_aim_ghost()
@@ -354,7 +381,11 @@ func _fire() -> void:
 	_cooldown = FIRE_EVERY
 	_recoil = 1.0
 	var from := camera.global_position
-	var to := from - camera.global_basis.z * GUN_RANGE
+	var angle := deg_to_rad(spread) * sqrt(randf())
+	var around := randf() * TAU
+	var dir := (camera.global_basis * Vector3(tan(angle) * cos(around), tan(angle) * sin(around), -1.0)).normalized()
+	var to := from + dir * GUN_RANGE
+	spread = minf(MAX_SPREAD, spread + lerpf(HIP_KICK, ADS_KICK, _ads))
 	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if !hit.is_empty():
@@ -392,7 +423,7 @@ func _tracer(from: Vector3, to: Vector3) -> void:
 
 func _build_gun() -> void:
 	_gun = Node3D.new()
-	_gun.position = Vector3(0.2, -0.17, -0.36)
+	_gun.position = HIP_GUN
 	_gun.scale = Vector3.ONE * 0.55
 	camera.add_child(_gun)
 	var metal := StandardMaterial3D.new()

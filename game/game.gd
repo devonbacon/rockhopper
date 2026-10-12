@@ -613,6 +613,9 @@ func _debug_setup() -> void:
 	if _args.has("radial"):
 		player.radial_open = true
 		player.radial_choice = int(_args.radial)
+	player.debug_aim = _args.has("aim")
+	if _args.has("pause"):
+		hud.set_paused(true)
 	if _args.has("pitch"):
 		player.look(deg_to_rad(float(_args.pitch)))
 	if _args.has("shot"):
