@@ -23,7 +23,7 @@ const POD_COLOR := Color(1.0, 0.55, 0.25)
 const ALERT := Color(1.0, 0.4, 0.3)
 const HEALTH_COLOR := Color(1.0, 0.35, 0.35)
 const FORECAST_STEPS := 120
-const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"drill": "Drill rig"}
+const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Drill rig"}
 
 var game: Game
 
@@ -186,7 +186,7 @@ func _build_meters() -> void:
 func _update_meters() -> void:
 	_set_meter(&"health", game.health / Game.HEALTH, "%d" % game.health, ALERT if game.hurt > 0.0 else Color.WHITE)
 	var net := game.power_in - game.power_out
-	_set_meter(&"battery", game.battery / Game.BATTERY, "%d   %+.1f/s" % [game.battery, net], ALERT if net < 0.0 else Color.WHITE)
+	_set_meter(&"battery", game.battery / game.capacity(), "%d / %d   %+.1f/s" % [game.battery, game.capacity(), net], ALERT if net < 0.0 else Color.WHITE)
 	var warmth := game.warmth / 100.0
 	_meters[&"warmth"].fill.bg_color = COLD_COLOR.lerp(WARM_COLOR, warmth)
 	var source := "in sunlight" if game.lit_by == "sun" else ("by a lamp" if game.lit_by == "lamp" else ("by the pod" if game.lit_by == "pod" else "IN THE DARK"))
@@ -303,7 +303,13 @@ func _draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tint: Col
 	var white := Color(0.88, 0.88, 0.86) * tint
 	var gold := Color(0.85, 0.62, 0.22) * tint
 	var dark := Color(0.15, 0.15, 0.17) * tint
-	if kind == &"drill":
+	if kind == &"battery":
+		canvas.draw_rect(Rect2(centre + Vector2(-22, -12), Vector2(44, 28)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-22, -7), Vector2(44, 5)), gold)
+		canvas.draw_rect(Rect2(centre + Vector2(-14, -18), Vector2(6, 6)), dark)
+		canvas.draw_rect(Rect2(centre + Vector2(8, -18), Vector2(6, 6)), dark)
+		canvas.draw_rect(Rect2(centre + Vector2(-14, 2), Vector2(28, 10)), Color(0.4, 1.0, 0.35) * tint)
+	elif kind == &"drill":
 		canvas.draw_line(centre + Vector2(-20, 20), centre + Vector2(0, -16), white, 3.0)
 		canvas.draw_line(centre + Vector2(20, 20), centre + Vector2(0, -16), white, 3.0)
 		canvas.draw_line(centre + Vector2(0, -12), centre + Vector2(0, 22), Color(0.5, 0.5, 0.52) * tint, 3.0)

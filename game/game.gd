@@ -27,6 +27,7 @@ const START_BATTERY := 60.0
 const POD_SOLAR := 0.8
 const PANEL_SOLAR := 1.6
 const LAMP_DRAW := 0.4
+const BATTERY_BANK := 80.0
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
 const COLD_RATE := 100.0 / 45.0
@@ -142,7 +143,11 @@ func _physics_process(delta: float) -> void:
 				fixture.set_on(want)
 			if fixture.on:
 				power_out += LAMP_DRAW
-	battery = clampf(battery + (power_in - power_out) * delta, 0.0, BATTERY)
+	var full := capacity()
+	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
+	for fixture in built:
+		if fixture.kind == &"battery":
+			fixture.charge = battery / full
 	if state != State.PLAYING:
 		return
 	for fixture in built:
@@ -178,6 +183,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.shift_pressed:
 			_last_seed = seed_value
 		get_tree().reload_current_scene()
+
+
+func capacity() -> float:
+	var total := BATTERY
+	for fixture in built:
+		if fixture.kind == &"battery":
+			total += BATTERY_BANK
+	return total
 
 
 ## What light reaches a point: "sun", "lamp", or "" for none.
@@ -296,7 +309,7 @@ func _wire_pod_screen() -> void:
 				out += 1
 		var left := maxf(0.0, MISSION - time)
 		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%\nLAUNCH IN     %d:%02d" % [
-			stock, QUOTA, rovers.size(), out, roundi(battery / BATTERY * 100.0), int(left) / 60, int(left) % 60]
+			stock, QUOTA, rovers.size(), out, roundi(battery / capacity() * 100.0), int(left) / 60, int(left) % 60]
 	screen.button = func(action: StringName) -> Array:
 		if action == &"rover":
 			return ["PRINT ROVER   %d ORE" % Fixture.COST[&"rover"], stock >= Fixture.COST[&"rover"], false]

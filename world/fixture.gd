@@ -9,7 +9,7 @@ extends StaticBody3D
 ## hopper that rovers come and empty, or you can by hand.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2, &"drill": 3, &"rover": 4}
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"rover": 4}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
@@ -32,6 +32,7 @@ var deposit: Fixture
 var stored := 0
 var drilled := 0.0
 var stalled := ""
+var charge := 0.0
 
 var light: OmniLight3D
 ## The pod's screen.
@@ -69,6 +70,7 @@ func _ready() -> void:
 		&"ore": _build_ore()
 		&"deposit": _build_deposit()
 		&"drill": _build_drill()
+		&"battery": _build_battery()
 
 
 func set_on(value: bool) -> void:
@@ -97,6 +99,9 @@ func take(amount: int) -> int:
 
 
 func _process(delta: float) -> void:
+	if kind == &"battery":
+		_fill.scale.y = maxf(0.02, charge)
+		_fill.position.y = 0.12 + 0.24 * _fill.scale.y
 	if _shaft:
 		if stalled == "":
 			_shaft.rotate_object_local(Vector3.UP, delta * 9.0)
@@ -314,6 +319,33 @@ func _build_drill() -> void:
 	shape.radius = 1.0
 	shape.height = 4.0
 	_add_collider(shape, Vector3(0, 2.0, 0))
+
+
+func _build_battery() -> void:
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var dark := _material(Color(0.12, 0.12, 0.14), 0.4, 0.6)
+	var body := BoxMesh.new()
+	body.size = Vector3(1.0, 0.6, 0.7)
+	_add_mesh(body, white, Vector3(0, 0.3, 0))
+	var band := BoxMesh.new()
+	band.size = Vector3(1.02, 0.14, 0.72)
+	_add_mesh(band, gold, Vector3(0, 0.42, 0))
+	for x in [-0.28, 0.28]:
+		_add_mesh(_cylinder(0.06, 0.08, 0.12), dark, Vector3(x, 0.66, 0))
+	var gauge := BoxMesh.new()
+	gauge.size = Vector3(0.6, 0.5, 0.02)
+	_add_mesh(gauge, dark, Vector3(0, 0.36, 0.36))
+	var fill_material := _material(Color(0.5, 1.0, 0.45), 0.0, 0.3)
+	fill_material.emission_enabled = true
+	fill_material.emission = Color(0.4, 1.0, 0.35)
+	fill_material.emission_energy_multiplier = 2.0
+	var fill := BoxMesh.new()
+	fill.size = Vector3(0.5, 0.48, 0.02)
+	_fill = _add_mesh(fill, fill_material, Vector3(0, 0.36, 0.37))
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.0, 0.7, 0.7)
+	_add_collider(shape, Vector3(0, 0.35, 0))
 
 
 func _material(color: Color, metallic: float, roughness: float) -> StandardMaterial3D:

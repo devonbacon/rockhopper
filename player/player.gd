@@ -17,7 +17,14 @@ const GRAVITY := 5.0
 const WALK := 5.0
 const RUN := 8.5
 const ACCEL := 30.0
-const AIR_ACCEL := 3.0
+const AIR_ACCEL := 4.0
+const SLIDE_BOOST := 3.0
+const SLIDE_MAX := 16.0
+const SLIDE_FRICTION := 2.0
+const SLIDE_SLOPE := 1.6
+const SLIDE_STEER := 4.0
+const SLIDE_JUMP_BOOST := 1.1
+const SLIDE_COOLDOWN := 0.8
 const JUMP := 4.5
 const JET := 11.0
 const JET_DRAIN := 35.0
@@ -50,7 +57,7 @@ const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
 ## What the radial menu offers, clockwise from the top.
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"drill"]
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill"]
 ## How far the mouse has to move from the middle to pick, and how far the
 ## pointer can go.
 const RADIAL_DEAD := 40.0
@@ -87,6 +94,9 @@ var _screen: Screen
 var _cooldown := 0.0
 var _recoil := 0.0
 var aiming := false
+var sliding := false
+var _slide_cooldown := 0.0
+var _crouch := 0.0
 var debug_aim := false
 var spread := HIP_SPREAD
 var _ads := 0.0
@@ -135,7 +145,9 @@ func _ready() -> void:
 	rig.top_radius = 0.6
 	rig.bottom_radius = 2.4
 	rig.height = 3.8
-	_ghost_meshes = {&"lamp": post, &"panel": panel, &"drill": rig}
+	var cell := BoxMesh.new()
+	cell.size = Vector3(1.0, 0.7, 0.7)
+	_ghost_meshes = {&"lamp": post, &"panel": panel, &"battery": cell, &"drill": rig}
 	_build_gun()
 	_ghost = MeshInstance3D.new()
 	_ghost.top_level = true
@@ -198,25 +210,53 @@ func _physics_process(delta: float) -> void:
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	aiming = playing and (debug_aim or captured and tool == &"" and !radial_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
 	_ads = move_toward(_ads, 1.0 if aiming else 0.0, delta * 7.0)
-	camera.fov = lerpf(FOV, ADS_FOV, _ads)
+	var rush := clampf((horizontal.length() - RUN) * 1.2, 0.0, 12.0)
+	camera.fov = lerpf(FOV + rush, ADS_FOV, _ads)
 	var speed := ADS_SPEED if aiming else (RUN if Input.is_physical_key_pressed(KEY_SHIFT) else WALK)
-	var wish := (global_basis.x * input.x - global_basis.z * input.y) * speed
+	var wish_dir := global_basis.x * input.x - global_basis.z * input.y
+	var wish := wish_dir * speed
 	var jump_held := playing and Input.is_physical_key_pressed(KEY_SPACE)
+	var crouch := playing and !aiming and (Input.is_physical_key_pressed(KEY_C) or Input.is_physical_key_pressed(KEY_CTRL))
+	_slide_cooldown = maxf(0.0, _slide_cooldown - delta)
 	jetting = false
 	if is_on_floor():
-		horizontal = horizontal.move_toward(wish, ACCEL * delta)
+		var ground_speed := horizontal.length()
+		if !sliding and crouch and ground_speed > WALK * 0.9:
+			sliding = true
+			if _slide_cooldown <= 0.0:
+				horizontal = horizontal.normalized() * minf(ground_speed + SLIDE_BOOST, SLIDE_MAX)
+				_slide_cooldown = SLIDE_COOLDOWN
+		if sliding and (!crouch or ground_speed < WALK * 0.6):
+			sliding = false
+		if sliding:
+			var gravity := -up * GRAVITY
+			var normal := get_floor_normal()
+			var downhill := gravity - normal * gravity.dot(normal)
+			horizontal += Vector3(downhill.x, 0.0, downhill.z) * SLIDE_SLOPE * delta
+			horizontal = horizontal.move_toward(Vector3.ZERO, SLIDE_FRICTION * delta)
+			horizontal = (horizontal + wish_dir * SLIDE_STEER * delta).limit_length(SLIDE_MAX)
+		else:
+			horizontal = horizontal.move_toward(wish, ACCEL * delta)
 		fuel = minf(100.0, fuel + JET_REFILL * delta)
 		if jump_held:
 			vertical = up * JUMP
+			if sliding:
+				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(SLIDE_MAX)
 	else:
-		if input != Vector2.ZERO:
-			horizontal = horizontal.move_toward(wish, AIR_ACCEL * delta)
+		sliding = false
 		jetting = jump_held and fuel > 0.0
+		var control := AIR_ACCEL + (JET * 0.6 if jetting else 0.0)
+		var target := speed * (1.2 if jetting else 1.0)
+		if input != Vector2.ZERO:
+			var along := horizontal.dot(wish_dir.normalized())
+			if along < target:
+				horizontal += wish_dir.normalized() * minf(target - along, control * delta)
 		if jetting:
 			if vertical.dot(up) < JET_RISE:
 				vertical += up * JET * delta
-			horizontal = horizontal.move_toward(wish * 1.2, JET * 0.6 * delta)
 			fuel = maxf(0.0, fuel - JET_DRAIN * delta)
+	_crouch = move_toward(_crouch, 1.0 if sliding else 0.0, delta * 8.0)
+	_head.position.y = lerpf(HEIGHT - 0.15, 0.95, _crouch)
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
 	var flat := Vector2(global_position.x, global_position.z)
@@ -296,7 +336,7 @@ func _use(delta: float) -> void:
 		&"ore":
 			prompt = "[Hold E] Mine ore (%d)" % target.amount
 			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
-		&"lamp", &"panel":
+		&"lamp", &"panel", &"battery":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.pick_up(target))
 
@@ -355,7 +395,7 @@ func _aim_ghost() -> void:
 	_ghost.mesh = _ghost_meshes[tool]
 	var ok := game.can_build(tool, hit.position)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.35) if ok else Color(1.0, 0.3, 0.25, 0.35)
-	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"drill": 1.9}[tool]
+	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9}[tool]
 	_ghost.global_transform = Transform3D(Fixture.upright(hit.normal), hit.position + hit.normal * lift)
 
 
