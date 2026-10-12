@@ -30,6 +30,8 @@ const LAMP_DRAW := 0.4
 const BATTERY_BANK := 80.0
 const LAB_DRAW := 0.6
 const UPGRADES := {
+	&"runners": {name = "BLADE RUNNERS", cost = 3, time = 25.0, text = "Walk and run as fast as you're built to"},
+	&"jetpack": {name = "JETPACK", cost = 5, time = 35.0, text = "Hold Space in the air to fly"},
 	&"armour": {name = "ARMOUR PLATING", cost = 5, time = 40.0, text = "+50 max health"},
 	&"heated": {name = "HEATED SUIT", cost = 4, time = 30.0, text = "Cold takes twice as long to freeze you"},
 	&"tanks": {name = "BIGGER TANKS", cost = 3, time = 30.0, text = "The jetpack burns fuel 40% slower"},
@@ -245,6 +247,8 @@ func _wire_lab_screen(lab: Fixture) -> void:
 		var upgrade: Dictionary = UPGRADES[action]
 		if has(action):
 			return ["%s   DONE" % upgrade.name, false, false]
+		if action == &"tanks" and !has(&"jetpack"):
+			return ["%s   NEEDS JETPACK" % upgrade.name, false, false]
 		if lab.researching == action:
 			return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
 		var busy := lab.researching != &"" or researching(action) != null
@@ -264,6 +268,8 @@ func _wire_lab_screen(lab: Fixture) -> void:
 			lab.researching = &""
 			stock += upgrade.cost
 			return "CANCELLED. %d ORE REFUNDED." % upgrade.cost
+		if action == &"tanks" and !has(&"jetpack"):
+			return "RESEARCH THE JETPACK FIRST."
 		if lab.researching != &"":
 			return "BUSY: CANCEL THE CURRENT RESEARCH FIRST."
 		if researching(action) != null:
@@ -747,6 +753,8 @@ func _debug_setup() -> void:
 		build(&"lab", ahead[0], ahead[1])
 		built[-1].screen.pressed.call(&"tanks")
 	player.debug_aim = _args.has("aim")
+	if _args.has("hammer"):
+		player._switch(&"hammer")
 	if _args.has("pause"):
 		hud.set_paused(true)
 	if _args.has("pitch"):

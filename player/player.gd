@@ -14,8 +14,10 @@ extends CharacterBody3D
 
 const LAYER := 4
 const GRAVITY := 5.0
-const WALK := 5.0
-const RUN := 8.5
+const WALK := 3.5
+const RUN := 6.0
+const RUNNER_WALK := 5.0
+const RUNNER_RUN := 8.5
 const ACCEL := 30.0
 const AIR_ACCEL := 4.0
 const SLIDE_BOOST := 3.0
@@ -53,6 +55,12 @@ const MAX_SPREAD := 7.0
 const SETTLE := 9.0
 const DAMAGE := 10.0
 const GUN_RANGE := 60.0
+const HAMMER_EVERY := 0.75
+const HAMMER_DAMAGE := 30.0
+const HAMMER_REACH := 3.2
+const GRAPPLE_RANGE := 35.0
+const GRAPPLE_PULL := 30.0
+const GRAPPLE_MAX := 20.0
 const SENSITIVITY := 0.0025
 ## What the radial menu offers, clockwise from the top.
 const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab"]
@@ -67,6 +75,8 @@ var camera: Camera3D
 var headlamp: SpotLight3D
 var fuel := 100.0
 var tool: StringName = &""
+var weapon := &"gun"
+var hooked := false
 ## The radial build menu: whether it's up, and which of BUILD the mouse
 ## has moved towards (-1 for the middle).
 var radial_open := false
@@ -101,6 +111,13 @@ var _ads := 0.0
 var _gun: Node3D
 var _muzzle: Node3D
 var _muzzle_light: OmniLight3D
+var _hammer: Node3D
+var _swing := 0.0
+var _hook_point := Vector3.ZERO
+var _hook_cooldown := 0.0
+var _rope: MeshInstance3D
+var _rope_flash := 0.0
+var _yank_from := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -149,6 +166,8 @@ func _ready() -> void:
 	lab.size = Vector3(2.2, 1.7, 1.6)
 	_ghost_meshes = {&"lamp": post, &"panel": panel, &"battery": cell, &"drill": rig, &"lab": lab}
 	_build_gun()
+	_build_hammer()
+	_build_rope()
 	_ghost = MeshInstance3D.new()
 	_ghost.top_level = true
 	_ghost.material_override = _ghost_material
@@ -202,6 +221,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed:
 		if !captured:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_switch(&"hammer" if weapon == &"gun" else &"gun")
 		elif event.button_index == MOUSE_BUTTON_LEFT and tool != &"":
 			_build()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
@@ -209,6 +230,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_F: headlamp.visible = !headlamp.visible
+			KEY_1: _switch(&"gun")
+			KEY_2: _switch(&"hammer")
+			KEY_G: _throw_hook()
 
 
 func _physics_process(delta: float) -> void:
@@ -221,25 +245,28 @@ func _physics_process(delta: float) -> void:
 	if playing:
 		input = Vector2(_axis(KEY_D, KEY_A), _axis(KEY_W, KEY_S)).limit_length(1.0)
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	aiming = playing and (debug_aim or captured and tool == &"" and !radial_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
+	aiming = playing and weapon == &"gun" and (debug_aim or captured and tool == &"" and !radial_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
 	_ads = move_toward(_ads, 1.0 if aiming else 0.0, delta * 7.0)
 	var rush := clampf((horizontal.length() - RUN) * 1.2, 0.0, 12.0)
 	camera.fov = lerpf(FOV + rush, ADS_FOV, _ads)
-	var speed := ADS_SPEED if aiming else (RUN if Input.is_physical_key_pressed(KEY_SHIFT) else WALK)
+	var walk := RUNNER_WALK if game.has(&"runners") else WALK
+	var speed := ADS_SPEED if aiming else ((RUNNER_RUN if game.has(&"runners") else RUN) if Input.is_physical_key_pressed(KEY_SHIFT) else walk)
 	var wish_dir := global_basis.x * input.x - global_basis.z * input.y
 	var wish := wish_dir * speed
 	var jump_held := playing and Input.is_physical_key_pressed(KEY_SPACE)
 	var crouch := playing and !aiming and (Input.is_physical_key_pressed(KEY_C) or Input.is_physical_key_pressed(KEY_CTRL))
 	_slide_cooldown = maxf(0.0, _slide_cooldown - delta)
 	jetting = false
-	if is_on_floor():
+	if hooked:
+		_reel(delta, playing)
+	if is_on_floor() and !hooked:
 		var ground_speed := horizontal.length()
-		if !sliding and crouch and ground_speed > WALK * 0.9:
+		if !sliding and crouch and ground_speed > walk * 0.9:
 			sliding = true
 			if _slide_cooldown <= 0.0:
 				horizontal = horizontal.normalized() * minf(ground_speed + SLIDE_BOOST, SLIDE_MAX)
 				_slide_cooldown = SLIDE_COOLDOWN
-		if sliding and (!crouch or ground_speed < WALK * 0.6):
+		if sliding and (!crouch or ground_speed < walk * 0.6):
 			sliding = false
 		if sliding:
 			var gravity := -up * GRAVITY
@@ -257,7 +284,7 @@ func _physics_process(delta: float) -> void:
 				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(SLIDE_MAX)
 	else:
 		sliding = false
-		jetting = jump_held and fuel > 0.0
+		jetting = jump_held and fuel > 0.0 and game.has(&"jetpack")
 		var control := AIR_ACCEL + (JET * 0.6 if jetting else 0.0)
 		var target := speed * (1.2 if jetting else 1.0)
 		if input != Vector2.ZERO:
@@ -274,7 +301,14 @@ func _physics_process(delta: float) -> void:
 	camera.rotation.z = lerpf(camera.rotation.z, -side * deg_to_rad(STRAFE_TILT), minf(1.0, delta * 10.0))
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
+	if hooked:
+		var pull := (_hook_point - global_position).normalized()
+		velocity = (velocity + pull * GRAPPLE_PULL * delta).limit_length(GRAPPLE_MAX)
 	move_and_slide()
+	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
+	_draw_rope(delta)
+	_swing = maxf(0.0, _swing - delta / HAMMER_EVERY)
+	_hammer.rotation.x = -1.3 * sin(_swing * PI) if _swing > 0.0 else 0.0
 	notice_time = maxf(0.0, notice_time - delta)
 	_cooldown = maxf(0.0, _cooldown - delta)
 	_recoil = maxf(0.0, _recoil - delta * 12.0)
@@ -290,7 +324,10 @@ func _physics_process(delta: float) -> void:
 		_aim_ghost()
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if trigger and tool == &"" and !radial_open and _cooldown <= 0.0:
-			_fire()
+			if weapon == &"gun":
+				_fire()
+			else:
+				_smash()
 	else:
 		_ghost.visible = false
 
@@ -423,6 +460,128 @@ func _build() -> void:
 ## Takes a lamp, panel or rig in hand, or nothing.
 func _choose(kind: StringName) -> void:
 	tool = kind
+
+
+func _switch(to: StringName) -> void:
+	weapon = to
+	_gun.visible = weapon == &"gun"
+	_hammer.visible = weapon == &"hammer"
+
+
+## Everything in a short arc in front takes a big hit and goes flying;
+## ore or a deposit under the head gives up a piece.
+func _smash() -> void:
+	_cooldown = HAMMER_EVERY
+	_swing = 1.0
+	var from := camera.global_position
+	var ahead := -camera.global_basis.z
+	for spider: Spider in game.spiders.duplicate():
+		var to := spider.global_position + spider.global_position.normalized() * 0.4 - from
+		if to.length() < HAMMER_REACH and to.normalized().dot(ahead) > 0.55:
+			spider.hit(HAMMER_DAMAGE)
+			if is_instance_valid(spider):
+				spider.fling((to.normalized() + up_direction * 0.6) * 9.0, 0.8)
+	var hit := _aim(HAMMER_REACH)
+	if !hit.is_empty() and hit.collider is Fixture and (hit.collider.kind == &"deposit" or hit.collider.kind == &"ore"):
+		game.mine(hit.collider)
+		_say("+ore")
+
+
+## Hooks what's under the crosshair. A spider gets yanked to you; anything
+## else pulls you to it while G's held.
+func _throw_hook() -> void:
+	if hooked or _hook_cooldown > 0.0:
+		return
+	var from := camera.global_position
+	var to := from - camera.global_basis.z * GRAPPLE_RANGE
+	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return
+	_hook_cooldown = 0.4
+	if hit.collider is Spider:
+		var spider: Spider = hit.collider
+		var home := (from - spider.global_position)
+		spider.fling(home.normalized() * minf(16.0, home.length() * 1.6) + up_direction * 3.0, 0.7)
+		_yank_from = spider.global_position
+		_rope_flash = 0.2
+		return
+	hooked = true
+	_hook_point = hit.position
+
+
+func _reel(_delta: float, playing: bool) -> void:
+	if !playing or !Input.is_physical_key_pressed(KEY_G) or global_position.distance_to(_hook_point) < 2.0:
+		hooked = false
+		_hook_cooldown = 0.3
+
+
+func _draw_rope(delta: float) -> void:
+	_rope_flash = maxf(0.0, _rope_flash - delta)
+	var end := _hook_point if hooked else _yank_from
+	_rope.visible = hooked or _rope_flash > 0.0
+	if !_rope.visible:
+		return
+	var from := camera.global_transform * Vector3(-0.25, -0.2, -0.4)
+	var length := from.distance_to(end)
+	if length < 0.05:
+		return
+	var along := (end - from) / length
+	var side := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.RIGHT).normalized()
+	_rope.global_transform = Transform3D(Basis(side, along * length, side.cross(along)), (from + end) * 0.5)
+
+
+func _build_rope() -> void:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.015
+	mesh.bottom_radius = 0.015
+	mesh.height = 1.0
+	mesh.radial_segments = 4
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(1.0, 0.6, 0.2)
+	_rope = MeshInstance3D.new()
+	_rope.mesh = mesh
+	_rope.material_override = material
+	_rope.top_level = true
+	_rope.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_rope.visible = false
+	add_child(_rope)
+
+
+func _build_hammer() -> void:
+	_hammer = Node3D.new()
+	_hammer.position = Vector3(0.3, -0.42, -0.5)
+	_hammer.scale = Vector3.ONE * 0.7
+	_hammer.visible = false
+	camera.add_child(_hammer)
+	var metal := StandardMaterial3D.new()
+	metal.albedo_color = Color(0.35, 0.36, 0.4)
+	metal.metallic = 0.8
+	metal.roughness = 0.35
+	var grip := StandardMaterial3D.new()
+	grip.albedo_color = Color(1.0, 0.45, 0.1)
+	grip.roughness = 0.6
+	var handle := CylinderMesh.new()
+	handle.top_radius = 0.025
+	handle.bottom_radius = 0.03
+	handle.height = 0.6
+	var shaft := MeshInstance3D.new()
+	shaft.mesh = handle
+	shaft.material_override = grip
+	shaft.position = Vector3(0, 0.15, 0)
+	shaft.rotation.x = -0.35
+	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hammer.add_child(shaft)
+	var block := BoxMesh.new()
+	block.size = Vector3(0.14, 0.14, 0.32)
+	var head := MeshInstance3D.new()
+	head.mesh = block
+	head.material_override = metal
+	head.position = Vector3(0, 0.43, -0.1)
+	head.rotation.x = -0.35
+	head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hammer.add_child(head)
 
 
 func _say(text: String) -> void:

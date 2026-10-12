@@ -27,6 +27,7 @@ var _sun_check := 0.0
 var _walk := 0.0
 var _flash := 0.0
 var _stuck := 0.0
+var _flung := 0.0
 var _collider: CollisionShape3D
 var _legs: Array[Node3D] = []
 var _body_material: StandardMaterial3D
@@ -75,6 +76,13 @@ func _physics_process(delta: float) -> void:
 		if game.sun.lights(global_position + up * 0.6, get_world_3d().direct_space_state):
 			burrow()
 			return
+	if _flung > 0.0:
+		_flung -= delta
+		velocity -= up * GRAVITY * delta
+		up_direction = up
+		move_and_slide()
+		_animate(delta, 1.5)
+		return
 	_retarget -= delta
 	if _retarget <= 0.0 or !is_instance_valid(target):
 		_retarget = 0.5
@@ -114,6 +122,14 @@ func hit(amount: float) -> void:
 	_flash = 1.0
 	if health <= 0.0:
 		game.remove_spider(self)
+
+
+## Sends it flying, out of its own control for a while.
+func fling(launch: Vector3, time: float) -> void:
+	if _rising > 0.0 or _sinking >= 0.0:
+		return
+	velocity = launch
+	_flung = time
 
 
 ## Back into the rock, as when the sun reaches it.

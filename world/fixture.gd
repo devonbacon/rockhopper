@@ -347,8 +347,8 @@ func _build_lab() -> void:
 	screen.title = "RESEARCH LAB"
 	screen.size_m = Vector2(1.5, 1.3)
 	screen.pixels = Vector2i(640, 556)
-	screen.button_height = 40.0
-	screen.button_font = 21
+	screen.button_height = 34.0
+	screen.button_font = 19
 	screen.buttons.assign(Game.UPGRADES.keys())
 	var frame := BoxMesh.new()
 	frame.size = Vector3(screen.size_m.x + 0.1, screen.size_m.y + 0.1, 0.04)

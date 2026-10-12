@@ -47,9 +47,11 @@ while it works (it stalls when the battery's flat). Pressing the one in
 progress cancels it and refunds the ore. Researched upgrades apply to
 everything, already built or not:
 
+- Blade runners: walk 5 and run 8.5, from 3.5 and 6.
+- Jetpack: hold Space in the air to fly.
 - Armour plating: +50 max health.
 - Heated suit: the cold takes twice as long to freeze you.
-- Bigger tanks: the jetpack burns fuel 40% slower.
+- Bigger tanks (after the jetpack): it burns fuel 40% slower.
 - Overcharged rounds: double damage, so one shot kills a spider.
 - Stabiliser: half the bloom from firing, and tighter at rest.
 - Faster drills: rigs drill 40% faster.
@@ -65,10 +67,16 @@ hurt you for a few seconds.
 
 ## Controls
 
-- **Move:** mouse looks, WASD walks, Shift runs. Space jumps; hold it
-  in the air for the jetpack, which refills on the ground. C or Ctrl
+- **Move:** mouse looks, WASD walks, Shift runs (slowly until you've
+  researched blade runners). Space jumps; once you've researched the
+  jetpack, hold it in the air to fly; it refills on the ground. C or Ctrl
   while running slides: a burst of speed, faster downhill, and a jump
   out of it keeps the momentum. Land with it held to slide on.
+- **Weapons:** 1, 2 or the wheel switch between the gun and the hammer.
+  The hammer smashes everything in a short arc in front, one-shotting
+  spiders and knocking them flying, and chips ore off a deposit.
+- **Grapple (G):** a spider gets yanked to you; anything else (rock, a
+  building) pulls you to it for as long as you hold G, about 35 m.
 - **Fire:** left mouse, held, when nothing's in hand. Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
@@ -122,6 +130,7 @@ User arguments after `--`, e.g.
 - `radial=N` holds the build menu up with item N chosen (-1 for none).
 - `pitch=D` tilts your view by D degrees.
 - `aim` holds aim down the sights; `pause` starts paused.
+- `hammer` starts with the hammer out.
 - `lab` builds a research lab ahead of you and starts it researching.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.

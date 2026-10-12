@@ -177,7 +177,7 @@ func _build_meters() -> void:
 		value.custom_minimum_size.x = 170
 		row.add_child(value)
 		rows.add_child(row)
-		_meters[meter[0]] = {bar = bar, fill = fill, value = value}
+		_meters[meter[0]] = {bar = bar, fill = fill, value = value, row = row}
 	var panel := _panel(rows)
 	_place(panel, Vector2.ZERO, Vector2(20, 20), Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_END)
 	add_child(panel)
@@ -197,6 +197,7 @@ func _update_meters() -> void:
 	var source := "in sunlight" if game.lit_by == "sun" else ("by a lamp" if game.lit_by == "lamp" else ("by the pod" if game.lit_by == "pod" else "IN THE DARK"))
 	_set_meter(&"warmth", warmth, "%d   %s" % [game.warmth, source], COLD_COLOR if game.lit_by == "" else Color.WHITE)
 	var player := game.player
+	_meters[&"fuel"].row.visible = game.has(&"jetpack")
 	_set_meter(&"fuel", player.fuel / 100.0, "burning" if player.jetting else "", Color.WHITE)
 
 
@@ -304,7 +305,8 @@ func _update_bottom() -> void:
 	if game.player.tool != &"":
 		_hint.text = "%s in hand    [LMB] build    [RMB] put away" % NAMES[game.player.tool]
 	else:
-		_hint.text = "[LMB] fire    [RMB] aim    [E] use    [Hold Q] build    [F] headlamp    [Esc] pause"
+		var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash"
+		_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [E] use    [Hold Q] build    [F] headlamp    [Esc] pause" % attack
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
@@ -349,7 +351,7 @@ func _draw_overlay() -> void:
 	var centre := _overlay.size * 0.5
 	var player := game.player
 	_overlay.draw_circle(centre, 2.5, Color(1, 1, 1, 0.85))
-	if player.tool == &"" and !player.radial_open:
+	if player.tool == &"" and !player.radial_open and player.weapon == &"gun":
 		var camera := player.camera
 		var bloom := tan(deg_to_rad(player.spread)) / tan(deg_to_rad(camera.fov * 0.5)) * _overlay.size.y * 0.5 + 5.0
 		for side in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
