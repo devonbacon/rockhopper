@@ -8,8 +8,11 @@ extends Node3D
 ## reach the whole way out and back: anywhere but parked by the pod. A
 ## rover that's destroyed is gone with what it carried. If it can't find a
 ## way to a rig, it comes home and leaves that rig alone for a while.
+##
+## The commander can also send it somewhere to wait (move), or to haul
+## from one rig only (fetch), going out for whatever's in it.
 
-enum Task { PARKED, OUTBOUND, LOADING, HOMEBOUND }
+enum Task { PARKED, OUTBOUND, LOADING, HOMEBOUND, MOVING }
 
 const SPEED := 4.0
 ## How fast it turns, in radians a second.
@@ -30,8 +33,11 @@ var puppet := false
 var target_position := Vector3.ZERO
 var target_basis := Basis.IDENTITY
 var task := Task.PARKED
-## &"haul", &"stay" or &"home", from its screen.
+## &"haul", &"stay" or &"home", from its screen; or from the commander,
+## &"move" (to move_to) or &"fetch" (from assigned).
 var order := &"haul"
+var move_to := Vector3.INF
+var assigned: Fixture
 var screen: Screen
 var rig: Fixture
 var cargo := 0
@@ -75,13 +81,19 @@ func _physics_process(delta: float) -> void:
 		return
 	if order == &"stay":
 		return
-	if order == &"home" and (task == Task.OUTBOUND or task == Task.LOADING):
-		task = Task.HOMEBOUND
+	if order == &"fetch" and !is_instance_valid(assigned):
+		order = &"haul"
 	match task:
+		Task.MOVING:
+			if _drive_to(move_to, 1.5, delta) != 0:
+				_settle(global_position, delta)
 		Task.PARKED:
 			if _drive_to(park_point(), 1.0, delta) != 0:
 				_settle(global_position, delta)
-			rig = game.pick_rig(self) if order == &"haul" else null
+			if order == &"fetch":
+				rig = assigned if assigned.stored > 0 else null
+			else:
+				rig = game.pick_rig(self) if order == &"haul" else null
 			if rig:
 				task = Task.OUTBOUND
 		Task.OUTBOUND:
@@ -108,6 +120,24 @@ func _physics_process(delta: float) -> void:
 				game.deliver(cargo)
 				cargo = 0
 				task = Task.PARKED
+
+
+## A new order: from its screen, or the commander's.
+func command(new_order: StringName, point := Vector3.INF, target: Fixture = null) -> void:
+	order = new_order
+	assigned = target if new_order == &"fetch" else null
+	match new_order:
+		&"move":
+			move_to = point
+			task = Task.MOVING
+		&"home":
+			task = Task.HOMEBOUND
+		&"haul", &"fetch":
+			if task == Task.MOVING or (task == Task.OUTBOUND and rig != assigned and new_order == &"fetch"):
+				task = Task.HOMEBOUND if cargo > 0 else Task.PARKED
+		&"stay":
+			if task == Task.MOVING:
+				move_to = global_position
 
 
 ## Whether it's somewhere a spider could get at it.
@@ -211,13 +241,14 @@ func _build_screen() -> void:
 			Task.OUTBOUND: "DRIVING TO A RIG",
 			Task.LOADING: "LOADING",
 			Task.HOMEBOUND: "DRIVING HOME",
+			Task.MOVING: "HOLDING HERE" if _across(move_to - global_position, Terrain.up_at(global_position)).length() < 2.5 else "DRIVING OUT",
 		}[task]
 		return "%s\nCARGO %d / %d    HULL %d%%" % [doing, cargo, game.rover_capacity(), roundi(health / HEALTH * 100.0)]
 	screen.button = func(action: StringName) -> Array:
 		var names := {&"haul": "HAUL", &"stay": "STAY", &"home": "GO HOME"}
-		return [names[action], true, order == action]
+		return [names[action], true, order == action or (action == &"haul" and order == &"fetch")]
 	screen.pressed = func(action: StringName) -> String:
-		order = action
+		command(action)
 		return {&"haul": "HAULING.", &"stay": "HOLDING POSITION.", &"home": "HEADING HOME."}[action]
 
 

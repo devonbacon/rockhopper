@@ -14,6 +14,10 @@ extends Node3D
 ## panels, rigs and rovers are paid for from the bank, and what's in it at
 ## launch is the score.
 ##
+## The commander, in the pod, places what gets built, as blueprints paid
+## for up front that soldiers hammer up; orders rovers about; and picks
+## what the labs research.
+##
 ## In the dark, spiders climb out of the ground wherever no light falls,
 ## more of them as the mission goes on, and go for soldiers, rovers out on
 ## the road, and what's been built. Sunlight sends them back under.
@@ -125,6 +129,8 @@ var pod: Fixture
 var hud: Hud
 ## Lamps, panels, batteries, rigs and labs.
 var built: Array[Fixture] = []
+## What the commander's placed and soldiers haven't hammered up yet.
+var blueprints: Array[Fixture] = []
 var ores: Array[Fixture] = []
 var deposits: Array[Fixture] = []
 var rovers: Array[Rover] = []
@@ -386,16 +392,28 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				empty_rig(target)
 		&"hand_in":
 			hand_in()
-		&"build":
-			if can_build(args[0], args[1]):
-				build(args[0], args[1], args[2], args[3])
-			elif OS.is_debug_build():
-				print("refused to build %s (%s) at %s: stock %d, has cost %s, pod %.1f m away" % [args[0], type_string(typeof(args[0])), args[1], stock, Fixture.COST.has(args[0]), pod.global_position.distance_to(args[1])])
+		&"blueprint":
+			if peer == commander_peer and can_build(args[0], args[1]):
+				place_blueprint(args[0], args[1], args[2], args[3])
+		&"cancel":
+			if peer == commander_peer and target is Fixture and blueprints.has(target):
+				stock += Fixture.COST[target.kind]
+				_remove_blueprint(target)
+		&"construct":
+			if target is Fixture and blueprints.has(target):
+				construct(target)
+		&"order":
+			if peer == commander_peer:
+				var rig: Fixture = entities.get(args[3], null) if args[3] != 0 else null
+				for id in args[0]:
+					var rover: Rover = entities.get(id, null) if entities.get(id, null) is Rover else null
+					if rover:
+						rover.command(args[1], args[2], rig)
 		&"press":
 			if target and "screen" in target and target.screen:
 				var reply: String = target.screen.pressed.call(args[1])
 				if peer == Net.local_id():
-					target.screen.reply(reply)
+					_show_reply(target, reply)
 				else:
 					Net.event.rpc_id(peer, &"reply", [args[0], reply])
 		&"uncommand":
@@ -422,7 +440,7 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"reply":
 			var owner: Node = entities.get(args[0], null)
 			if owner and "screen" in owner and owner.screen:
-				owner.screen.reply(args[1])
+				_show_reply(owner, args[1])
 		&"respawn":
 			if player:
 				place_player(args[0], pod.global_position)
@@ -438,6 +456,12 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"tracer":
 			if player:
 				player._tracer(args[0], args[1])
+
+
+func _show_reply(owner: Node, text: String) -> void:
+	owner.screen.reply(text)
+	if commander_view and commander_view.visible and text != "":
+		commander_view.toast(text)
 
 
 func _announce(text: String) -> void:
@@ -578,7 +602,7 @@ func _fast_state() -> Array:
 		spider_rows.append([spider.net_id, spider.global_position, spider.global_basis.get_rotation_quaternion(), spider.health])
 	var rover_rows: Array = []
 	for rover in rovers:
-		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot])
+		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot, rover.move_to, rover.assigned.net_id if is_instance_valid(rover.assigned) else 0])
 	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows, commander_peer]
 
 
@@ -589,7 +613,10 @@ func _slow_state() -> Array:
 	var alive := PackedInt32Array()
 	for ore in ores:
 		alive.append(ore.net_id)
-	return [rows, alive, researched.keys()]
+	var plans: Array = []
+	for b in blueprints:
+		plans.append([b.net_id, b.kind, b.global_position, b.global_basis.get_rotation_quaternion(), b.normal, b.hits, b.deposit.net_id if b.deposit else 0])
+	return [rows, alive, researched.keys(), plans]
 
 
 ## Client: the server's latest of everything that moves.
@@ -660,6 +687,8 @@ func apply_snapshot(data: Array) -> void:
 		rover.order = row[4]
 		rover.cargo = row[5]
 		rover.show_health(row[6])
+		rover.move_to = row[8]
+		rover.assigned = entities.get(row[9], null) if row[9] != 0 else null
 	for rover in rovers.duplicate():
 		if !seen.has(rover.net_id):
 			rovers.erase(rover)
@@ -713,6 +742,24 @@ func apply_slow(data: Array) -> void:
 			ores.erase(ore)
 			entities.erase(ore.net_id)
 			ore.queue_free()
+	seen.clear()
+	for row: Array in data[3]:
+		seen[row[0]] = true
+		var plan: Fixture = entities.get(row[0], null)
+		if !plan:
+			plan = Fixture.make(row[1], row[2], row[4])
+			plan.basis = Basis(row[3])
+			plan.blueprint = true
+			if row[6] != 0 and entities.has(row[6]):
+				plan.deposit = entities[row[6]]
+				plan.deposit.rig = plan
+			add_child(plan)
+			_track(plan, row[0])
+			blueprints.push_back(plan)
+		plan.hits = row[5]
+	for plan in blueprints.duplicate():
+		if !seen.has(plan.net_id):
+			_remove_blueprint(plan)
 	for upgrade: StringName in data[2]:
 		if !researched.has(upgrade):
 			researched[upgrade] = true
@@ -803,7 +850,7 @@ func can_build(kind: StringName, pos: Vector3) -> bool:
 	if kind == &"drill":
 		var deposit := deposit_at(pos)
 		return deposit != null and deposit.rig == null
-	for fixture: Fixture in built + ores + deposits + [pod]:
+	for fixture: Fixture in built + blueprints + ores + deposits + [pod]:
 		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
 		if kind == &"lab" or fixture.kind == &"lab":
 			room += 1.6
@@ -813,8 +860,19 @@ func can_build(kind: StringName, pos: Vector3) -> bool:
 
 
 ## Builds kind at pos; a lab turns its screen towards facing_from.
-func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> void:
+func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> Fixture:
 	stock -= Fixture.COST[kind]
+	var fixture := _make_fixture(kind, pos, normal, facing_from)
+	add_child(fixture)
+	_track(fixture)
+	built.push_back(fixture)
+	_light_check = 0.0
+	if kind == &"lab":
+		_wire_lab_screen(fixture)
+	return fixture
+
+
+func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from: Vector3) -> Fixture:
 	var fixture: Fixture
 	if kind == &"drill":
 		var deposit := deposit_at(pos)
@@ -828,12 +886,40 @@ func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vecto
 		towards -= normal * towards.dot(normal)
 		if towards.length() > 0.1:
 			fixture.basis = Basis.looking_at(-towards.normalized(), normal)
-	add_child(fixture)
-	_track(fixture)
-	built.push_back(fixture)
-	_light_check = 0.0
-	if kind == &"lab":
-		_wire_lab_screen(fixture)
+	return fixture
+
+
+## The commander's: kind, paid for now, as a hologram for soldiers to
+## hammer up.
+func place_blueprint(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> Fixture:
+	stock -= Fixture.COST[kind]
+	var plan := _make_fixture(kind, pos, normal, facing_from)
+	plan.blueprint = true
+	add_child(plan)
+	_track(plan)
+	blueprints.push_back(plan)
+	return plan
+
+
+## A hammer blow on a blueprint; the last one puts it up for real.
+func construct(plan: Fixture) -> void:
+	plan.hits += 1
+	if plan.hits < plan.hits_needed():
+		return
+	var at := plan.global_transform
+	_remove_blueprint(plan)
+	stock += Fixture.COST[plan.kind]
+	var fixture := build(plan.kind, at.origin, plan.normal)
+	fixture.basis = at.basis
+	_announce("%s built" % Fixture.NAMES[plan.kind])
+
+
+func _remove_blueprint(plan: Fixture) -> void:
+	if plan.deposit and plan.deposit.rig == plan:
+		plan.deposit.rig = null
+	blueprints.erase(plan)
+	entities.erase(plan.net_id)
+	plan.queue_free()
 
 
 func deposit_at(pos: Vector3) -> Fixture:
@@ -1227,9 +1313,9 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
 ## cave|screen|rover, lab (builds one ahead, researching), rig (builds one
 ## on the deposit nearest the pod and stands you by it), lamps=N (around
-## you), spiders=N (in front of you), tool=, radial=N (the build menu up, N
-## chosen, -1 for none), aim, hammer, pause, pitch=degrees, and
-## shot=path.png and shot_at=seconds to save a screenshot and quit.
+## you), spiders=N (in front of you), plan=N (blueprints round the pod),
+## command (in the commander's seat), aim, hammer, pause, pitch=degrees,
+## and shot=path.png and shot_at=seconds to save a screenshot and quit.
 func _debug_setup() -> void:
 	match _args.get("view", ""):
 		"overview":
@@ -1278,11 +1364,14 @@ func _debug_setup() -> void:
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(around, around - Terrain.up_at(around) * 12.0, Terrain.ROCK_LAYER))
 		if !hit.is_empty():
 			spawn_spider(hit.position)
-	if _args.has("tool"):
-		player.tool = StringName(_args.tool)
-	if _args.has("radial"):
-		player.radial_open = true
-		player.radial_choice = int(_args.radial)
+	if _args.has("plan"):
+		var frame := Fixture.upright(pod.normal)
+		for i in int(_args.plan):
+			var kind: StringName = [&"lab", &"lamp", &"panel", &"battery"][i % 4]
+			var spot: Array = terrain.surface_point(pod.global_position + (frame.x * cos(i * 1.3 + 2.0) + frame.z * sin(i * 1.3 + 2.0)) * (8.0 + i * 1.5))
+			stock += Fixture.COST[kind]
+			var plan := place_blueprint(kind, spot[0], spot[1], pod.global_position)
+			plan.hits = i % plan.hits_needed()
 	if _args.has("lab"):
 		player.rotate_object_local(Vector3.UP, PI)
 		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
@@ -1298,6 +1387,12 @@ func _debug_setup() -> void:
 		player.look(deg_to_rad(float(_args.pitch)))
 	if _args.has("command"):
 		_take_command(Net.local_id())
+		if _args.has("select"):
+			commander_view.selected.assign(rovers)
+			var out: Vector3 = terrain.surface_point(pod.global_position + Fixture.upright(pod.normal).z * 20.0)[0]
+			for rover in rovers:
+				rover.command(&"move", out)
+		commander_view._research.visible = _args.has("research")
 	if _args.has("probe"):
 		_probe(_args.probe)
 	if _args.has("shot"):
@@ -1325,7 +1420,24 @@ func _probe(kind: String) -> void:
 		act(&"press", [pod.net_id, &"command"])
 		await tree.create_timer(2.0).timeout
 		print("[commander] in the pod: commander %d (me %d), view %s" % [commander_peer, Net.local_id(), commander_view != null and commander_view.visible])
+		var frame := Fixture.upright(pod.normal)
+		var spot: Array = terrain.surface_point(pod.global_position + frame.x * 9.0)
+		var stock_before := stock
+		act(&"blueprint", [&"lamp", spot[0], spot[1], pod.global_position])
+		var target: Vector3 = terrain.surface_point(pod.global_position + frame.z * 14.0)[0]
+		act(&"order", [[rovers[0].net_id], &"move", target, 0])
+		await tree.create_timer(1.0).timeout
+		print("[commander] blueprints %d, stock %d -> %d, rover order %s task %s" % [blueprints.size(), stock_before, stock, rovers[0].order, Rover.Task.keys()[rovers[0].task]])
 		act(&"uncommand", [])
+		await tree.create_timer(1.0).timeout
+		if !blueprints.is_empty():
+			var plan := blueprints[0]
+			for i in plan.hits_needed():
+				act(&"construct", [plan.net_id])
+			await tree.create_timer(1.0).timeout
+			print("[commander] hammered it: blueprints %d, lamps %d" % [blueprints.size(), built.filter(func(f: Fixture) -> bool: return f.kind == &"lamp").size()])
+		await tree.create_timer(6.0).timeout
+		print("[commander] rover %.1f m from where it was sent" % rovers[0].global_position.distance_to(target))
 		await tree.create_timer(2.0).timeout
 		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])
 	elif kind == "stander":
@@ -1341,17 +1453,15 @@ func _probe(kind: String) -> void:
 			await tree.create_timer(0.2).timeout
 		report.call("walked")
 	else:
-		var ahead: Array = terrain.surface_point(player.global_position + Vector3(3, 0, 3))
 		var stock_before := stock
-		act(&"build", [&"lamp", ahead[0], ahead[1], player.global_position])
 		var nearest := ores[0]
 		for ore in ores:
 			if ore.global_position.distance_to(player.global_position) < nearest.global_position.distance_to(player.global_position):
 				nearest = ore
 		act(&"mine", [nearest.net_id])
 		await tree.create_timer(1.0).timeout
-		report.call("built+mined")
-		print("[builder] lamp built: %s (stock %d -> %d), carrying %d" % [built.any(func(f: Fixture) -> bool: return f.kind == &"lamp"), stock_before, stock, carried])
+		report.call("mined")
+		print("[builder] stock %d -> %d, carrying %d" % [stock_before, stock, carried])
 		act(&"press", [pod.net_id, &"hand_in"])
 		await tree.create_timer(1.0).timeout
 		act(&"press", [pod.net_id, &"rover"])

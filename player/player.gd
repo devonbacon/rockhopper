@@ -3,14 +3,12 @@ extends CharacterBody3D
 ## You, in first person, on the crater floor.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
-## the jetpack, which refills on the ground. Holding Q brings up the radial
-## build menu: move the mouse towards a lamp, panel or drill rig and let go
-## of Q to take it in hand, or let go in the middle to put it away. Left
-## mouse fires, or with something in hand, builds it; a rig goes over a
-## deposit. Right-click puts it away. E is use: tap it at the pod to hand
-## in ore, on a button on the pod's screen to press it, or at a rig to
-## empty its hopper; hold it on ore or a deposit to mine it, or on a lamp,
-## panel or rig to pick it back up. F toggles the headlamp.
+## the jetpack, which refills on the ground. Left mouse fires, or swings
+## the hammer, which also mines and puts up the commander's blueprints. E
+## is use: tap it at the pod to hand in ore, on a button on a screen to
+## press it, or at a rig to empty its hopper; hold it on ore or a deposit
+## to mine it, or on a lamp, panel or rig to pick it back up. F toggles the
+## headlamp.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -65,25 +63,14 @@ const GRAPPLE_MAX := 20.0
 ## you, in case the jetpack or the grapple gets you up it.
 const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
 const SENSITIVITY := 0.0025
-## What the radial menu offers, clockwise from the top.
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab"]
-## How far the mouse has to move from the middle to pick, and how far the
-## pointer can go.
-const RADIAL_DEAD := 40.0
-const RADIAL_REACH := 140.0
 const HEIGHT := 1.8
 
 var game: Game
 var camera: Camera3D
 var headlamp: SpotLight3D
 var fuel := 100.0
-var tool: StringName = &""
 var weapon := &"gun"
 var hooked := false
-## The radial build menu: whether it's up, and which of BUILD the mouse
-## has moved towards (-1 for the middle).
-var radial_open := false
-var radial_choice := -1
 ## What E would do now, and how far through a hold it is, for the HUD.
 var prompt := ""
 var progress := 0.0
@@ -93,16 +80,12 @@ var notice := ""
 var notice_time := 0.0
 
 var _head: Node3D
-var _ghost: MeshInstance3D
-var _ghost_material: StandardMaterial3D
-var _ghost_meshes := {}
 var _pitch := 0.0
 var pitch: float:
 	get: return _pitch
 var _use_target: Fixture
 var _use_held := 0.0
 var _use_was_down := false
-var _radial_aim := Vector2.ZERO
 var _screen: Screen
 var _cooldown := 0.0
 var _recoil := 0.0
@@ -152,32 +135,9 @@ func _ready() -> void:
 	headlamp.light_energy = 1.6
 	headlamp.position = Vector3(0.2, -0.1, 0)
 	camera.add_child(headlamp)
-	_ghost_material = StandardMaterial3D.new()
-	_ghost_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_ghost_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	var post := CylinderMesh.new()
-	post.top_radius = 0.12
-	post.bottom_radius = 0.2
-	post.height = 1.6
-	var panel := BoxMesh.new()
-	panel.size = Vector3(1.6, 0.6, 1.0)
-	var rig := CylinderMesh.new()
-	rig.top_radius = 0.6
-	rig.bottom_radius = 2.4
-	rig.height = 3.8
-	var cell := BoxMesh.new()
-	cell.size = Vector3(1.0, 0.7, 0.7)
-	var lab := BoxMesh.new()
-	lab.size = Vector3(2.2, 1.7, 1.6)
-	_ghost_meshes = {&"lamp": post, &"panel": panel, &"battery": cell, &"drill": rig, &"lab": lab}
 	_build_gun()
 	_build_hammer()
 	_build_rope()
-	_ghost = MeshInstance3D.new()
-	_ghost.top_level = true
-	_ghost.material_override = _ghost_material
-	_ghost.visible = false
-	add_child(_ghost)
 
 
 ## Turns the body so its up points away from the centre, keeping where it
@@ -201,24 +161,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if !game or game.state != Game.State.PLAYING:
 		return
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	if event is InputEventKey and event.physical_keycode == KEY_Q and !event.echo:
-		if event.pressed:
-			radial_open = true
-			radial_choice = -1
-			_radial_aim = Vector2.ZERO
-		elif radial_open:
-			radial_open = false
-			_choose(&"" if radial_choice < 0 else BUILD[radial_choice])
-		return
-	if radial_open:
-		if event is InputEventMouseMotion:
-			_radial_aim = (_radial_aim + event.relative).limit_length(RADIAL_REACH)
-			radial_choice = -1
-			if _radial_aim.length() > RADIAL_DEAD:
-				# Screen y points down, so the top is -PI/2; wedges go clockwise.
-				var turn := fposmod(_radial_aim.angle() + PI * 0.5, TAU)
-				radial_choice = roundi(turn / (TAU / BUILD.size())) % BUILD.size()
-		return
 	if event is InputEventMouseMotion and captured:
 		var sensitivity := SENSITIVITY * camera.fov / FOV
 		rotate_object_local(Vector3.UP, -event.relative.x * sensitivity)
@@ -228,10 +170,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_switch(&"hammer" if weapon == &"gun" else &"gun")
-		elif event.button_index == MOUSE_BUTTON_LEFT and tool != &"":
-			_build()
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			tool = &""
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_F: headlamp.visible = !headlamp.visible
@@ -250,7 +188,7 @@ func _physics_process(delta: float) -> void:
 	if playing:
 		input = Vector2(_axis(KEY_D, KEY_A), _axis(KEY_W, KEY_S)).limit_length(1.0)
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	aiming = playing and weapon == &"gun" and (debug_aim or captured and tool == &"" and !radial_open and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
+	aiming = playing and weapon == &"gun" and (debug_aim or captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
 	_ads = move_toward(_ads, 1.0 if aiming else 0.0, delta * 7.0)
 	var rush := clampf((horizontal.length() - RUN) * 1.2, 0.0, 12.0)
 	camera.fov = lerpf(FOV + rush, ADS_FOV, _ads)
@@ -330,15 +268,12 @@ func _physics_process(delta: float) -> void:
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
 	if playing:
 		_use(delta)
-		_aim_ghost()
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if trigger and tool == &"" and !radial_open and _cooldown <= 0.0:
+		if trigger and _cooldown <= 0.0:
 			if weapon == &"gun":
 				_fire()
 			else:
 				_smash()
-	else:
-		_ghost.visible = false
 
 
 func _axis(positive: Key, negative: Key) -> float:
@@ -373,6 +308,9 @@ func _use(delta: float) -> void:
 				_screen.press()
 		return
 	if !target:
+		return
+	if target.blueprint:
+		prompt = "%s blueprint: %d / %d\n%s" % [Fixture.NAMES[target.kind], target.hits, target.hits_needed(), "[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up"]
 		return
 	match target.kind:
 		&"deposit":
@@ -431,46 +369,6 @@ func _hold(down: bool, delta: float, needed: float, done: Callable) -> void:
 		done.call()
 
 
-## Where the tool in hand would build, or an empty dictionary if it can't.
-## A rig goes over the deposit you're looking at.
-func _placement() -> Dictionary:
-	if tool == &"":
-		return {}
-	var hit := _aim(BUILD_REACH)
-	if hit.is_empty():
-		return {}
-	if tool == &"drill":
-		if hit.collider is Fixture and hit.collider.kind == &"deposit":
-			return {position = hit.collider.global_position, normal = hit.collider.normal}
-		return {}
-	if hit.collider is Fixture:
-		return {}
-	return hit
-
-
-func _aim_ghost() -> void:
-	var hit := _placement()
-	_ghost.visible = !hit.is_empty()
-	if hit.is_empty():
-		return
-	_ghost.mesh = _ghost_meshes[tool]
-	var ok := game.can_build(tool, hit.position)
-	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.35) if ok else Color(1.0, 0.3, 0.25, 0.35)
-	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85}[tool]
-	_ghost.global_transform = Transform3D(Fixture.upright(hit.normal), hit.position + hit.normal * lift)
-
-
-func _build() -> void:
-	var hit := _placement()
-	if !hit.is_empty() and game.can_build(tool, hit.position):
-		game.act(&"build", [tool, hit.position, hit.normal, global_position])
-
-
-## Takes a lamp, panel or rig in hand, or nothing.
-func _choose(kind: StringName) -> void:
-	tool = kind
-
-
 func _switch(to: StringName) -> void:
 	weapon = to
 	_gun.visible = weapon == &"gun"
@@ -490,8 +388,14 @@ func _smash() -> void:
 			game.act(&"hit", [spider.net_id, HAMMER_DAMAGE])
 			game.act(&"fling", [spider.net_id, (to.normalized() + up_direction * 0.6) * 9.0, 0.8])
 	var hit := _aim(HAMMER_REACH)
-	if !hit.is_empty() and hit.collider is Fixture and (hit.collider.kind == &"deposit" or hit.collider.kind == &"ore"):
-		game.act(&"mine", [hit.collider.net_id])
+	if hit.is_empty() or !(hit.collider is Fixture):
+		return
+	var fixture: Fixture = hit.collider
+	if fixture.blueprint:
+		game.act(&"construct", [fixture.net_id])
+		_say("%s %d / %d" % [Fixture.NAMES[fixture.kind], mini(fixture.hits + 1, fixture.hits_needed()), fixture.hits_needed()])
+	elif fixture.kind == &"deposit" or fixture.kind == &"ore":
+		game.act(&"mine", [fixture.net_id])
 		_say("+ore")
 
 

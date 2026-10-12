@@ -7,6 +7,9 @@ extends StaticBody3D
 ## that never runs out: you can chip at it by hand, or build a drill rig
 ## over it. A rig drills while it's lit, by the sun or a lamp, into a
 ## hopper that rovers come and empty, or you can by hand.
+##
+## What the commander places starts as a blueprint: a hologram, paid for,
+## that does nothing till soldiers hammer it up.
 
 const LAYER := 2
 const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"rover": 4}
@@ -14,6 +17,11 @@ const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
 const LAMP_RANGE := 13.0
+## Hammer blows to put up a blueprint.
+const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6}
+const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab"}
+## How high a placement ghost sits over the ground.
+const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85}
 
 var kind: StringName
 var net_id := 0
@@ -37,6 +45,8 @@ var charge := 0.0
 var researching: StringName = &""
 var research_time := 0.0
 var unpowered := false
+var blueprint := false
+var hits := 0
 
 var light: OmniLight3D
 ## The pod's screen.
@@ -47,6 +57,7 @@ var _beacon_bulb: StandardMaterial3D
 var _shaft: Node3D
 var _status: StandardMaterial3D
 var _fill: MeshInstance3D
+var _holo: StandardMaterial3D
 
 
 static func make(fixture_kind: StringName, pos: Vector3, surface_normal: Vector3) -> Fixture:
@@ -55,6 +66,34 @@ static func make(fixture_kind: StringName, pos: Vector3, surface_normal: Vector3
 	fixture.normal = surface_normal
 	fixture.transform = Transform3D(upright(surface_normal), pos)
 	return fixture
+
+
+## A rough shape of kind, for placement ghosts.
+static func ghost_mesh(ghost_kind: StringName) -> Mesh:
+	match ghost_kind:
+		&"lamp":
+			var post := CylinderMesh.new()
+			post.top_radius = 0.12
+			post.bottom_radius = 0.2
+			post.height = 1.6
+			return post
+		&"panel":
+			var panel := BoxMesh.new()
+			panel.size = Vector3(1.6, 0.6, 1.0)
+			return panel
+		&"battery":
+			var cell := BoxMesh.new()
+			cell.size = Vector3(1.0, 0.7, 0.7)
+			return cell
+		&"drill":
+			var rig := CylinderMesh.new()
+			rig.top_radius = 0.6
+			rig.bottom_radius = 2.4
+			rig.height = 3.8
+			return rig
+	var lab := BoxMesh.new()
+	lab.size = Vector3(2.2, 1.7, 1.6)
+	return lab
 
 
 ## A basis whose y is up, turned about it arbitrarily.
@@ -76,6 +115,8 @@ func _ready() -> void:
 		&"drill": _build_drill()
 		&"battery": _build_battery()
 		&"lab": _build_lab()
+	if blueprint:
+		_hologram()
 
 
 func set_on(value: bool) -> void:
@@ -103,7 +144,45 @@ func take(amount: int) -> int:
 	return given
 
 
+func hits_needed() -> int:
+	return BUILD_HITS[kind]
+
+
+## Every part see-through and glowing, nothing lit or working.
+func _hologram() -> void:
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.35, 0.75, 1.0, 0.28)
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.no_depth_test = false
+	_holo = material
+	_hologram_under(self)
+	if light:
+		light.visible = false
+	if screen:
+		screen.visible = false
+	_shaft = null
+	_fill = null
+
+
+func _hologram_under(node: Node) -> void:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			(child as MeshInstance3D).material_override = _holo
+			(child as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		elif child is Light3D:
+			(child as Light3D).visible = false
+		if !(child is Screen):
+			_hologram_under(child)
+
+
 func _process(delta: float) -> void:
+	if blueprint:
+		var done := hits / float(hits_needed())
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 300.0)
+		_holo.albedo_color = Color(0.35, 0.75, 1.0, 0.18 + 0.3 * done + 0.08 * pulse)
+		return
 	if kind == &"battery":
 		_fill.scale.y = maxf(0.02, charge)
 		_fill.position.y = 0.12 + 0.24 * _fill.scale.y

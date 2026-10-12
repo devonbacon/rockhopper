@@ -6,8 +6,7 @@ extends CanvasLayer
 ## and in your pockets, and the rovers. In the middle, a
 ## crosshair that fills as you hold E, what E would do, a marker for the
 ## pod pinned to the screen's edge when it's out of view, and markers on
-## drill rigs, with how full they are and why they've stopped. Holding Q
-## brings up the radial build menu over it all.
+## drill rigs and blueprints, with how far along they are.
 
 const PANEL := Color(0.04, 0.05, 0.07, 0.75)
 const EDGE := Color(1, 1, 1, 0.12)
@@ -23,7 +22,7 @@ const POD_COLOR := Color(1.0, 0.55, 0.25)
 const ALERT := Color(1.0, 0.4, 0.3)
 const HEALTH_COLOR := Color(1.0, 0.35, 0.35)
 const FORECAST_STEPS := 120
-const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab"}
+const BLUEPRINT_COLOR := Color(0.45, 0.8, 1.0)
 
 var game: Game
 
@@ -96,8 +95,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func set_paused(paused: bool) -> void:
 	get_tree().paused = paused and !Net.networked()
 	_pause.visible = paused
+	var commanding := game.commander_view != null and game.commander_view.visible
+	if commanding:
+		visible = paused
 	var playing := game.state == Game.State.PLAYING
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if !paused and playing else Input.MOUSE_MODE_VISIBLE
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if !paused and playing and !commanding else Input.MOUSE_MODE_VISIBLE
 
 
 func _build_pause() -> void:
@@ -143,7 +145,7 @@ func _process(delta: float) -> void:
 	_update_bottom()
 	var player := game.player
 	_prompt.text = player.prompt
-	_prompt.visible = player.prompt != "" and !player.radial_open
+	_prompt.visible = player.prompt != ""
 	_frost_material.set_shader_parameter("amount", clampf(1.0 - game.warmth / 70.0, 0.0, 1.0))
 	_hurt_material.set_shader_parameter("amount", maxf(game.hurt * 0.7, clampf(1.0 - game.health / 40.0, 0.0, 1.0) * 0.5))
 	_notice.text = player.notice
@@ -306,15 +308,12 @@ func _update_bottom() -> void:
 		if lab.kind == &"lab" and lab.researching != &"":
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
 			_rovers.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
-	if game.player.tool != &"":
-		_hint.text = "%s in hand    [LMB] build    [RMB] put away" % NAMES[game.player.tool]
-	else:
-		var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash"
-		_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [E] use    [Hold Q] build    [F] headlamp    [Esc] pause" % attack
+	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
+	_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [E] use    [F] headlamp    [Esc] pause" % attack
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
-func _draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tint: Color) -> void:
+static func draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tint: Color) -> void:
 	var white := Color(0.88, 0.88, 0.86) * tint
 	var gold := Color(0.85, 0.62, 0.22) * tint
 	var dark := Color(0.15, 0.15, 0.17) * tint
@@ -355,7 +354,7 @@ func _draw_overlay() -> void:
 	var centre := _overlay.size * 0.5
 	var player := game.player
 	_overlay.draw_circle(centre, 2.5, Color(1, 1, 1, 0.85))
-	if player.tool == &"" and !player.radial_open and player.weapon == &"gun":
+	if player.weapon == &"gun":
 		var camera := player.camera
 		var bloom := tan(deg_to_rad(player.spread)) / tan(deg_to_rad(camera.fov * 0.5)) * _overlay.size.y * 0.5 + 5.0
 		for side in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
@@ -367,40 +366,21 @@ func _draw_overlay() -> void:
 		_overlay.draw_arc(centre, 10, 0, TAU, 24, Color(1, 1, 1, 0.5), 1.5)
 	_draw_pod_marker(centre)
 	_draw_rig_markers()
-	if player.radial_open:
-		_draw_radial(centre)
+	_draw_blueprint_markers()
 
 
-## A ring of wedges round the middle of the screen, one for each thing you
-## can build, the one the mouse is towards lit up.
-func _draw_radial(centre: Vector2) -> void:
-	var player := game.player
+func _draw_blueprint_markers() -> void:
+	var camera := game.player.camera
 	var font := _overlay.get_theme_default_font()
-	var count := Player.BUILD.size()
-	var inner := 60.0
-	var outer := 190.0
-	var span := TAU / count
-	_overlay.draw_circle(centre, outer + 12.0, Color(0, 0, 0, 0.35))
-	for i in count:
-		var kind := Player.BUILD[i]
-		var mid := -PI * 0.5 + span * i
-		var points := PackedVector2Array()
-		for step in 13:
-			points.push_back(centre + Vector2.from_angle(mid - span * 0.5 + 0.03 + (span - 0.06) * step / 12.0) * outer)
-		for step in range(12, -1, -1):
-			points.push_back(centre + Vector2.from_angle(mid - span * 0.5 + 0.06 + (span - 0.12) * step / 12.0) * inner)
-		var chosen := player.radial_choice == i
-		var holding := player.tool == kind
-		var affordable: bool = game.stock >= Fixture.COST[kind]
-		_overlay.draw_colored_polygon(points, Color(DAY_COLOR, 0.35) if chosen else PANEL)
-		_overlay.draw_polyline(points + PackedVector2Array([points[0]]), DAY_COLOR if chosen or holding else EDGE, 2.0 if chosen else 1.0)
-		var at := centre + Vector2.from_angle(mid) * (inner + outer) * 0.5
-		_draw_icon(_overlay, kind, at - Vector2(0, 14), Color.WHITE if affordable else Color(1, 1, 1, 0.3))
-		_overlay.draw_string(font, at + Vector2(-70, 34), NAMES[kind], HORIZONTAL_ALIGNMENT_CENTER, 140, 15, Color.WHITE)
-		var cost := "%d ore" % Fixture.COST[kind]
-		_overlay.draw_string(font, at + Vector2(-70, 50), cost, HORIZONTAL_ALIGNMENT_CENTER, 140, 13, ORE_COLOR if affordable else ALERT)
-	var middle := "Put away" if player.tool != &"" else "Nothing"
-	_overlay.draw_string(font, centre + Vector2(-50, 5), middle, HORIZONTAL_ALIGNMENT_CENTER, 100, 14, Color.WHITE if player.radial_choice < 0 else DIM)
+	for plan in game.blueprints:
+		var top := plan.global_position + plan.normal * 2.6
+		if camera.is_position_behind(top) or camera.global_position.distance_to(top) > 70.0:
+			continue
+		var at := camera.unproject_position(top)
+		var text := "BUILD %s %d/%d" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed()]
+		_overlay.draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), BLUEPRINT_COLOR, false, 2.0)
+		_overlay.draw_string_outline(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, 4, Color(0, 0, 0, 0.7))
+		_overlay.draw_string(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, BLUEPRINT_COLOR)
 
 
 func _draw_rig_markers() -> void:
