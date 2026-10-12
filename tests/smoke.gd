@@ -1,24 +1,28 @@
 extends SceneTree
-## Headless smoke test. Generates a few asteroids and reports on them, then
+## Headless smoke test. Generates a few maps and reports on them, then
 ## plays a mission roughly:
-## - checks you stand on the rock;
-## - marks the deposit nearest the pod and lets the bots work it for a
-##   minute in daylight;
-## - skips to night and watches the spiders come.
+## - checks you stand on the ground;
+## - builds a drill rig on the deposit nearest the pod and lets it and the
+##   rover work for a minute and a half in daylight;
+## - skips to the middle of the night and watches the spiders come.
 ## Run it with --fixed-fps 60 so it goes as fast as it can.
 
 var _game: Game
 var _elapsed := 0.0
 var _phase := 0
 var _stock_before := 0
+var _rig: Fixture
 
 
 func _initialize() -> void:
 	for seed_value in [1, 2, 3]:
-		var rock := Asteroid.new()
-		rock.generate(seed_value)
-		print("seed %d: %d ms, %d triangles, cave spots %d, surface spots %d" % [seed_value, rock.generate_ms, rock.triangle_count, rock.cave_spots.size(), rock.surface_spots.size()])
-		rock.free()
+		var terrain := Terrain.new()
+		terrain.generate(seed_value)
+		var polygons := terrain.navigation.navigation_mesh.get_polygon_count()
+		print("seed %d: %d ms, %d triangles, %d nav polygons, cave spots %d, surface spots %d" % [seed_value, terrain.generate_ms, terrain.triangle_count, polygons, terrain.cave_spots.size(), terrain.surface_spots.size()])
+		if polygons == 0:
+			push_error("nothing baked for rovers to drive on")
+		terrain.free()
 	_game = load("res://game/game.tscn").instantiate()
 	root.add_child(_game)
 
@@ -30,27 +34,31 @@ func _physics_process(delta: float) -> bool:
 		0:
 			if _elapsed < 4.0:
 				return false
-			var below := _game.asteroid.surface_point(player.global_position)
-			var height: float = player.global_position.distance_to(below[0])
-			print("mission seed %d: %d deposits, %d ore, %d bots" % [_game.seed_value, _game.deposits.size(), _game.ores.size(), _game.bots.size()])
-			print("after %.1fs: on floor %s, %.2f m above the surface, battery %.1f, warmth %.0f lit by '%s'" % [_elapsed, player.is_on_floor(), height, _game.battery, _game.warmth, _game.lit_by])
-			if !player.is_on_floor() or height > 1.5:
-				push_error("player isn't standing on the rock")
+			var below: Array = _game.terrain.surface_point(player.global_position)
+			var height: float = player.global_position.y - below[0].y
+			print("mission seed %d: %d deposits, %d ore, %d rovers" % [_game.seed_value, _game.deposits.size(), _game.ores.size(), _game.rovers.size()])
+			print("after %.1fs: on floor %s, %.2f m above the ground, battery %.1f, warmth %.0f lit by '%s'" % [_elapsed, player.is_on_floor(), height, _game.battery, _game.warmth, _game.lit_by])
+			if !player.is_on_floor() or absf(height) > 1.5:
+				push_error("player isn't standing on the ground")
 			var nearest := _game.deposits[0]
 			for deposit in _game.deposits:
 				if deposit.global_position.distance_to(_game.pod.global_position) < nearest.global_position.distance_to(_game.pod.global_position):
 					nearest = deposit
-			_game.toggle_designation(nearest)
+			if !_game.can_build(&"drill", nearest.global_position):
+				push_error("can't build a rig on the nearest deposit")
+			_game.build(&"drill", nearest.global_position, Vector3.UP)
+			_rig = nearest.rig
 			_stock_before = _game.stock
-			print("marked a deposit %.0f m from the pod, lit by '%s'" % [nearest.global_position.distance_to(_game.pod.global_position), _game.lit_at(nearest.work_point())])
+			var path := NavigationServer3D.map_get_path(_game.get_world_3d().navigation_map, _game.rovers[0].global_position, _rig.global_position, true)
+			print("built a rig %.0f m from the pod; path for the rover: %d points, ending %.1f m from it" % [nearest.global_position.distance_to(_game.pod.global_position), path.size(), path[-1].distance_to(_rig.global_position) if !path.is_empty() else INF])
 			_phase = 1
 		1:
-			if _elapsed < 64.0:
+			if _elapsed < 94.0:
 				return false
-			var tasks := _game.bots.map(func(b: Bot) -> String: return Bot.Task.keys()[b.task] + (" dark" if b.dark else ""))
-			print("after a minute of mining: stock %d -> %d, bots %s" % [_stock_before, _game.stock, tasks])
+			var rover := _game.rovers[0]
+			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored, _rig.stalled if _rig.stalled != "" else "drilling", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
 			if _game.stock <= _stock_before:
-				push_error("the bots brought nothing home")
+				push_error("the rover brought nothing home")
 			var forecast := _game.sun.forecast(player.camera.global_position, _game.get_world_3d().direct_space_state, 120)
 			var dark := forecast.find(false)
 			var light_again := forecast.find(true, maxi(dark, 0))
@@ -61,9 +69,9 @@ func _physics_process(delta: float) -> bool:
 			print("skipped to t=%.0f, the middle of the night here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])
 			_phase = 2
 		2:
-			if _elapsed < 94.0:
+			if _elapsed < 124.0:
 				return false
-			print("30 s into the night: %d spiders, health %.0f, warmth %.0f, state %s, bots %d, built %d" % [_game.spiders.size(), _game.health, _game.warmth, Game.State.keys()[_game.state], _game.bots.size(), _game.built.size()])
+			print("30 s into the night: %d spiders, health %.0f, state %s, rovers %d, built %d, rig %s" % [_game.spiders.size(), _game.health, Game.State.keys()[_game.state], _game.rovers.size(), _game.built.size(), _rig.stalled if is_instance_valid(_rig) else "destroyed"])
 			if _game.spiders.is_empty() and _game.state == Game.State.PLAYING:
 				push_error("no spiders came")
 			return true

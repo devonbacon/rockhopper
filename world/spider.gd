@@ -1,7 +1,7 @@
 class_name Spider
 extends CharacterBody3D
-## Climbs up out of the rock in the dark and goes for whatever's nearest
-## that it can bite: you, a working bot, a lamp or a panel. Sunlight drives
+## Climbs up out of the ground in the dark and goes for whatever's nearest
+## that it can bite: you, a rover out on the road, or anything built. Sunlight drives
 ## it back underground. You can outrun one, but not by walking.
 
 const LAYER := 16
@@ -34,7 +34,7 @@ var _body_material: StandardMaterial3D
 
 func _ready() -> void:
 	collision_layer = LAYER
-	collision_mask = Asteroid.ROCK_LAYER
+	collision_mask = Terrain.ROCK_LAYER
 	floor_max_angle = deg_to_rad(65.0)
 	floor_snap_length = 0.5
 	var shape := SphereShape3D.new()
@@ -45,13 +45,13 @@ func _ready() -> void:
 	_collider.disabled = true
 	add_child(_collider)
 	_build_model()
-	global_position -= global_position.normalized() * 1.0
+	global_position -= Vector3.UP * 1.0
 	_retarget = randf() * 0.5
 	_sun_check = randf() * 0.5
 
 
 func _physics_process(delta: float) -> void:
-	var up := global_position.normalized()
+	var up := Vector3.UP
 	_align(up, delta)
 	_flash = maxf(0.0, _flash - delta * 5.0)
 	_body_material.emission = Color(1.0, 0.9, 0.8) * _flash

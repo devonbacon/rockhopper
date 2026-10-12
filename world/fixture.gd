@@ -4,11 +4,15 @@ extends StaticBody3D
 ## build. Stood upright along the surface normal it was placed on.
 ##
 ## Ore is a small cluster, gone once mined. A deposit is a big outcrop
-## that never runs out: you can chip at it by hand, or mark it for bots.
+## that never runs out: you can chip at it by hand, or build a drill rig
+## over it. A rig drills while it's lit, by the sun or a lamp, into a
+## hopper that rovers come and empty, or you can by hand.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2, &"bot": 4}
+const COST := {&"lamp": 1, &"panel": 2, &"drill": 3, &"rover": 4}
 const HEALTH := 30.0
+const DRILL_EVERY := 6.0
+const HOPPER := 12
 const LAMP_RANGE := 13.0
 
 var kind: StringName
@@ -18,16 +22,24 @@ var normal := Vector3.UP
 var sunlit := false
 var on := false
 var amount := 3
-## Deposits: whether bots should mine it.
-var designated := false
-## Lamps and panels: spiders wear this down.
+## Lamps, panels and rigs: spiders wear this down.
 var health := HEALTH
+## A deposit's rig, and a rig's deposit.
+var rig: Fixture
+var deposit: Fixture
+## Rigs: ore in the hopper, progress towards the next, and why it isn't
+## drilling: "" if it is, "dark" or "full".
+var stored := 0
+var drilled := 0.0
+var stalled := ""
 
 var light: OmniLight3D
 var _bulb: StandardMaterial3D
 var _beacon: OmniLight3D
 var _beacon_bulb: StandardMaterial3D
-var _marker: MeshInstance3D
+var _shaft: Node3D
+var _status: StandardMaterial3D
+var _fill: MeshInstance3D
 
 
 static func make(fixture_kind: StringName, pos: Vector3, surface_normal: Vector3) -> Fixture:
@@ -54,6 +66,7 @@ func _ready() -> void:
 		&"panel": _build_panel()
 		&"ore": _build_ore()
 		&"deposit": _build_deposit()
+		&"drill": _build_drill()
 
 
 func set_on(value: bool) -> void:
@@ -62,19 +75,34 @@ func set_on(value: bool) -> void:
 	_bulb.emission_energy_multiplier = 6.0 if on else 0.0
 
 
-func set_designated(value: bool) -> void:
-	designated = value
-	_marker.visible = value
+## Rigs: drills for delta seconds if it's lit and has room, given whether
+## it's lit.
+func drill(delta: float, lit: bool) -> void:
+	stalled = "full" if stored >= HOPPER else ("dark" if !lit else "")
+	if stalled != "":
+		return
+	drilled += delta
+	if drilled >= DRILL_EVERY:
+		drilled -= DRILL_EVERY
+		stored += 1
 
 
-## Where a bot mining it hovers.
-func work_point() -> Vector3:
-	return global_position + normal * 3.4
+## Rigs: empties up to amount from the hopper, returning what it gave.
+func take(amount: int) -> int:
+	var given := mini(amount, stored)
+	stored -= given
+	return given
 
 
 func _process(delta: float) -> void:
-	if _marker and _marker.visible:
-		_marker.rotate_object_local(Vector3.UP, delta * 0.8)
+	if _shaft:
+		if stalled == "":
+			_shaft.rotate_object_local(Vector3.UP, delta * 9.0)
+		var color := Color(0.3, 1.0, 0.4) if stalled == "" else (Color(0.4, 0.7, 1.0) if stalled == "dark" else Color(1.0, 0.7, 0.2))
+		_status.albedo_color = color
+		_status.emission = color
+		_fill.scale.y = maxf(0.02, stored / float(HOPPER))
+		_fill.position.y = 3.05 + 0.28 * _fill.scale.y
 	if _beacon:
 		var blink := fmod(Time.get_ticks_msec() / 1000.0, 1.6) < 0.25
 		_beacon.visible = blink
@@ -205,20 +233,73 @@ func _build_deposit() -> void:
 		var out := rng.randf_range(0.2, 1.1)
 		var shard := _add_mesh(mesh, crystal, Vector3(cos(angle) * out, height * 0.4 + 0.3, sin(angle) * out))
 		shard.rotation = Vector3(sin(angle) * out * 0.5, rng.randf_range(0, TAU), -cos(angle) * out * 0.5)
-	var ring := TorusMesh.new()
-	ring.inner_radius = 2.3
-	ring.outer_radius = 2.45
-	ring.rings = 48
-	var glow := _material(Color(0.4, 0.95, 1.0), 0.0, 0.5)
-	glow.emission_enabled = true
-	glow.emission = Color(0.3, 0.9, 1.0)
-	glow.emission_energy_multiplier = 3.0
-	_marker = _add_mesh(ring, glow, Vector3(0, 0.25, 0))
-	_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_marker.visible = false
 	var shape := SphereShape3D.new()
 	shape.radius = 1.6
 	_add_collider(shape, Vector3(0, 0.9, 0))
+
+
+## A tripod over the deposit, a spinning drill down its middle, and a
+## hopper up top with a gauge, in white, gold foil and orange.
+func _build_drill() -> void:
+	health = 40.0
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	for i in 3:
+		var angle := TAU * i / 3.0
+		var foot := Vector3(cos(angle) * 2.4, 0.0, sin(angle) * 2.4)
+		var top := Vector3(0, 3.2, 0)
+		var leg := BoxMesh.new()
+		leg.size = Vector3(0.14, foot.distance_to(top), 0.14)
+		var along := (top - foot).normalized()
+		var side := along.cross(Vector3.FORWARD if absf(along.z) < 0.9 else Vector3.RIGHT).normalized()
+		var instance := _add_mesh(leg, white, (foot + top) * 0.5)
+		instance.basis = Basis(side, along, side.cross(along))
+		var pad := BoxMesh.new()
+		pad.size = Vector3(0.45, 0.1, 0.45)
+		_add_mesh(pad, orange, foot + Vector3(0, 0.05, 0))
+	_shaft = Node3D.new()
+	_shaft.position = Vector3(0, 1.6, 0)
+	add_child(_shaft)
+	var bit := _cylinder(0.12, 0.12, 2.6)
+	var shaft_mesh := MeshInstance3D.new()
+	shaft_mesh.mesh = bit
+	shaft_mesh.material_override = _material(Color(0.4, 0.4, 0.42), 0.8, 0.3)
+	_shaft.add_child(shaft_mesh)
+	var flight := BoxMesh.new()
+	flight.size = Vector3(0.5, 0.06, 0.08)
+	for i in 4:
+		var blade := MeshInstance3D.new()
+		blade.mesh = flight
+		blade.material_override = orange
+		blade.position = Vector3(0, -0.9 + i * 0.5, 0)
+		blade.rotation.y = i * 0.8
+		_shaft.add_child(blade)
+	var hopper := BoxMesh.new()
+	hopper.size = Vector3(1.3, 0.75, 1.3)
+	_add_mesh(hopper, gold, Vector3(0, 3.4, 0))
+	var gauge := BoxMesh.new()
+	gauge.size = Vector3(0.18, 0.56, 0.05)
+	var gauge_back := _material(Color(0.05, 0.05, 0.06), 0.0, 0.8)
+	_add_mesh(gauge, gauge_back, Vector3(0, 3.33, 0.67))
+	var fill_material := _material(Color(0.3, 0.85, 0.92), 0.0, 0.3)
+	fill_material.emission_enabled = true
+	fill_material.emission = Color(0.2, 0.75, 0.9)
+	fill_material.emission_energy_multiplier = 2.0
+	var fill := BoxMesh.new()
+	fill.size = Vector3(0.12, 0.56, 0.06)
+	_fill = _add_mesh(fill, fill_material, Vector3(0, 3.05, 0.68))
+	_status = _material(Color(0.3, 1.0, 0.4), 0.0, 0.3)
+	_status.emission_enabled = true
+	_status.emission_energy_multiplier = 4.0
+	var bulb := SphereMesh.new()
+	bulb.radius = 0.1
+	bulb.height = 0.2
+	_add_mesh(bulb, _status, Vector3(0, 3.9, 0))
+	var shape := CylinderShape3D.new()
+	shape.radius = 1.0
+	shape.height = 4.0
+	_add_collider(shape, Vector3(0, 2.0, 0))
 
 
 func _material(color: Color, metallic: float, roughness: float) -> StandardMaterial3D:

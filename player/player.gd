@@ -1,14 +1,16 @@
 class_name Player
 extends CharacterBody3D
-## You, in first person, walking on a rock whose down is always its centre.
+## You, in first person, on the crater floor.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Left mouse fires, unless a
-## lamp or panel's in hand (1 and 2), when it builds one; right-click puts
-## it away. E is use: tap it at the pod to hand in ore, hold it on ore or a
-## deposit to mine it, or on a lamp or panel to pick it back up. Q marks a
-## deposit for the bots to mine, or unmarks it, from a fair way off. 3
-## prints a bot at the pod. F toggles the headlamp.
+## lamp, panel or drill rig's in hand (1, 2 and 3), when it builds one; a
+## rig goes over a deposit. Right-click puts it away. 4 prints a rover at
+## the pod. Holding Q brings up the same choices on a radial menu: move the
+## mouse towards one and let go of Q, or let go in the middle to put
+## what's in hand away. E is use: tap it at the pod to hand in ore, or at a rig to
+## empty its hopper; hold it on ore or a deposit to mine it, or on a lamp,
+## panel or rig to pick it back up. F toggles the headlamp.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -26,11 +28,19 @@ const REACH := 4.5
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
-const MARK_REACH := 45.0
+## How far out from the middle you can go before the crater wall stops
+## you, in case the jetpack gets you up it.
+const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
 const FIRE_EVERY := 0.14
 const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
+## What the radial menu offers, clockwise from the top.
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"drill", &"rover"]
+## How far the mouse has to move from the middle to pick, and how far the
+## pointer can go.
+const RADIAL_DEAD := 40.0
+const RADIAL_REACH := 140.0
 const HEIGHT := 1.8
 
 var game: Game
@@ -38,6 +48,10 @@ var camera: Camera3D
 var headlamp: SpotLight3D
 var fuel := 100.0
 var tool: StringName = &""
+## The radial build menu: whether it's up, and which of BUILD the mouse
+## has moved towards (-1 for the middle).
+var radial_open := false
+var radial_choice := -1
 ## What E would do now, and how far through a hold it is, for the HUD.
 var prompt := ""
 var progress := 0.0
@@ -54,7 +68,7 @@ var _pitch := 0.0
 var _use_target: Fixture
 var _use_held := 0.0
 var _use_was_down := false
-var _mark_was_down := false
+var _radial_aim := Vector2.ZERO
 var _cooldown := 0.0
 var _recoil := 0.0
 var _gun: Node3D
@@ -64,7 +78,7 @@ var _muzzle_light: OmniLight3D
 
 func _ready() -> void:
 	collision_layer = LAYER
-	collision_mask = Asteroid.ROCK_LAYER | Fixture.LAYER
+	collision_mask = Terrain.ROCK_LAYER | Fixture.LAYER
 	floor_max_angle = deg_to_rad(55.0)
 	floor_snap_length = 0.4
 	var shape := CapsuleShape3D.new()
@@ -98,25 +112,17 @@ func _ready() -> void:
 	post.height = 1.6
 	var panel := BoxMesh.new()
 	panel.size = Vector3(1.6, 0.6, 1.0)
-	_ghost_meshes = {&"lamp": post, &"panel": panel}
+	var rig := CylinderMesh.new()
+	rig.top_radius = 0.6
+	rig.bottom_radius = 2.4
+	rig.height = 3.8
+	_ghost_meshes = {&"lamp": post, &"panel": panel, &"drill": rig}
 	_build_gun()
 	_ghost = MeshInstance3D.new()
 	_ghost.top_level = true
 	_ghost.material_override = _ghost_material
 	_ghost.visible = false
 	add_child(_ghost)
-
-
-## Turns the body so its up points away from the asteroid's centre,
-## keeping where it faces as near as it can.
-func align_up() -> void:
-	var up := global_position.normalized()
-	var b := global_basis.orthonormalized()
-	var angle := b.y.angle_to(up)
-	if angle > 0.0001:
-		b = Basis(b.y.cross(up).normalized(), angle) * b
-	global_basis = b.orthonormalized()
-	up_direction = up
 
 
 func look(pitch: float) -> void:
@@ -128,6 +134,24 @@ func _unhandled_input(event: InputEvent) -> void:
 	if !game or game.state != Game.State.PLAYING:
 		return
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	if event is InputEventKey and event.physical_keycode == KEY_Q and !event.echo:
+		if event.pressed:
+			radial_open = true
+			radial_choice = -1
+			_radial_aim = Vector2.ZERO
+		elif radial_open:
+			radial_open = false
+			_choose(&"" if radial_choice < 0 else BUILD[radial_choice])
+		return
+	if radial_open:
+		if event is InputEventMouseMotion:
+			_radial_aim = (_radial_aim + event.relative).limit_length(RADIAL_REACH)
+			radial_choice = -1
+			if _radial_aim.length() > RADIAL_DEAD:
+				# Screen y points down, so the top is -PI/2; wedges go clockwise.
+				var turn := fposmod(_radial_aim.angle() + PI * 0.5, TAU)
+				radial_choice = roundi(turn / (TAU / BUILD.size())) % BUILD.size()
+		return
 	if event is InputEventMouseMotion and captured:
 		rotate_object_local(Vector3.UP, -event.relative.x * SENSITIVITY)
 		look(clampf(_pitch - event.relative.y * SENSITIVITY, -1.5, 1.5))
@@ -141,15 +165,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_ESCAPE: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-			KEY_1: tool = &"" if tool == &"lamp" else &"lamp"
-			KEY_2: tool = &"" if tool == &"panel" else &"panel"
-			KEY_3: _say("Bot printed at the pod" if game.print_bot() else "Not enough ore in the pod for a bot")
+			KEY_1: _choose(&"" if tool == &"lamp" else &"lamp")
+			KEY_2: _choose(&"" if tool == &"panel" else &"panel")
+			KEY_3: _choose(&"" if tool == &"drill" else &"drill")
+			KEY_4: _choose(&"rover")
 			KEY_F: headlamp.visible = !headlamp.visible
 
 
 func _physics_process(delta: float) -> void:
-	align_up()
-	var up := up_direction
+	var up := Vector3.UP
 	var playing := game.state == Game.State.PLAYING
 	var vertical := up * velocity.dot(up)
 	var horizontal := velocity - vertical
@@ -176,6 +200,10 @@ func _physics_process(delta: float) -> void:
 			fuel = maxf(0.0, fuel - JET_DRAIN * delta)
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
+	var flat := Vector2(global_position.x, global_position.z)
+	if flat.length() > BOUNDS and Vector2(velocity.x, velocity.z).dot(flat) > 0.0:
+		var out := Vector3(flat.x, 0.0, flat.y).normalized()
+		velocity -= out * velocity.dot(out)
 	move_and_slide()
 	notice_time = maxf(0.0, notice_time - delta)
 	_cooldown = maxf(0.0, _cooldown - delta)
@@ -186,7 +214,7 @@ func _physics_process(delta: float) -> void:
 		_use(delta)
 		_aim_ghost()
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if trigger and tool == &"" and _cooldown <= 0.0:
+		if trigger and tool == &"" and !radial_open and _cooldown <= 0.0:
 			_fire()
 	else:
 		_ghost.visible = false
@@ -200,39 +228,37 @@ func _axis(positive: Key, negative: Key) -> float:
 func _aim(reach: float) -> Dictionary:
 	var from := camera.global_position
 	var to := from - camera.global_basis.z * reach
-	var query := PhysicsRayQueryParameters3D.create(from, to, Asteroid.ROCK_LAYER | Fixture.LAYER, [get_rid()])
+	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER, [get_rid()])
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
 
 func _use(delta: float) -> void:
-	var hit := _aim(MARK_REACH)
-	var aimed: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
-	var target: Fixture = aimed if aimed and camera.global_position.distance_to(hit.position) <= REACH else null
+	var hit := _aim(REACH)
+	var target: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
 	var down := Input.is_physical_key_pressed(KEY_E)
 	var pressed := down and !_use_was_down
+	var released := !down and _use_was_down
 	_use_was_down = down
-	var mark_down := Input.is_physical_key_pressed(KEY_Q)
-	var mark_pressed := mark_down and !_mark_was_down
-	_mark_was_down = mark_down
 	if target != _use_target:
 		_use_target = target
 		_use_held = 0.0
 	prompt = ""
 	progress = 0.0
-	if aimed and aimed.kind == &"deposit":
-		var mark := "[Q] %s for bots" % ("Unmark" if aimed.designated else "Mark")
-		if aimed.designated:
-			mark += " (%d on it)" % game.bots_on(aimed)
-		prompt = ("[Hold E] Mine    " + mark) if target else mark
-		if mark_pressed:
-			game.toggle_designation(aimed)
-			_say("Deposit marked for mining" if aimed.designated else "Deposit unmarked")
-		if target:
-			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
-		return
 	if !target:
 		return
 	match target.kind:
+		&"deposit":
+			prompt = "[Hold E] Mine" + ("" if target.rig == null else "    a rig's on it")
+			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
+		&"drill":
+			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full"}[target.stalled]
+			prompt = "Rig: %d / %d, %s\n[E] Empty hopper    [Hold E] Pick up" % [target.stored, Fixture.HOPPER, why]
+			# A tap empties the hopper; holding on picks the rig up.
+			if released and _use_held < 0.3 and target.stored > 0:
+				game.empty_rig(target)
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.pick_up(target))
+			if progress < 0.3 / (PICK_UP_TIME * 2.0):
+				progress = 0.0
 		&"pod":
 			prompt = ("[E] Hand in %d ore" % game.carried) if game.carried > 0 else ("Drop pod: %d ore banked" % game.stock)
 			if pressed:
@@ -255,11 +281,18 @@ func _hold(down: bool, delta: float, needed: float, done: Callable) -> void:
 
 
 ## Where the tool in hand would build, or an empty dictionary if it can't.
+## A rig goes over the deposit you're looking at.
 func _placement() -> Dictionary:
 	if tool == &"":
 		return {}
 	var hit := _aim(BUILD_REACH)
-	if hit.is_empty() or hit.collider is Fixture:
+	if hit.is_empty():
+		return {}
+	if tool == &"drill":
+		if hit.collider is Fixture and hit.collider.kind == &"deposit":
+			return {position = hit.collider.global_position, normal = Vector3.UP}
+		return {}
+	if hit.collider is Fixture:
 		return {}
 	return hit
 
@@ -272,13 +305,22 @@ func _aim_ghost() -> void:
 	_ghost.mesh = _ghost_meshes[tool]
 	var ok := game.can_build(tool, hit.position)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.35) if ok else Color(1.0, 0.3, 0.25, 0.35)
-	_ghost.global_transform = Transform3D(Fixture.upright(hit.normal), hit.position + hit.normal * (0.8 if tool == &"lamp" else 0.3))
+	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"drill": 1.9}[tool]
+	_ghost.global_transform = Transform3D(Fixture.upright(hit.normal), hit.position + hit.normal * lift)
 
 
 func _build() -> void:
 	var hit := _placement()
 	if !hit.is_empty() and game.can_build(tool, hit.position):
 		game.build(tool, hit.position, hit.normal)
+
+
+## Takes a lamp, panel or rig in hand (or nothing), or prints a rover.
+func _choose(kind: StringName) -> void:
+	if kind == &"rover":
+		_say("Rover printed at the pod" if game.print_rover() else "Not enough ore in the pod for a rover")
+	else:
+		tool = kind
 
 
 func _say(text: String) -> void:
@@ -293,7 +335,7 @@ func _fire() -> void:
 	_recoil = 1.0
 	var from := camera.global_position
 	var to := from - camera.global_basis.z * GUN_RANGE
-	var query := PhysicsRayQueryParameters3D.create(from, to, Asteroid.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
+	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if !hit.is_empty():
 		to = hit.position
