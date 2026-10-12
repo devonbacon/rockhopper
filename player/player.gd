@@ -25,6 +25,7 @@ const SLIDE_SLOPE := 1.6
 const SLIDE_STEER := 4.0
 const SLIDE_JUMP_BOOST := 1.1
 const SLIDE_COOLDOWN := 0.8
+const STRAFE_TILT := 2.5
 const JUMP := 4.5
 const JET := 11.0
 const JET_DRAIN := 35.0
@@ -257,6 +258,8 @@ func _physics_process(delta: float) -> void:
 			fuel = maxf(0.0, fuel - JET_DRAIN * delta)
 	_crouch = move_toward(_crouch, 1.0 if sliding else 0.0, delta * 8.0)
 	_head.position.y = lerpf(HEIGHT - 0.15, 0.95, _crouch)
+	var side := clampf(horizontal.dot(global_basis.x) / RUN, -1.0, 1.0)
+	camera.rotation.z = lerpf(camera.rotation.z, -side * deg_to_rad(STRAFE_TILT), minf(1.0, delta * 10.0))
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
 	var flat := Vector2(global_position.x, global_position.z)
