@@ -23,6 +23,9 @@ const GIVE_UP_FOR := 30.0
 
 var game: Game
 var task := Task.PARKED
+## &"haul", &"stay" or &"home", from its screen.
+var order := &"haul"
+var screen: Screen
 var rig: Fixture
 var cargo := 0
 var health := HEALTH
@@ -46,6 +49,7 @@ var _load: Node3D
 
 func _ready() -> void:
 	_build_model()
+	_build_screen()
 	_heading = -global_basis.z
 
 
@@ -53,10 +57,14 @@ func _physics_process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta * 4.0)
 	_hull.emission = Color(1.0, 0.3, 0.2) * _flash
 	_load.visible = cargo > 0
+	if order == &"stay":
+		return
+	if order == &"home" and (task == Task.OUTBOUND or task == Task.LOADING):
+		task = Task.HOMEBOUND
 	match task:
 		Task.PARKED:
 			_drive_to(park_point(), 1.0, delta)
-			rig = game.pick_rig(self)
+			rig = game.pick_rig(self) if order == &"haul" else null
 			if rig:
 				task = Task.OUTBOUND
 		Task.OUTBOUND:
@@ -140,6 +148,35 @@ func _settle(pos: Vector3, delta: float) -> void:
 		_ground_up = _ground_up.slerp(hit.normal, minf(1.0, delta * 6.0)).normalized()
 	var ahead := (_heading - _ground_up * _heading.dot(_ground_up)).normalized()
 	global_transform = Transform3D(Basis.looking_at(ahead, _ground_up), pos)
+
+
+func _build_screen() -> void:
+	screen = Screen.new()
+	screen.size_m = Vector2(0.96, 0.6)
+	screen.title = "ROVER  R-%d" % (slot + 1)
+	screen.buttons = [&"haul", &"stay", &"home"]
+	var tilt := deg_to_rad(40.0)
+	var facing := Vector3(0, sin(tilt), cos(tilt))
+	var up := Vector3(0, cos(tilt), -sin(tilt))
+	screen.transform = Transform3D(Basis(Vector3.RIGHT, up, facing), Vector3(0, 1.45, 0.92))
+	add_child(screen)
+	_add_box(Vector3(0.1, 0.35, 0.1), _hull, Vector3(0, 1.2, 0.85))
+	var frame := _add_box(Vector3(1.04, 0.68, 0.04), _material(Color(0.2, 0.21, 0.24), 0.6, 0.4), Vector3(0, 1.45, 0.92) - facing * 0.03)
+	frame.basis = Basis(Vector3.RIGHT, up, facing)
+	screen.info = func() -> String:
+		var doing: String = "HOLDING HERE" if order == &"stay" else {
+			Task.PARKED: "PARKED" if order == &"home" else "WAITING FOR A LOAD",
+			Task.OUTBOUND: "DRIVING TO A RIG",
+			Task.LOADING: "LOADING",
+			Task.HOMEBOUND: "DRIVING HOME",
+		}[task]
+		return "%s\nCARGO %d / %d    HULL %d%%" % [doing, cargo, CAPACITY, roundi(health / HEALTH * 100.0)]
+	screen.button = func(action: StringName) -> Array:
+		var names := {&"haul": "HAUL", &"stay": "STAY", &"home": "GO HOME"}
+		return [names[action], true, order == action]
+	screen.pressed = func(action: StringName) -> String:
+		order = action
+		return {&"haul": "HAULING.", &"stay": "HOLDING POSITION.", &"home": "HEADING HOME."}[action]
 
 
 func _build_model() -> void:

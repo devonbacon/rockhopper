@@ -280,8 +280,40 @@ func deliver(amount: int) -> void:
 	stock += amount
 
 
-## Prints a rover at the pod from the bank, if there's enough in it. Done
-## from the pod's screen.
+func screens() -> Array[Screen]:
+	var all: Array[Screen] = [pod.screen]
+	for rover in rovers:
+		all.push_back(rover.screen)
+	return all
+
+
+func _wire_pod_screen() -> void:
+	var screen := pod.screen
+	screen.info = func() -> String:
+		var out := 0
+		for rover in rovers:
+			if rover.task != Rover.Task.PARKED:
+				out += 1
+		var left := maxf(0.0, MISSION - time)
+		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%\nLAUNCH IN     %d:%02d" % [
+			stock, QUOTA, rovers.size(), out, roundi(battery / BATTERY * 100.0), int(left) / 60, int(left) % 60]
+	screen.button = func(action: StringName) -> Array:
+		if action == &"rover":
+			return ["PRINT ROVER   %d ORE" % Fixture.COST[&"rover"], stock >= Fixture.COST[&"rover"], false]
+		return ["HAND IN ORE   %d CARRIED" % carried, carried > 0, false]
+	screen.pressed = func(action: StringName) -> String:
+		if action == &"rover":
+			if print_rover():
+				return "ROVER PRINTED. %d ON THE ROSTER." % rovers.size()
+			return "NOT ENOUGH ORE BANKED: A ROVER NEEDS %d." % Fixture.COST[&"rover"]
+		if carried == 0:
+			return "NOTHING TO HAND IN."
+		var amount := carried
+		hand_in()
+		return "%d ORE BANKED." % amount
+
+
+## Prints a rover at the pod from the bank, if there's enough in it.
 func print_rover() -> bool:
 	if stock < Fixture.COST[&"rover"]:
 		return false
@@ -454,7 +486,7 @@ func _place_pod() -> void:
 			break
 	pod = Fixture.make(&"pod", landing[0] - Vector3.UP * 0.4, Vector3.UP)
 	add_child(pod)
-	pod.screen.game = self
+	_wire_pod_screen()
 
 
 ## Big outcrops that never run out, spread well apart, none too near the
@@ -524,7 +556,7 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 
 
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
-## cave|screen, rig (builds one on the deposit nearest the pod and stands you by
+## cave|screen|rover, rig (builds one on the deposit nearest the pod and stands you by
 ## it), lamps=N (around you), spiders=N (in front of you), tool=,
 ## radial=N (the build menu up, N chosen, -1 for none), pitch=
 ## degrees, and shot=path.png and shot_at=seconds to save a screenshot and
@@ -542,6 +574,10 @@ func _debug_setup() -> void:
 			var front: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 2.6
 			var spot: Array = terrain.surface_point(front)
 			place_player(spot[0] + Vector3.UP * 0.3, pod.screen.global_position)
+		"rover":
+			var rover := rovers[0]
+			var behind: Vector3 = rover.screen.global_position + rover.global_basis.z * 1.6
+			place_player(Vector3(behind.x, terrain.surface_point(behind)[0].y + 0.3, behind.z), rover.screen.global_position)
 		"cave":
 			var chamber := terrain.chambers[0]
 			var floor_point: Array = terrain.surface_point(Vector3(chamber.x, 0, chamber.z))

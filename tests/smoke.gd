@@ -59,6 +59,16 @@ func _physics_process(delta: float) -> bool:
 			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored, _rig.stalled if _rig.stalled != "" else "drilling", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
 			if _game.stock <= _stock_before:
 				push_error("the rover brought nothing home")
+			var screen := rover.screen
+			var rect: Rect2 = screen._rects[&"home"]
+			var uv := rect.get_center() / Vector2(Screen.PIXELS)
+			var on := screen.global_transform * Vector3((uv.x - 0.5) * screen.size_m.x, (0.5 - uv.y) * screen.size_m.y, 0.0)
+			var normal := screen.global_basis.z.normalized()
+			screen.aim(on + normal * 1.2, -normal)
+			print("aimed at the rover's GO HOME button: hover %s" % screen.hover)
+			screen.press()
+			if rover.order != &"home":
+				push_error("pressing the rover's screen didn't send it home")
 			var forecast := _game.sun.forecast(player.camera.global_position, _game.get_world_3d().direct_space_state, 120)
 			var dark := forecast.find(false)
 			var light_again := forecast.find(true, maxi(dark, 0))
@@ -71,6 +81,8 @@ func _physics_process(delta: float) -> bool:
 		2:
 			if _elapsed < 124.0:
 				return false
+			if !_game.rovers.is_empty():
+				print("sent home 30 s ago: rover %s, %.0f m from the pod" % [Rover.Task.keys()[_game.rovers[0].task], _game.rovers[0].global_position.distance_to(_game.pod.global_position)])
 			print("30 s into the night: %d spiders, health %.0f, state %s, rovers %d, built %d, rig %s" % [_game.spiders.size(), _game.health, Game.State.keys()[_game.state], _game.rovers.size(), _game.built.size(), _rig.stalled if is_instance_valid(_rig) else "destroyed"])
 			if _game.spiders.is_empty() and _game.state == Game.State.PLAYING:
 				push_error("no spiders came")

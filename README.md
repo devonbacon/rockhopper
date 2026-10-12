@@ -61,6 +61,10 @@ hurt you for a few seconds.
 - **The pod's screen:** look at a button on it and press E, to print a
   rover (4 ore) or hand in what you carry. It also shows what's banked,
   the rovers, the battery and the launch clock.
+- **A rover's screen** (on a stand at its back): HAUL is the usual, STAY
+  stops it where it is, GO HOME drives it back to park, unloading what
+  it carries, until you tell it to haul again. It also shows what the
+  rover's doing, its cargo and its hull.
 - **F** toggles the headlamp. **Esc** frees the mouse; click to take it
   back.
 - **R** after a mission: a new map. **Shift+R:** the same one.
@@ -85,7 +89,8 @@ User arguments after `--`, e.g.
 - `seed=N`: the map.
 - `time=S`: start S seconds in (`time=150` is dusk).
 - `view=overview` looks down on the whole crater; `view=cave` stands
-  you in a cave; `view=screen` in front of the pod's screen.
+  you in a cave; `view=screen` in front of the pod's screen; `view=rover`
+  behind the first rover.
 - `rig` builds a rig on the deposit nearest the pod and stands you
   beside it.
 - `lamps=N` builds N lamps around you.
@@ -104,7 +109,8 @@ User arguments after `--`, e.g.
   from it for rovers. No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, lamps, panels and rigs.
-- `world/pod_screen.gd`, `world/screen.gdshader`: the pod's screen.
+- `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and
+  the rovers.
 - `world/rover.gd`: the haulers.
 - `world/spider.gd`: the spiders.
 - `player/player.gd`: you.

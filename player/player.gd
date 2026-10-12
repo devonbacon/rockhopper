@@ -69,6 +69,7 @@ var _use_target: Fixture
 var _use_held := 0.0
 var _use_was_down := false
 var _radial_aim := Vector2.ZERO
+var _screen: Screen
 var _cooldown := 0.0
 var _recoil := 0.0
 var _gun: Node3D
@@ -240,14 +241,13 @@ func _use(delta: float) -> void:
 		_use_held = 0.0
 	prompt = ""
 	progress = 0.0
-	game.pod.screen.hover = &""
-	if !target:
+	if _aim_screen():
+		if _screen.hover != &"":
+			prompt = "[E] " + String(_screen.button.call(_screen.hover)[0]).capitalize()
+			if pressed:
+				_screen.press()
 		return
-	if target.kind == &"pod" and target.screen.aim(camera.global_position, -camera.global_basis.z):
-		var labels := {&"rover": "Print a rover", &"hand_in": "Hand in ore"}
-		prompt = ("[E] " + labels[target.screen.hover]) if target.screen.hover != &"" else ""
-		if pressed:
-			target.screen.press()
+	if !target:
 		return
 	match target.kind:
 		&"deposit":
@@ -272,6 +272,26 @@ func _use(delta: float) -> void:
 		&"lamp", &"panel":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.pick_up(target))
+
+
+## Whether the crosshair's on a screen within reach; if so it's _screen.
+func _aim_screen() -> bool:
+	if is_instance_valid(_screen):
+		_screen.hover = &""
+	_screen = null
+	var from := camera.global_position
+	var dir := -camera.global_basis.z
+	var nearest := REACH
+	for screen in game.screens():
+		var distance := screen.aim(from, dir)
+		if distance < nearest:
+			if _screen:
+				_screen.hover = &""
+			nearest = distance
+			_screen = screen
+		else:
+			screen.hover = &""
+	return _screen != null
 
 
 func _hold(down: bool, delta: float, needed: float, done: Callable) -> void:
