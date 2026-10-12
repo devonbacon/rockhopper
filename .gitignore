@@ -1,0 +1,9 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Godot editor save temp files
+*.tmp
+
+# Claude Code local state (agent worktrees)
+.claude/
