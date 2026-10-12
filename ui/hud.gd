@@ -94,7 +94,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func set_paused(paused: bool) -> void:
-	get_tree().paused = paused
+	get_tree().paused = paused and !Net.networked()
 	_pause.visible = paused
 	var playing := game.state == Game.State.PLAYING
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if !paused and playing else Input.MOUSE_MODE_VISIBLE
@@ -113,9 +113,13 @@ func _build_pause() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 	for entry: Array in [["Resume", func() -> void: set_paused(false)],
-			["New map", func() -> void:
+			["Leave" if Net.networked() else "New map", func() -> void:
 				get_tree().paused = false
-				get_tree().reload_current_scene()],
+				if Net.networked():
+					Net.leave()
+					get_tree().change_scene_to_file("res://menu/menu.tscn")
+				else:
+					get_tree().reload_current_scene()],
 			["Quit", func() -> void: get_tree().quit()]]:
 		var button := Button.new()
 		button.text = entry[0]

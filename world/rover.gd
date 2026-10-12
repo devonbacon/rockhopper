@@ -24,6 +24,11 @@ const GIVE_UP_FOR := 30.0
 const MAX_STEP := 1.0
 
 var game: Game
+var net_id := 0
+## On clients: no mind of its own, just eased to where the server says.
+var puppet := false
+var target_position := Vector3.ZERO
+var target_basis := Basis.IDENTITY
 var task := Task.PARKED
 ## &"haul", &"stay" or &"home", from its screen.
 var order := &"haul"
@@ -59,6 +64,15 @@ func _physics_process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta * 4.0)
 	_hull.emission = Color(1.0, 0.3, 0.2) * _flash
 	_load.visible = cargo > 0
+	if puppet:
+		var before := global_position
+		var blend := 1.0 - exp(-12.0 * delta)
+		global_position = global_position.lerp(target_position, blend)
+		global_basis = global_basis.orthonormalized().slerp(target_basis, blend)
+		var rolled := before.distance_to(global_position)
+		for wheel in _wheels:
+			wheel.rotate_object_local(Vector3.RIGHT, -rolled / WHEEL_RADIUS)
+		return
 	if order == &"stay":
 		return
 	if order == &"home" and (task == Task.OUTBOUND or task == Task.LOADING):
@@ -99,6 +113,13 @@ func _physics_process(delta: float) -> void:
 ## Whether it's somewhere a spider could get at it.
 func exposed() -> bool:
 	return task != Task.PARKED or global_position.distance_to(game.pod.global_position) > 9.0
+
+
+## On clients: the server says its health is now this.
+func show_health(value: float) -> void:
+	if value < health:
+		_flash = 1.0
+	health = value
 
 
 func damage(amount: float) -> void:

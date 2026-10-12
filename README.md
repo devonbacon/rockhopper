@@ -64,6 +64,27 @@ help them), or anything you've built. What they destroy is gone.
 Sunlight sends them back under. Your health comes back once nothing's
 hurt you for a few seconds.
 
+## Playing together
+
+The menu offers solo, hosting, or joining a server, as a soldier or the
+commander (who, for now, plays as a soldier too). The server runs the
+world: spiders, rovers, building, power, research, the bank and the
+clock. Each client moves its own soldier and asks the server for
+everything else. Every client generates the same map from the server's
+seed. Online, freezing or being killed sends you back to the pod without
+what you carried, rather than ending the mission, and a new mission
+starts 15 s after one ends.
+
+From the command line, after `--`:
+
+- `server` (with `port=`, default 7777, and `seed=`): a dedicated server,
+  headless, with no player of its own.
+- `host`: a server with you playing on it.
+- `join=address:port`, with `name=` and `role=soldier|commander`.
+
+Debug: `probe=builder|walker|stander` scripts a joined client, for
+checking a server headlessly.
+
 ## Controls
 
 - **Move:** mouse looks, WASD walks, Shift runs (slowly until you've
@@ -147,9 +168,12 @@ User arguments after `--`, e.g.
 - `world/spider.gd`: the spiders.
 - `player/player.gd`: you.
 - `game/game.gd`: the mission, power, warmth, building, the spiders'
-  spawning.
+  spawning, and the server/client split (snapshots, requests).
+- `net/net.gd` (autoload `Net`): connections and every RPC.
+- `game/avatar.gd`: other soldiers.
+- `menu/menu.gd`: the front door.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,
-  `Godot --headless --fixed-fps 60 --path . -s tests/smoke.gd`. It plays
+  `Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn`. It plays
   a minute and a half of a rig and a rover working by day, then half a
   minute of night.

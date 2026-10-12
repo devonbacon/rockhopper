@@ -15,8 +15,14 @@ extends Node3D
 ## launch is the score.
 ##
 ## In the dark, spiders climb out of the ground wherever no light falls,
-## more of them as the mission goes on, and go for you, rovers out on the
-## road, and what you've built. Sunlight sends them back under.
+## more of them as the mission goes on, and go for soldiers, rovers out on
+## the road, and what's been built. Sunlight sends them back under.
+##
+## Networked, the server (or solo) runs all of that; clients mirror it from
+## snapshots, and send what their soldier does as requests (act()). Every
+## soldier has their own health, warmth and pockets (stats); health and the
+## rest read and write the local soldier's, or, while the server handles a
+## request, the requester's.
 
 enum State { PLAYING, WON, LOST }
 
@@ -64,6 +70,12 @@ const SPIDERS_START := 5
 const SPIDERS_END := 16
 const SPAWN_GAP_START := 4.0
 const SPAWN_GAP_END := 1.5
+const SNAPSHOT_EVERY := 0.05
+const SLOW_EVERY := 0.25
+const MOVE_EVERY := 1.0 / 30.0
+const RESTART_AFTER := 15.0
+## Net ids below this are the world as generated, the same on every peer.
+const FIRST_SPAWNED_ID := 1000
 
 ## Kept across a restart that keeps the seed.
 static var _last_seed := 0
@@ -76,43 +88,72 @@ var battery := START_BATTERY
 ## This frame's power in and out, per second, for the HUD.
 var power_in := 0.0
 var power_out := 0.0
-## Ore in the pod, and in your pockets.
+## Ore in the pod.
 var stock := START_STOCK
-var carried := 0
-var warmth := 100.0
-var health := HEALTH
-## How recently you were hurt, 1 fading to 0, for the HUD.
-var hurt := 0.0
-var lit_by := ""
 var researched := {}
+## Per soldier, by peer id: health, warmth, carried, lit_by, hurt,
+## since_hurt.
+var stats := {}
+## Per soldier, by peer id: the local Player, or an Avatar.
+var bodies := {}
+
+var health: float:
+	get: return _me().health
+	set(value): _me().health = value
+var warmth: float:
+	get: return _me().warmth
+	set(value): _me().warmth = value
+var carried: int:
+	get: return _me().carried
+	set(value): _me().carried = value
+var lit_by: String:
+	get: return _me().lit_by
+	set(value): _me().lit_by = value
+## How recently you were hurt, 1 fading to 0, for the HUD.
+var hurt: float:
+	get: return _me().hurt
+	set(value): _me().hurt = value
 
 var terrain: Terrain
 var sun: Sun
 var player: Player
 var pod: Fixture
 var hud: Hud
-## Lamps, panels and rigs.
+## Lamps, panels, batteries, rigs and labs.
 var built: Array[Fixture] = []
 var ores: Array[Fixture] = []
 var deposits: Array[Fixture] = []
 var rovers: Array[Rover] = []
 var spiders: Array[Spider] = []
+## Net id -> node, for everything that has one.
+var entities := {}
 
+var _next_id := 1
+var _acting := 0
+var _nobody := _new_stats()
 var _rng := RandomNumberGenerator.new()
 var _light_check := 0.0
-var _since_hurt := 99.0
 var _spawn_in := 2.0
+var _snap_in := 0.0
+var _slow_in := 0.0
+var _move_in := 0.0
+var _end_in := INF
 var _args := {}
 
 
 func _ready() -> void:
+	Net.game = self
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
-	seed_value = int(_args.seed) if _args.has("seed") else (_last_seed if _last_seed != 0 else randi())
+	if Net.networked():
+		seed_value = Net.seed_value
+		time = Net.start_time
+	else:
+		seed_value = int(_args.seed) if _args.has("seed") else (_last_seed if _last_seed != 0 else randi())
+		time = float(_args.get("time", "0"))
 	_last_seed = 0
 	_rng.seed = seed_value
-	time = float(_args.get("time", "0"))
 	_add_environment()
 	terrain = Terrain.new()
 	add_child(terrain)
@@ -123,20 +164,44 @@ func _ready() -> void:
 	_place_pod()
 	_place_deposits()
 	_place_ore()
-	for i in START_ROVERS:
-		_add_rover()
-	player = Player.new()
-	player.game = self
-	add_child(player)
-	_spawn_player()
-	hud = Hud.new()
-	hud.game = self
-	add_child(hud)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	_debug_setup()
+	_next_id = FIRST_SPAWNED_ID
+	if Net.authority():
+		for i in START_ROVERS:
+			_add_rover()
+	if Net.has_local_player():
+		var me := Net.local_id()
+		player = Player.new()
+		player.game = self
+		player.set_meta("peer", me)
+		add_child(player)
+		stats[me] = _new_stats()
+		bodies[me] = player
+		_spawn_player()
+		hud = Hud.new()
+		hud.game = self
+		add_child(hud)
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		if Net.mode == Net.Mode.CLIENT:
+			Net.ready_to_play.rpc_id(1)
+		_debug_setup()
 
 
 func _physics_process(delta: float) -> void:
+	if Net.authority():
+		_simulate(delta)
+		if Net.networked():
+			_send_snapshots(delta)
+	else:
+		if state == State.PLAYING:
+			time += delta
+		sun.set_time(time)
+		_move_in -= delta
+		if player and _move_in <= 0.0:
+			_move_in = MOVE_EVERY
+			Net.move.rpc_id(1, player.global_position, player.global_rotation.y, player.pitch)
+
+
+func _simulate(delta: float) -> void:
 	if state == State.PLAYING:
 		time += delta
 	sun.set_time(time)
@@ -167,7 +232,7 @@ func _physics_process(delta: float) -> void:
 				lab.research_time += delta
 				if lab.research_time >= UPGRADES[lab.researching].time:
 					researched[lab.researching] = true
-					hud.announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize())
+					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize())
 					lab.researching = &""
 	var full := capacity()
 	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
@@ -175,6 +240,10 @@ func _physics_process(delta: float) -> void:
 		if fixture.kind == &"battery":
 			fixture.charge = battery / full
 	if state != State.PLAYING:
+		_end_in -= delta
+		if _end_in <= 0.0 and Net.networked():
+			_end_in = INF
+			Net.restart()
 		return
 	for fixture in built:
 		if fixture.kind == &"drill":
@@ -183,32 +252,82 @@ func _physics_process(delta: float) -> void:
 	for rover in rovers.duplicate():
 		if rover.health <= 0.0:
 			rovers.erase(rover)
+			entities.erase(rover.net_id)
 			rover.queue_free()
 	for fixture in built.duplicate():
 		if fixture.health <= 0.0:
 			_remove_built(fixture)
-	lit_by = _light_on_player()
-	warmth = clampf(warmth + (WARM_RATE if lit_by != "" else -COLD_RATE * (0.5 if has(&"heated") else 1.0)) * delta, 0.0, 100.0)
-	_since_hurt += delta
-	hurt = maxf(0.0, hurt - delta * 2.0)
-	if _since_hurt > HEAL_DELAY:
-		health = minf(max_health(), health + HEAL_RATE * delta)
-	if warmth <= 0.0:
-		_end(State.LOST, "You froze in the dark.")
-	elif health <= 0.0:
-		_end(State.LOST, "The spiders got you.")
-	elif time >= MISSION:
-		if player.global_position.distance_to(pod.global_position) < POD_RANGE + 2.0:
+	for peer in bodies.keys():
+		_look_after(peer, delta)
+	if time >= MISSION:
+		var aboard := 0
+		for body: Node3D in bodies.values():
+			if body.global_position.distance_to(pod.global_position) < POD_RANGE + 2.0:
+				aboard += 1
+		if aboard > 0:
 			_end(State.WON, "Extracted with %d of %d ore in the pod.%s" % [stock, QUOTA, " Quota met." if stock >= QUOTA else ""])
 		else:
-			_end(State.LOST, "The pod launched without you.")
+			_end(State.LOST, "The pod launched without anyone.")
+
+
+## One soldier's warmth and health, and a trip back to the pod if they've
+## frozen or been killed.
+func _look_after(peer: int, delta: float) -> void:
+	var s: Dictionary = stats[peer]
+	var body: Node3D = bodies[peer]
+	var head := body.global_position + Terrain.up_at(body.global_position) * 1.65
+	var light := lit_at(head)
+	if light == "" and battery > 0.0 and head.distance_to(pod.global_position) < POD_RANGE:
+		light = "pod"
+	s.lit_by = light
+	s.warmth = clampf(s.warmth + (WARM_RATE if light != "" else -COLD_RATE * (0.5 if has(&"heated") else 1.0)) * delta, 0.0, 100.0)
+	s.since_hurt += delta
+	s.hurt = maxf(0.0, s.hurt - delta * 2.0)
+	if s.since_hurt > HEAL_DELAY:
+		s.health = minf(max_health(), s.health + HEAL_RATE * delta)
+	if s.warmth <= 0.0:
+		_respawn(peer, "You froze in the dark. Back at the pod, without what you carried.")
+	elif s.health <= 0.0:
+		_respawn(peer, "The spiders got you. Back at the pod, without what you carried.")
+
+
+func _respawn(peer: int, why: String) -> void:
+	stats[peer] = _new_stats()
+	var spot := _spawn_spot_by_pod(peer)
+	if peer == Net.local_id() and player:
+		place_player(spot, pod.global_position)
+		player._say(why)
+	else:
+		var body: Node3D = bodies[peer]
+		body.global_position = spot
+		if body is Avatar:
+			(body as Avatar).target_position = spot
+		Net.event.rpc_id(peer, &"respawn", [spot, why])
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if Net.networked():
+		return
 	if event is InputEventKey and event.pressed and !event.echo and event.physical_keycode == KEY_R and state != State.PLAYING:
 		if event.shift_pressed:
 			_last_seed = seed_value
 		get_tree().reload_current_scene()
+
+
+func _me() -> Dictionary:
+	return stats.get(_acting if _acting != 0 else Net.local_id(), _nobody)
+
+
+func _new_stats() -> Dictionary:
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0}
+
+
+func _track(node: Node, id := 0) -> void:
+	if id == 0:
+		id = _next_id
+		_next_id += 1
+	node.net_id = id
+	entities[id] = node
 
 
 func has(upgrade: StringName) -> bool:
@@ -233,6 +352,304 @@ func researching(upgrade: StringName) -> Fixture:
 		if lab.kind == &"lab" and lab.researching == upgrade:
 			return lab
 	return null
+
+
+## Something the local soldier does to the world: done here if this is the
+## server (or solo), asked of the server if not.
+func act(action: StringName, args: Array) -> void:
+	if Net.authority():
+		handle(Net.local_id(), action, args)
+	else:
+		Net.request.rpc_id(1, action, args)
+
+
+## Server: does what peer asked, as peer.
+func handle(peer: int, action: StringName, args: Array) -> void:
+	if !stats.has(peer):
+		return
+	_acting = peer
+	var target: Node = entities.get(args[0], null) if !args.is_empty() and args[0] is int else null
+	match action:
+		&"mine":
+			if target is Fixture and (ores.has(target) or deposits.has(target)):
+				mine(target)
+		&"pick_up":
+			if target is Fixture and built.has(target):
+				pick_up(target)
+		&"empty_rig":
+			if target is Fixture and built.has(target):
+				empty_rig(target)
+		&"hand_in":
+			hand_in()
+		&"build":
+			if can_build(args[0], args[1]):
+				build(args[0], args[1], args[2], args[3])
+			elif OS.is_debug_build():
+				print("refused to build %s (%s) at %s: stock %d, has cost %s, pod %.1f m away" % [args[0], type_string(typeof(args[0])), args[1], stock, Fixture.COST.has(args[0]), pod.global_position.distance_to(args[1])])
+		&"press":
+			if target and "screen" in target and target.screen:
+				var reply: String = target.screen.pressed.call(args[1])
+				if peer == Net.local_id():
+					target.screen.reply(reply)
+				else:
+					Net.event.rpc_id(peer, &"reply", [args[0], reply])
+		&"hit":
+			if target is Spider:
+				(target as Spider).hit(args[1])
+		&"fling":
+			if target is Spider:
+				(target as Spider).fling(args[1], args[2])
+		&"shot":
+			for id in Net.peers:
+				if id != peer and id != Net.local_id():
+					Net.effect.rpc_id(id, &"tracer", args)
+			if peer != Net.local_id() and player:
+				player._tracer(args[0], args[1])
+	_acting = 0
+
+
+## Client: something the server's telling this peer alone.
+func on_event(kind: StringName, args: Array) -> void:
+	match kind:
+		&"reply":
+			var owner: Node = entities.get(args[0], null)
+			if owner and "screen" in owner and owner.screen:
+				owner.screen.reply(args[1])
+		&"respawn":
+			if player:
+				place_player(args[0], pod.global_position)
+				player._say(args[1])
+		&"announce":
+			if hud:
+				hud.announce(args[0])
+		&"tracer":
+			if player:
+				player._tracer(args[0], args[1])
+
+
+func _announce(text: String) -> void:
+	if hud:
+		hud.announce(text)
+	if Net.networked():
+		for id in Net.peers:
+			if id != Net.local_id():
+				Net.event.rpc_id(id, &"announce", [text])
+
+
+func add_soldier(peer: int) -> void:
+	if bodies.has(peer):
+		return
+	stats[peer] = _new_stats()
+	var avatar := _make_avatar(peer)
+	var spot := _spawn_spot_by_pod(peer)
+	avatar.global_position = spot
+	avatar.target_position = spot
+
+
+func remove_soldier(peer: int) -> void:
+	if bodies.has(peer) and bodies[peer] != player:
+		bodies[peer].queue_free()
+	bodies.erase(peer)
+	stats.erase(peer)
+
+
+func _make_avatar(peer: int) -> Avatar:
+	var avatar := Avatar.new()
+	avatar.peer = peer
+	avatar.set_meta("peer", peer)
+	add_child(avatar)
+	var info: Dictionary = Net.peers.get(peer, {})
+	avatar.set_label("%s%s" % [info.get("name", "Soldier"), " (commander)" if info.get("role", &"soldier") == &"commander" else ""])
+	bodies[peer] = avatar
+	return avatar
+
+
+func remote_move(peer: int, pos: Vector3, yaw: float, pitch: float) -> void:
+	var body: Node3D = bodies.get(peer, null)
+	if body is Avatar:
+		var avatar := body as Avatar
+		avatar.target_position = pos
+		avatar.target_yaw = yaw
+		avatar.pitch = pitch
+
+
+func _send_snapshots(delta: float) -> void:
+	_snap_in -= delta
+	_slow_in -= delta
+	var fast: Array = []
+	var slow: Array = []
+	if _snap_in <= 0.0:
+		_snap_in = SNAPSHOT_EVERY
+		fast = _fast_state()
+	if _slow_in <= 0.0:
+		_slow_in = SLOW_EVERY
+		slow = _slow_state()
+	for id in stats:
+		if id == Net.local_id():
+			continue
+		if !fast.is_empty():
+			var s: Dictionary = stats[id]
+			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt]])
+		if !slow.is_empty():
+			Net.slow_snapshot.rpc_id(id, slow)
+
+
+func _fast_state() -> Array:
+	var soldiers: Array = []
+	for peer in bodies:
+		var body: Node3D = bodies[peer]
+		var pitch: float = body.pitch if "pitch" in body else 0.0
+		soldiers.append([peer, body.global_position, body.global_rotation.y, pitch])
+	var spider_rows: Array = []
+	for spider in spiders:
+		spider_rows.append([spider.net_id, spider.global_position, spider.global_basis.get_rotation_quaternion(), spider.health])
+	var rover_rows: Array = []
+	for rover in rovers:
+		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot])
+	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows]
+
+
+func _slow_state() -> Array:
+	var rows: Array = []
+	for f in built:
+		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0])
+	var alive := PackedInt32Array()
+	for ore in ores:
+		alive.append(ore.net_id)
+	return [rows, alive, researched.keys()]
+
+
+## Client: the server's latest of everything that moves.
+func apply_snapshot(data: Array) -> void:
+	var f: Array = data[0]
+	time = f[0]
+	battery = f[1]
+	power_in = f[2]
+	power_out = f[3]
+	stock = f[4]
+	if state == State.PLAYING and f[5] != State.PLAYING:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	state = f[5]
+	outcome = f[6]
+	var seen := {}
+	for row: Array in f[7]:
+		var peer: int = row[0]
+		seen[peer] = true
+		if peer == Net.local_id():
+			continue
+		var avatar: Avatar = bodies.get(peer, null)
+		if !avatar:
+			avatar = _make_avatar(peer)
+			avatar.global_position = row[1]
+			stats[peer] = _new_stats()
+		remote_move(peer, row[1], row[2], row[3])
+	for peer in bodies.keys():
+		if !seen.has(peer) and peer != Net.local_id():
+			remove_soldier(peer)
+	seen.clear()
+	for row: Array in f[8]:
+		seen[row[0]] = true
+		var spider: Spider = entities.get(row[0], null)
+		if !spider:
+			spider = Spider.new()
+			spider.game = self
+			spider.puppet = true
+			spider.position = row[1]
+			add_child(spider)
+			_track(spider, row[0])
+			spiders.push_back(spider)
+		spider.target_position = row[1]
+		spider.target_basis = Basis(row[2])
+		spider.show_health(row[3])
+	for spider in spiders.duplicate():
+		if !seen.has(spider.net_id):
+			spiders.erase(spider)
+			entities.erase(spider.net_id)
+			spider.queue_free()
+	seen.clear()
+	for row: Array in f[9]:
+		seen[row[0]] = true
+		var rover: Rover = entities.get(row[0], null)
+		if !rover:
+			rover = Rover.new()
+			rover.game = self
+			rover.puppet = true
+			rover.slot = row[7]
+			add_child(rover)
+			rover.global_position = row[1]
+			_track(rover, row[0])
+			rovers.push_back(rover)
+			_send_presses(rover)
+		rover.target_position = row[1]
+		rover.target_basis = Basis(row[2])
+		rover.task = row[3]
+		rover.order = row[4]
+		rover.cargo = row[5]
+		rover.show_health(row[6])
+	for rover in rovers.duplicate():
+		if !seen.has(rover.net_id):
+			rovers.erase(rover)
+			entities.erase(rover.net_id)
+			rover.queue_free()
+	var mine: Array = data[1]
+	var s: Dictionary = _me()
+	s.health = mine[0]
+	s.warmth = mine[1]
+	s.carried = mine[2]
+	s.lit_by = mine[3]
+	s.hurt = mine[4]
+
+
+## Client: the server's latest of what's built, what ore's left, and what's
+## been researched.
+func apply_slow(data: Array) -> void:
+	var seen := {}
+	for row: Array in data[0]:
+		seen[row[0]] = true
+		var fixture: Fixture = entities.get(row[0], null)
+		if !fixture:
+			fixture = Fixture.make(row[1], row[2], row[4])
+			fixture.basis = Basis(row[3])
+			if row[13] != 0 and entities.has(row[13]):
+				fixture.deposit = entities[row[13]]
+				fixture.deposit.rig = fixture
+			add_child(fixture)
+			_track(fixture, row[0])
+			built.push_back(fixture)
+			if fixture.kind == &"lab":
+				_wire_lab_screen(fixture)
+				_send_presses(fixture)
+		fixture.health = row[5]
+		if fixture.kind == &"lamp" and fixture.on != row[6]:
+			fixture.set_on(row[6])
+		fixture.stored = row[7]
+		fixture.stalled = row[8]
+		fixture.researching = row[9]
+		fixture.research_time = row[10]
+		fixture.unpowered = row[11]
+		fixture.charge = row[12]
+	for fixture in built.duplicate():
+		if !seen.has(fixture.net_id):
+			_remove_built(fixture)
+	var alive := {}
+	for id in data[1]:
+		alive[id] = true
+	for ore in ores.duplicate():
+		if !alive.has(ore.net_id):
+			ores.erase(ore)
+			entities.erase(ore.net_id)
+			ore.queue_free()
+	for upgrade: StringName in data[2]:
+		if !researched.has(upgrade):
+			researched[upgrade] = true
+			if hud:
+				hud.announce("Researched: %s" % String(UPGRADES[upgrade].name).capitalize())
+
+
+## Client: presses on this thing's screen go to the server.
+func _send_presses(owner: Node) -> void:
+	if Net.mode == Net.Mode.CLIENT:
+		owner.screen.send = func(action: StringName) -> void: act(&"press", [owner.net_id, action])
 
 
 func _wire_lab_screen(lab: Fixture) -> void:
@@ -305,18 +722,9 @@ func lit_at(pos: Vector3) -> String:
 	return ""
 
 
-## What's keeping the player warm: "sun", "lamp", "pod", or "" for nothing.
-func _light_on_player() -> String:
-	var head := player.camera.global_position
-	var light := lit_at(head)
-	if light == "" and battery > 0.0 and head.distance_to(pod.global_position) < POD_RANGE:
-		return "pod"
-	return light
-
-
 ## Whether kind can go at pos; for a rig, pos is the deposit's.
 func can_build(kind: StringName, pos: Vector3) -> bool:
-	if stock < Fixture.COST[kind]:
+	if !Fixture.COST.has(kind) or stock < Fixture.COST[kind]:
 		return false
 	if kind == &"drill":
 		var deposit := deposit_at(pos)
@@ -330,7 +738,8 @@ func can_build(kind: StringName, pos: Vector3) -> bool:
 	return true
 
 
-func build(kind: StringName, pos: Vector3, normal: Vector3) -> void:
+## Builds kind at pos; a lab turns its screen towards facing_from.
+func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> void:
 	stock -= Fixture.COST[kind]
 	var fixture: Fixture
 	if kind == &"drill":
@@ -340,12 +749,13 @@ func build(kind: StringName, pos: Vector3, normal: Vector3) -> void:
 		deposit.rig = fixture
 	else:
 		fixture = Fixture.make(kind, pos, normal)
-	if kind == &"lab":
-		var towards := player.global_position - pos
+	if kind == &"lab" and facing_from != Vector3.INF:
+		var towards := facing_from - pos
 		towards -= normal * towards.dot(normal)
 		if towards.length() > 0.1:
 			fixture.basis = Basis.looking_at(-towards.normalized(), normal)
 	add_child(fixture)
+	_track(fixture)
 	built.push_back(fixture)
 	_light_check = 0.0
 	if kind == &"lab":
@@ -373,6 +783,7 @@ func _remove_built(fixture: Fixture) -> void:
 	if fixture.deposit:
 		fixture.deposit.rig = null
 	built.erase(fixture)
+	entities.erase(fixture.net_id)
 	fixture.queue_free()
 
 
@@ -384,6 +795,7 @@ func mine(ore: Fixture) -> void:
 		return
 	carried += ore.amount
 	ores.erase(ore)
+	entities.erase(ore.net_id)
 	ore.queue_free()
 
 
@@ -435,6 +847,7 @@ func _wire_pod_screen() -> void:
 		var amount := carried
 		hand_in()
 		return "%d ORE BANKED." % amount
+	_send_presses(pod)
 
 
 ## Prints a rover at the pod from the bank, if there's enough in it.
@@ -469,19 +882,22 @@ func pick_rig(rover: Rover) -> Fixture:
 	return best
 
 
-## The nearest thing a spider would bite: you, a rover out on the road, a
-## lamp, a panel or a rig. You count as a little nearer than you are.
+## The nearest thing a spider would bite: a soldier, a rover out on the
+## road, or something built. Soldiers count as a little nearer than they
+## are.
 func spider_target(spider: Spider) -> Node3D:
 	var from := spider.global_position
 	var best: Node3D = null
 	var best_distance := Spider.SIGHT
-	var candidates: Array[Node3D] = [player]
+	var candidates: Array[Node3D] = []
+	for body: Node3D in bodies.values():
+		candidates.push_back(body)
 	for rover in rovers:
 		if rover.exposed():
 			candidates.push_back(rover)
 	candidates.append_array(built)
 	for candidate in candidates:
-		var distance := from.distance_to(candidate.global_position) * (0.75 if candidate == player else 1.0)
+		var distance := from.distance_to(candidate.global_position) * (0.75 if candidate.has_meta("peer") else 1.0)
 		if distance < best_distance:
 			best_distance = distance
 			best = candidate
@@ -492,7 +908,7 @@ func spider_target(spider: Spider) -> Node3D:
 func bite_reach(target: Node3D) -> float:
 	if target is Rover:
 		return 2.0
-	if target == player:
+	if target.has_meta("peer"):
 		return 1.7
 	if target is Fixture and (target as Fixture).kind == &"drill":
 		return 2.8
@@ -502,10 +918,11 @@ func bite_reach(target: Node3D) -> float:
 func damage(target: Node3D, amount: float) -> void:
 	if state != State.PLAYING:
 		return
-	if target == player:
-		health -= amount
-		hurt = 1.0
-		_since_hurt = 0.0
+	if target.has_meta("peer"):
+		var s: Dictionary = stats.get(target.get_meta("peer"), _nobody)
+		s.health -= amount
+		s.hurt = 1.0
+		s.since_hurt = 0.0
 	elif target is Rover:
 		(target as Rover).damage(amount)
 	elif target is Fixture:
@@ -514,6 +931,7 @@ func damage(target: Node3D, amount: float) -> void:
 
 func remove_spider(spider: Spider) -> void:
 	spiders.erase(spider)
+	entities.erase(spider.net_id)
 	spider.queue_free()
 
 
@@ -522,6 +940,7 @@ func spawn_spider(spot: Vector3) -> void:
 	spider.game = self
 	spider.position = spot
 	add_child(spider)
+	_track(spider)
 	spiders.push_back(spider)
 
 
@@ -531,11 +950,12 @@ func _add_rover() -> void:
 	rover.slot = rovers.size()
 	add_child(rover)
 	rover.global_position = rover.park_point()
+	_track(rover)
 	rovers.push_back(rover)
 
 
-## Brings spiders up out of the ground, somewhere unlit not far from you, a
-## rover, or something you've built.
+## Brings spiders up out of the ground, somewhere unlit not far from a
+## soldier, a rover, or something built.
 func _spawn_spiders(delta: float) -> void:
 	_spawn_in -= delta
 	if _spawn_in > 0.0:
@@ -544,9 +964,13 @@ func _spawn_spiders(delta: float) -> void:
 	_spawn_in = lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress)
 	if spiders.size() >= roundi(lerpf(SPIDERS_START, SPIDERS_END, progress)):
 		return
-	var near: Array[Node3D] = [player, player, player]
+	var near: Array[Node3D] = []
+	for body: Node3D in bodies.values():
+		near.append_array([body, body, body])
 	near.append_array(rovers)
 	near.append_array(built)
+	if near.is_empty():
+		return
 	var focus: Node3D = near[_rng.randi() % near.size()]
 	for attempt in 4:
 		var spot := _spawn_spot(focus.global_position)
@@ -556,7 +980,7 @@ func _spawn_spiders(delta: float) -> void:
 
 
 ## Somewhere dark on the ground 12-28 m from around, inside the crater and
-## not too near you, or INF if this try didn't find one.
+## not too near any soldier, or INF if this try didn't find one.
 func _spawn_spot(around: Vector3) -> Vector3:
 	var up := Terrain.up_at(around)
 	var frame := Fixture.upright(up)
@@ -569,7 +993,10 @@ func _spawn_spot(around: Vector3) -> Vector3:
 	if hit.is_empty():
 		return Vector3.INF
 	var spot: Vector3 = hit.position
-	if spot.distance_to(player.global_position) < 10.0 or lit_at(spot + up * 0.6) != "":
+	for body: Node3D in bodies.values():
+		if spot.distance_to(body.global_position) < 10.0:
+			return Vector3.INF
+	if lit_at(spot + up * 0.6) != "":
 		return Vector3.INF
 	return spot
 
@@ -577,7 +1004,9 @@ func _spawn_spot(around: Vector3) -> Vector3:
 func _end(new_state: State, text: String) -> void:
 	state = new_state
 	outcome = text
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_end_in = RESTART_AFTER
+	if player:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _add_environment() -> void:
@@ -612,6 +1041,7 @@ func _place_pod() -> void:
 			break
 	pod = Fixture.make(&"pod", landing[0] - Vector3.UP * 0.4, Vector3.UP)
 	add_child(pod)
+	_track(pod)
 	_wire_pod_screen()
 
 
@@ -645,6 +1075,7 @@ func _place_deposits_from(spots: Array[Array], reachable_only: bool) -> void:
 		var up: Vector3 = (spot[1] + Terrain.up_at(p)).normalized()
 		var deposit := Fixture.make(&"deposit", p - up * 0.3, up)
 		add_child(deposit)
+		_track(deposit)
 		deposits.push_back(deposit)
 
 
@@ -666,6 +1097,7 @@ func _place_ore() -> void:
 			continue
 		var ore := Fixture.make(&"ore", p - spot[1] * 0.15, spot[1])
 		add_child(ore)
+		_track(ore)
 		ores.push_back(ore)
 
 
@@ -677,10 +1109,22 @@ func _shuffle(list: Array) -> void:
 		list[j] = t
 
 
+## Somewhere round the pod for a soldier to start, spread out by peer.
+func _spawn_spot_by_pod(peer: int) -> Vector3:
+	var frame := Fixture.upright(pod.normal)
+	var angle := 0.4 + (peer % 7) * 0.9
+	var spot: Array = terrain.surface_point(pod.global_position + (frame.x * cos(angle) + frame.z * sin(angle)) * 5.0)
+	return spot[0] + Terrain.up_at(spot[0]) * 0.6
+
+
 func _spawn_player() -> void:
 	var side := Fixture.upright(pod.normal).x
 	var spot: Array = terrain.surface_point(pod.global_position + side * 5.0)
-	place_player(spot[0] + Terrain.up_at(spot[0]) * 0.6, pod.global_position)
+	var at: Vector3 = spot[0] + Terrain.up_at(spot[0]) * 0.6
+	if Net.networked():
+		at = _spawn_spot_by_pod(Net.local_id())
+	place_player(at, pod.global_position)
+
 
 ## Puts the player at pos, standing up and facing towards target.
 func place_player(pos: Vector3, target: Vector3) -> void:
@@ -693,12 +1137,13 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 	player.velocity = Vector3.ZERO
 	player.align_up()
 
+
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
-## cave|screen|rover, lab (builds one ahead, researching), rig (builds one on the deposit nearest the pod and stands you by
-## it), lamps=N (around you), spiders=N (in front of you), tool=,
-## radial=N (the build menu up, N chosen, -1 for none), pitch=
-## degrees, and shot=path.png and shot_at=seconds to save a screenshot and
-## quit.
+## cave|screen|rover, lab (builds one ahead, researching), rig (builds one
+## on the deposit nearest the pod and stands you by it), lamps=N (around
+## you), spiders=N (in front of you), tool=, radial=N (the build menu up, N
+## chosen, -1 for none), aim, hammer, pause, pitch=degrees, and
+## shot=path.png and shot_at=seconds to save a screenshot and quit.
 func _debug_setup() -> void:
 	match _args.get("view", ""):
 		"overview":
@@ -713,10 +1158,11 @@ func _debug_setup() -> void:
 			var spot: Array = terrain.surface_point(front)
 			place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, pod.screen.global_position)
 		"rover":
-			var rover := rovers[0]
-			var behind: Vector3 = rover.screen.global_position + rover.global_basis.z * 1.6
-			var spot: Array = terrain.surface_point(behind)
-			place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, rover.screen.global_position)
+			if !rovers.is_empty():
+				var rover := rovers[0]
+				var behind: Vector3 = rover.screen.global_position + rover.global_basis.z * 1.6
+				var spot: Array = terrain.surface_point(behind)
+				place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, rover.screen.global_position)
 		"cave":
 			var chamber := terrain.chambers[0]
 			var centre := Vector3(chamber.x, chamber.y, chamber.z)
@@ -755,7 +1201,7 @@ func _debug_setup() -> void:
 		player.rotate_object_local(Vector3.UP, PI)
 		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
 		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"tanks"].cost
-		build(&"lab", ahead[0], ahead[1])
+		build(&"lab", ahead[0], ahead[1], player.global_position)
 		built[-1].screen.pressed.call(&"tanks")
 	player.debug_aim = _args.has("aim")
 	if _args.has("hammer"):
@@ -764,9 +1210,59 @@ func _debug_setup() -> void:
 		hud.set_paused(true)
 	if _args.has("pitch"):
 		player.look(deg_to_rad(float(_args.pitch)))
+	if _args.has("probe"):
+		_probe(_args.probe)
 	if _args.has("shot"):
 		await get_tree().create_timer(float(_args.get("shot_at", "3"))).timeout
 		var image := get_viewport().get_texture().get_image()
 		image.save_png(_args.shot)
 		print("saved ", _args.shot)
 		get_tree().quit()
+
+
+## Debug, networked: a scripted client. "builder" builds, mines, hands in
+## and prints a rover, checking each reached the server; "walker" walks in
+## circles round the pod; "stander" stands by the pod's screen. Both report what they see, then quit.
+func _probe(kind: String) -> void:
+	var tree := get_tree()
+	var report := func(tag: String) -> void:
+		var others := []
+		for peer in bodies:
+			if peer != Net.local_id():
+				others.append("%d@%s" % [peer, (bodies[peer] as Node3D).global_position.snapped(Vector3.ONE * 0.1)])
+		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d rovers %d spiders %d | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), rovers.size(), spiders.size(), others])
+	await tree.create_timer(3.0).timeout
+	report.call("joined")
+	if kind == "stander":
+		var spot: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 1.6 + pod.screen.global_basis.x * 1.2
+		for i in 60:
+			player.global_position = terrain.surface_point(spot)[0] + Vector3.UP * 0.1
+			await tree.create_timer(0.25).timeout
+	elif kind == "walker":
+		var centre := pod.global_position
+		for i in 60:
+			var angle := i * 0.2
+			player.global_position = terrain.surface_point(centre + Vector3(cos(angle), 0, sin(angle)) * 9.0)[0] + Vector3.UP * 0.5
+			await tree.create_timer(0.2).timeout
+		report.call("walked")
+	else:
+		var ahead: Array = terrain.surface_point(player.global_position + Vector3(3, 0, 3))
+		var stock_before := stock
+		act(&"build", [&"lamp", ahead[0], ahead[1], player.global_position])
+		var nearest := ores[0]
+		for ore in ores:
+			if ore.global_position.distance_to(player.global_position) < nearest.global_position.distance_to(player.global_position):
+				nearest = ore
+		act(&"mine", [nearest.net_id])
+		await tree.create_timer(1.0).timeout
+		report.call("built+mined")
+		print("[builder] lamp built: %s (stock %d -> %d), carrying %d" % [built.any(func(f: Fixture) -> bool: return f.kind == &"lamp"), stock_before, stock, carried])
+		act(&"press", [pod.net_id, &"hand_in"])
+		await tree.create_timer(1.0).timeout
+		act(&"press", [pod.net_id, &"rover"])
+		await tree.create_timer(1.5).timeout
+		report.call("handed in + rover")
+		for i in 8:
+			await tree.create_timer(1.0).timeout
+			report.call("watching")
+	tree.quit()

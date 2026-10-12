@@ -97,6 +97,8 @@ var _ghost: MeshInstance3D
 var _ghost_material: StandardMaterial3D
 var _ghost_meshes := {}
 var _pitch := 0.0
+var pitch: float:
+	get: return _pitch
 var _use_target: Fixture
 var _use_held := 0.0
 var _use_was_down := false
@@ -375,26 +377,26 @@ func _use(delta: float) -> void:
 	match target.kind:
 		&"deposit":
 			prompt = "[Hold E] Mine" + ("" if target.rig == null else "    a rig's on it")
-			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
+			_hold(down, delta, MINE_TIME, func() -> void: game.act(&"mine", [target.net_id]))
 		&"drill":
 			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full"}[target.stalled]
 			prompt = "Rig: %d / %d, %s\n[E] Empty hopper    [Hold E] Pick up" % [target.stored, Fixture.HOPPER, why]
 			# A tap empties the hopper; holding on picks the rig up.
 			if released and _use_held < 0.3 and target.stored > 0:
-				game.empty_rig(target)
-			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.pick_up(target))
+				game.act(&"empty_rig", [target.net_id])
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
 			if progress < 0.3 / (PICK_UP_TIME * 2.0):
 				progress = 0.0
 		&"pod":
 			prompt = ("[E] Hand in %d ore" % game.carried) if game.carried > 0 else ("Drop pod: %d ore banked" % game.stock)
 			if pressed:
-				game.hand_in()
+				game.act(&"hand_in", [])
 		&"ore":
 			prompt = "[Hold E] Mine ore (%d)" % target.amount
-			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
+			_hold(down, delta, MINE_TIME, func() -> void: game.act(&"mine", [target.net_id]))
 		&"lamp", &"panel", &"battery", &"lab":
 			prompt = "[Hold E] Pick up %s" % target.kind
-			_hold(down, delta, PICK_UP_TIME, func() -> void: game.pick_up(target))
+			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
 
 
 ## Whether the crosshair's on a screen within reach; if so it's _screen.
@@ -461,7 +463,7 @@ func _aim_ghost() -> void:
 func _build() -> void:
 	var hit := _placement()
 	if !hit.is_empty() and game.can_build(tool, hit.position):
-		game.build(tool, hit.position, hit.normal)
+		game.act(&"build", [tool, hit.position, hit.normal, global_position])
 
 
 ## Takes a lamp, panel or rig in hand, or nothing.
@@ -485,12 +487,11 @@ func _smash() -> void:
 	for spider: Spider in game.spiders.duplicate():
 		var to := spider.global_position + Terrain.up_at(spider.global_position) * 0.4 - from
 		if to.length() < HAMMER_REACH and to.normalized().dot(ahead) > 0.55:
-			spider.hit(HAMMER_DAMAGE)
-			if is_instance_valid(spider):
-				spider.fling((to.normalized() + up_direction * 0.6) * 9.0, 0.8)
+			game.act(&"hit", [spider.net_id, HAMMER_DAMAGE])
+			game.act(&"fling", [spider.net_id, (to.normalized() + up_direction * 0.6) * 9.0, 0.8])
 	var hit := _aim(HAMMER_REACH)
 	if !hit.is_empty() and hit.collider is Fixture and (hit.collider.kind == &"deposit" or hit.collider.kind == &"ore"):
-		game.mine(hit.collider)
+		game.act(&"mine", [hit.collider.net_id])
 		_say("+ore")
 
 
@@ -509,7 +510,7 @@ func _throw_hook() -> void:
 	if hit.collider is Spider:
 		var spider: Spider = hit.collider
 		var home := (from - spider.global_position)
-		spider.fling(home.normalized() * minf(16.0, home.length() * 1.6) + up_direction * 3.0, 0.7)
+		game.act(&"fling", [spider.net_id, home.normalized() * minf(16.0, home.length() * 1.6) + up_direction * 3.0, 0.7])
 		_yank_from = spider.global_position
 		_rope_flash = 0.2
 		return
@@ -612,8 +613,10 @@ func _fire() -> void:
 	if !hit.is_empty():
 		to = hit.position
 		if hit.collider is Spider:
-			(hit.collider as Spider).hit(DAMAGE * (2.0 if game.has(&"rounds") else 1.0))
+			game.act(&"hit", [(hit.collider as Spider).net_id, DAMAGE * (2.0 if game.has(&"rounds") else 1.0)])
 	_tracer(_muzzle.global_position, to)
+	if Net.networked():
+		game.act(&"shot", [_muzzle.global_position, to])
 
 
 func _tracer(from: Vector3, to: Vector3) -> void:

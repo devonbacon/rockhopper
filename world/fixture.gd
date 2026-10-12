@@ -16,6 +16,7 @@ const HOPPER := 12
 const LAMP_RANGE := 13.0
 
 var kind: StringName
+var net_id := 0
 var normal := Vector3.UP
 ## Kept up to date by the game: whether the sun reaches it, and for lamps,
 ## whether they're lit.

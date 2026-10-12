@@ -1,11 +1,12 @@
-extends SceneTree
+extends Node
 ## Headless smoke test. Generates a few maps and reports on them, then
 ## plays a mission roughly:
 ## - checks you stand on the ground;
 ## - builds a drill rig on the deposit nearest the pod and lets it and the
 ##   rover work for a minute and a half in daylight;
 ## - skips to the middle of the night and watches the spiders come.
-## Run it with --fixed-fps 60 so it goes as fast as it can.
+## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
+## Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn
 
 var _game: Game
 var _elapsed := 0.0
@@ -15,7 +16,7 @@ var _rig: Fixture
 var _lab: Fixture
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	for seed_value in [1, 2, 3]:
 		var terrain := Terrain.new()
 		terrain.generate(seed_value)
@@ -25,10 +26,17 @@ func _initialize() -> void:
 			push_error("nothing baked for rovers to drive on")
 		terrain.free()
 	_game = load("res://game/game.tscn").instantiate()
-	root.add_child(_game)
+	get_tree().root.add_child.call_deferred(_game)
 
 
-func _physics_process(delta: float) -> bool:
+func _physics_process(delta: float) -> void:
+	if !_game.is_inside_tree():
+		return
+	if _step(delta):
+		get_tree().quit()
+
+
+func _step(delta: float) -> bool:
 	_elapsed += delta
 	var player := _game.player
 	match _phase:

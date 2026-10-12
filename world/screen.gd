@@ -22,6 +22,8 @@ var button := func(_action: StringName) -> Array: return ["", true, false]
 ## action -> reply for the status line, or ""
 var pressed := func(_action: StringName) -> String: return ""
 var hover: StringName = &""
+## Set on clients: sends a press to the server, which answers with reply().
+var send := Callable()
 
 var _viewport: SubViewport
 var _lines: Label
@@ -114,9 +116,15 @@ func aim(from: Vector3, dir: Vector3) -> float:
 func press() -> void:
 	if hover == &"":
 		return
-	var reply: String = pressed.call(hover)
-	if reply != "":
-		_status.text = reply
+	if send.is_valid():
+		send.call(hover)
+	else:
+		reply(pressed.call(hover))
+
+
+func reply(text: String) -> void:
+	if text != "":
+		_status.text = text
 		_status_time = 2.5
 
 

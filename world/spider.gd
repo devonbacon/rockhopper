@@ -15,6 +15,11 @@ const SINK_TIME := 1.0
 const SIGHT := 40.0
 
 var game: Game
+var net_id := 0
+## On clients: no mind of its own, just eased to where the server says.
+var puppet := false
+var target_position := Vector3.ZERO
+var target_basis := Basis.IDENTITY
 var health := HEALTH
 var target: Node3D
 
@@ -46,12 +51,26 @@ func _ready() -> void:
 	_collider.disabled = true
 	add_child(_collider)
 	_build_model()
+	if puppet:
+		_collider.disabled = false
+		target_position = global_position
+		target_basis = global_basis
+		return
 	global_position -= Terrain.up_at(global_position) * 1.0
 	_retarget = randf() * 0.5
 	_sun_check = randf() * 0.5
 
 
 func _physics_process(delta: float) -> void:
+	if puppet:
+		_flash = maxf(0.0, _flash - delta * 5.0)
+		_body_material.emission = Color(1.0, 0.9, 0.8) * _flash
+		var before := global_position
+		var blend := 1.0 - exp(-14.0 * delta)
+		global_position = global_position.lerp(target_position, blend)
+		global_basis = global_basis.orthonormalized().slerp(target_basis, blend)
+		_animate(delta, clampf(before.distance_to(global_position) / delta / SPEED, 0.0, 1.5))
+		return
 	var up := Terrain.up_at(global_position)
 	_align(up, delta)
 	_flash = maxf(0.0, _flash - delta * 5.0)
@@ -113,6 +132,13 @@ func _physics_process(delta: float) -> void:
 	up_direction = up
 	move_and_slide()
 	_animate(delta, horizontal.length() / SPEED)
+
+
+## On clients: the server says its health is now this.
+func show_health(value: float) -> void:
+	if value < health:
+		_flash = 1.0
+	health = value
 
 
 func hit(amount: float) -> void:
