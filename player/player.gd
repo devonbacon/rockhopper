@@ -58,7 +58,7 @@ const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
 ## What the radial menu offers, clockwise from the top.
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill"]
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab"]
 ## How far the mouse has to move from the middle to pick, and how far the
 ## pointer can go.
 const RADIAL_DEAD := 40.0
@@ -148,7 +148,9 @@ func _ready() -> void:
 	rig.height = 3.8
 	var cell := BoxMesh.new()
 	cell.size = Vector3(1.0, 0.7, 0.7)
-	_ghost_meshes = {&"lamp": post, &"panel": panel, &"battery": cell, &"drill": rig}
+	var lab := BoxMesh.new()
+	lab.size = Vector3(2.2, 1.7, 1.6)
+	_ghost_meshes = {&"lamp": post, &"panel": panel, &"battery": cell, &"drill": rig, &"lab": lab}
 	_build_gun()
 	_ghost = MeshInstance3D.new()
 	_ghost.top_level = true
@@ -255,7 +257,7 @@ func _physics_process(delta: float) -> void:
 		if jetting:
 			if vertical.dot(up) < JET_RISE:
 				vertical += up * JET * delta
-			fuel = maxf(0.0, fuel - JET_DRAIN * delta)
+			fuel = maxf(0.0, fuel - JET_DRAIN * (0.6 if game.has(&"tanks") else 1.0) * delta)
 	_crouch = move_toward(_crouch, 1.0 if sliding else 0.0, delta * 8.0)
 	_head.position.y = lerpf(HEIGHT - 0.15, 0.95, _crouch)
 	var side := clampf(horizontal.dot(global_basis.x) / RUN, -1.0, 1.0)
@@ -273,7 +275,7 @@ func _physics_process(delta: float) -> void:
 	_muzzle_light.light_energy = _recoil * 3.0
 	_gun.position = HIP_GUN.lerp(ADS_GUN, _ads) + Vector3(0, 0, _recoil * 0.04)
 	var moving := clampf(Vector2(velocity.x, velocity.z).length() / RUN, 0.0, 1.0)
-	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
+	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) * (0.6 if game.has(&"stabiliser") else 1.0) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
 	if !is_on_floor():
 		rest += 2.0
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
@@ -313,7 +315,8 @@ func _use(delta: float) -> void:
 	progress = 0.0
 	if _aim_screen():
 		if _screen.hover != &"":
-			prompt = "[E] " + String(_screen.button.call(_screen.hover)[0]).capitalize()
+			var described: String = _screen.describe.call(_screen.hover)
+			prompt = described if described != "" else "[E] " + String(_screen.button.call(_screen.hover)[0]).capitalize()
 			if pressed:
 				_screen.press()
 		return
@@ -339,7 +342,7 @@ func _use(delta: float) -> void:
 		&"ore":
 			prompt = "[Hold E] Mine ore (%d)" % target.amount
 			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
-		&"lamp", &"panel", &"battery":
+		&"lamp", &"panel", &"battery", &"lab":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.pick_up(target))
 
@@ -352,6 +355,9 @@ func _aim_screen() -> bool:
 	var from := camera.global_position
 	var dir := -camera.global_basis.z
 	var nearest := REACH
+	var rock := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(from, from + dir * REACH, Terrain.ROCK_LAYER))
+	if !rock.is_empty():
+		nearest = from.distance_to(rock.position)
 	for screen in game.screens():
 		var distance := screen.aim(from, dir)
 		if distance < nearest:
@@ -398,7 +404,7 @@ func _aim_ghost() -> void:
 	_ghost.mesh = _ghost_meshes[tool]
 	var ok := game.can_build(tool, hit.position)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.35) if ok else Color(1.0, 0.3, 0.25, 0.35)
-	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9}[tool]
+	var lift: float = {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85}[tool]
 	_ghost.global_transform = Transform3D(Fixture.upright(hit.normal), hit.position + hit.normal * lift)
 
 
@@ -428,13 +434,13 @@ func _fire() -> void:
 	var around := randf() * TAU
 	var dir := (camera.global_basis * Vector3(tan(angle) * cos(around), tan(angle) * sin(around), -1.0)).normalized()
 	var to := from + dir * GUN_RANGE
-	spread = minf(MAX_SPREAD, spread + lerpf(HIP_KICK, ADS_KICK, _ads))
+	spread = minf(MAX_SPREAD, spread + lerpf(HIP_KICK, ADS_KICK, _ads) * (0.5 if game.has(&"stabiliser") else 1.0))
 	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if !hit.is_empty():
 		to = hit.position
 		if hit.collider is Spider:
-			(hit.collider as Spider).hit(DAMAGE)
+			(hit.collider as Spider).hit(DAMAGE * (2.0 if game.has(&"rounds") else 1.0))
 	_tracer(_muzzle.global_position, to)
 
 

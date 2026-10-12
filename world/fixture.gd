@@ -9,7 +9,7 @@ extends StaticBody3D
 ## hopper that rovers come and empty, or you can by hand.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"rover": 4}
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"rover": 4}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
@@ -33,6 +33,9 @@ var stored := 0
 var drilled := 0.0
 var stalled := ""
 var charge := 0.0
+var researching: StringName = &""
+var research_time := 0.0
+var unpowered := false
 
 var light: OmniLight3D
 ## The pod's screen.
@@ -71,6 +74,7 @@ func _ready() -> void:
 		&"deposit": _build_deposit()
 		&"drill": _build_drill()
 		&"battery": _build_battery()
+		&"lab": _build_lab()
 
 
 func set_on(value: bool) -> void:
@@ -81,13 +85,13 @@ func set_on(value: bool) -> void:
 
 ## Rigs: drills for delta seconds if it's lit and has room, given whether
 ## it's lit.
-func drill(delta: float, lit: bool) -> void:
+func drill(delta: float, lit: bool, every: float = DRILL_EVERY) -> void:
 	stalled = "full" if stored >= HOPPER else ("dark" if !lit else "")
 	if stalled != "":
 		return
 	drilled += delta
-	if drilled >= DRILL_EVERY:
-		drilled -= DRILL_EVERY
+	if drilled >= every:
+		drilled -= every
 		stored += 1
 
 
@@ -319,6 +323,41 @@ func _build_drill() -> void:
 	shape.radius = 1.0
 	shape.height = 4.0
 	_add_collider(shape, Vector3(0, 2.0, 0))
+
+
+func _build_lab() -> void:
+	health = 50.0
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var dark := _material(Color(0.2, 0.21, 0.24), 0.6, 0.4)
+	var body := BoxMesh.new()
+	body.size = Vector3(2.2, 1.7, 1.6)
+	_add_mesh(body, white, Vector3(0, 0.85, 0))
+	var roof := BoxMesh.new()
+	roof.size = Vector3(2.3, 0.12, 1.7)
+	_add_mesh(roof, gold, Vector3(0, 1.76, 0))
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(2.22, 0.1, 1.62)
+	_add_mesh(stripe, orange, Vector3(0, 0.3, 0))
+	_add_mesh(_cylinder(0.04, 0.04, 0.8), white, Vector3(0.7, 2.2, -0.4))
+	var dish := _cylinder(0.45, 0.08, 0.18)
+	_add_mesh(dish, white, Vector3(0.7, 2.65, -0.4)).rotation = Vector3(0.5, 0, 0.3)
+	screen = Screen.new()
+	screen.title = "RESEARCH LAB"
+	screen.size_m = Vector2(1.5, 1.3)
+	screen.pixels = Vector2i(640, 556)
+	screen.button_height = 40.0
+	screen.button_font = 21
+	screen.buttons.assign(Game.UPGRADES.keys())
+	var frame := BoxMesh.new()
+	frame.size = Vector3(screen.size_m.x + 0.1, screen.size_m.y + 0.1, 0.04)
+	_add_mesh(frame, dark, Vector3(0, 0.9, 0.81))
+	screen.position = Vector3(0, 0.9, 0.84)
+	add_child(screen)
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(2.2, 1.8, 1.6)
+	_add_collider(shape, Vector3(0, 0.9, 0))
 
 
 func _build_battery() -> void:

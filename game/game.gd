@@ -28,6 +28,17 @@ const POD_SOLAR := 0.8
 const PANEL_SOLAR := 1.6
 const LAMP_DRAW := 0.4
 const BATTERY_BANK := 80.0
+const LAB_DRAW := 0.6
+const UPGRADES := {
+	&"armour": {name = "ARMOUR PLATING", cost = 5, time = 40.0, text = "+50 max health"},
+	&"heated": {name = "HEATED SUIT", cost = 4, time = 30.0, text = "Cold takes twice as long to freeze you"},
+	&"tanks": {name = "BIGGER TANKS", cost = 3, time = 30.0, text = "The jetpack burns fuel 40% slower"},
+	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 6, time = 45.0, text = "Double damage: one shot kills a spider"},
+	&"stabiliser": {name = "STABILISER", cost = 4, time = 30.0, text = "Half the bloom from firing, tighter at rest"},
+	&"drills": {name = "FASTER DRILLS", cost = 6, time = 45.0, text = "Rigs drill 40% faster"},
+	&"rovers": {name = "ROVER TUNING", cost = 5, time = 40.0, text = "Rovers drive 40% faster and carry 4 more"},
+	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, time = 30.0, text = "Lamps draw half the power"},
+}
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
 const COLD_RATE := 100.0 / 45.0
@@ -69,6 +80,7 @@ var health := HEALTH
 ## How recently you were hurt, 1 fading to 0, for the HUD.
 var hurt := 0.0
 var lit_by := ""
+var researched := {}
 
 var terrain: Terrain
 var sun: Sun
@@ -142,7 +154,17 @@ func _physics_process(delta: float) -> void:
 			if want != fixture.on:
 				fixture.set_on(want)
 			if fixture.on:
-				power_out += LAMP_DRAW
+				power_out += LAMP_DRAW * (0.5 if has(&"lamps") else 1.0)
+	for lab in built:
+		if lab.kind == &"lab" and lab.researching != &"" and state == State.PLAYING:
+			lab.unpowered = battery <= 0.0
+			if !lab.unpowered:
+				power_out += LAB_DRAW
+				lab.research_time += delta
+				if lab.research_time >= UPGRADES[lab.researching].time:
+					researched[lab.researching] = true
+					hud.announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize())
+					lab.researching = &""
 	var full := capacity()
 	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
 	for fixture in built:
@@ -152,7 +174,7 @@ func _physics_process(delta: float) -> void:
 		return
 	for fixture in built:
 		if fixture.kind == &"drill":
-			fixture.drill(delta, fixture.sunlit or lit_at(fixture.global_position + fixture.normal * 1.0) != "")
+			fixture.drill(delta, fixture.sunlit or lit_at(fixture.global_position + fixture.normal * 1.0) != "", Fixture.DRILL_EVERY * (0.6 if has(&"drills") else 1.0))
 	_spawn_spiders(delta)
 	for rover in rovers.duplicate():
 		if rover.health <= 0.0:
@@ -162,11 +184,11 @@ func _physics_process(delta: float) -> void:
 		if fixture.health <= 0.0:
 			_remove_built(fixture)
 	lit_by = _light_on_player()
-	warmth = clampf(warmth + (WARM_RATE if lit_by != "" else -COLD_RATE) * delta, 0.0, 100.0)
+	warmth = clampf(warmth + (WARM_RATE if lit_by != "" else -COLD_RATE * (0.5 if has(&"heated") else 1.0)) * delta, 0.0, 100.0)
 	_since_hurt += delta
 	hurt = maxf(0.0, hurt - delta * 2.0)
 	if _since_hurt > HEAL_DELAY:
-		health = minf(HEALTH, health + HEAL_RATE * delta)
+		health = minf(max_health(), health + HEAL_RATE * delta)
 	if warmth <= 0.0:
 		_end(State.LOST, "You froze in the dark.")
 	elif health <= 0.0:
@@ -183,6 +205,73 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.shift_pressed:
 			_last_seed = seed_value
 		get_tree().reload_current_scene()
+
+
+func has(upgrade: StringName) -> bool:
+	return researched.has(upgrade)
+
+
+func max_health() -> float:
+	return HEALTH + (50.0 if has(&"armour") else 0.0)
+
+
+func rover_capacity() -> int:
+	return Rover.CAPACITY + (4 if has(&"rovers") else 0)
+
+
+func rover_speed() -> float:
+	return Rover.SPEED * (1.4 if has(&"rovers") else 1.0)
+
+
+## Whether a lab is working on it, and which.
+func researching(upgrade: StringName) -> Fixture:
+	for lab in built:
+		if lab.kind == &"lab" and lab.researching == upgrade:
+			return lab
+	return null
+
+
+func _wire_lab_screen(lab: Fixture) -> void:
+	var screen := lab.screen
+	screen.info = func() -> String:
+		if lab.researching == &"":
+			return "IDLE. PICK SOMETHING TO RESEARCH."
+		var upgrade: Dictionary = UPGRADES[lab.researching]
+		var left: float = upgrade.time - lab.research_time
+		return "%s  %ds%s" % [upgrade.name, ceili(left), "  NO POWER" if lab.unpowered else ""]
+	screen.button = func(action: StringName) -> Array:
+		var upgrade: Dictionary = UPGRADES[action]
+		if has(action):
+			return ["%s   DONE" % upgrade.name, false, false]
+		if lab.researching == action:
+			return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
+		var busy := lab.researching != &"" or researching(action) != null
+		return ["%s   %d ORE  %ds" % [upgrade.name, upgrade.cost, upgrade.time], !busy and stock >= upgrade.cost, false]
+	screen.describe = func(action: StringName) -> String:
+		var upgrade: Dictionary = UPGRADES[action]
+		if has(action):
+			return "%s: researched" % String(upgrade.name).capitalize()
+		if lab.researching == action:
+			return "[E] Cancel %s, refunding %d ore" % [String(upgrade.name).capitalize(), upgrade.cost]
+		return "[E] Research %s: %s" % [String(upgrade.name).capitalize(), upgrade.text]
+	screen.pressed = func(action: StringName) -> String:
+		var upgrade: Dictionary = UPGRADES[action]
+		if has(action):
+			return "ALREADY RESEARCHED."
+		if lab.researching == action:
+			lab.researching = &""
+			stock += upgrade.cost
+			return "CANCELLED. %d ORE REFUNDED." % upgrade.cost
+		if lab.researching != &"":
+			return "BUSY: CANCEL THE CURRENT RESEARCH FIRST."
+		if researching(action) != null:
+			return "ANOTHER LAB IS ON IT."
+		if stock < upgrade.cost:
+			return "NOT ENOUGH ORE BANKED."
+		stock -= upgrade.cost
+		lab.researching = action
+		lab.research_time = 0.0
+		return "RESEARCHING %s." % upgrade.name
 
 
 func capacity() -> float:
@@ -226,6 +315,8 @@ func can_build(kind: StringName, pos: Vector3) -> bool:
 		return deposit != null and deposit.rig == null
 	for fixture: Fixture in built + ores + deposits + [pod]:
 		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
+		if kind == &"lab" or fixture.kind == &"lab":
+			room += 1.6
 		if fixture.global_position.distance_to(pos) < room:
 			return false
 	return true
@@ -241,9 +332,15 @@ func build(kind: StringName, pos: Vector3, normal: Vector3) -> void:
 		deposit.rig = fixture
 	else:
 		fixture = Fixture.make(kind, pos, normal)
+	if kind == &"lab":
+		var towards := Vector3(player.global_position.x - pos.x, 0.0, player.global_position.z - pos.z)
+		if towards.length() > 0.1:
+			fixture.basis = Basis.looking_at(-towards.normalized(), Vector3.UP)
 	add_child(fixture)
 	built.push_back(fixture)
 	_light_check = 0.0
+	if kind == &"lab":
+		_wire_lab_screen(fixture)
 
 
 func deposit_at(pos: Vector3) -> Fixture:
@@ -258,6 +355,8 @@ func deposit_at(pos: Vector3) -> Fixture:
 func pick_up(fixture: Fixture) -> void:
 	stock += Fixture.COST[fixture.kind]
 	carried += fixture.stored
+	if fixture.researching != &"":
+		stock += UPGRADES[fixture.researching].cost
 	_remove_built(fixture)
 
 
@@ -295,6 +394,9 @@ func deliver(amount: int) -> void:
 
 func screens() -> Array[Screen]:
 	var all: Array[Screen] = [pod.screen]
+	for fixture in built:
+		if fixture.kind == &"lab":
+			all.push_back(fixture.screen)
 	for rover in rovers:
 		all.push_back(rover.screen)
 	return all
@@ -347,7 +449,7 @@ func pick_rig(rover: Rover) -> Fixture:
 		var spoken_for := 0
 		for other in rovers:
 			if other != rover and other.rig == rig and (other.task == Rover.Task.OUTBOUND or other.task == Rover.Task.LOADING):
-				spoken_for += Rover.CAPACITY
+				spoken_for += rover_capacity()
 		var waiting := rig.stored - spoken_for
 		if waiting < WORTH_A_TRIP:
 			continue
@@ -569,7 +671,7 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 
 
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
-## cave|screen|rover, rig (builds one on the deposit nearest the pod and stands you by
+## cave|screen|rover, lab (builds one ahead, researching), rig (builds one on the deposit nearest the pod and stands you by
 ## it), lamps=N (around you), spiders=N (in front of you), tool=,
 ## radial=N (the build menu up, N chosen, -1 for none), pitch=
 ## degrees, and shot=path.png and shot_at=seconds to save a screenshot and
@@ -626,6 +728,12 @@ func _debug_setup() -> void:
 	if _args.has("radial"):
 		player.radial_open = true
 		player.radial_choice = int(_args.radial)
+	if _args.has("lab"):
+		player.rotate_object_local(Vector3.UP, PI)
+		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 4.5)
+		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"tanks"].cost
+		build(&"lab", ahead[0], ahead[1])
+		built[-1].screen.pressed.call(&"tanks")
 	player.debug_aim = _args.has("aim")
 	if _args.has("pause"):
 		hud.set_paused(true)

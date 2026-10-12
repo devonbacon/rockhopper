@@ -12,6 +12,7 @@ var _elapsed := 0.0
 var _phase := 0
 var _stock_before := 0
 var _rig: Fixture
+var _lab: Fixture
 
 
 func _initialize() -> void:
@@ -48,6 +49,14 @@ func _physics_process(delta: float) -> bool:
 				push_error("can't build a rig on the nearest deposit")
 			_game.build(&"drill", nearest.global_position, Vector3.UP)
 			_rig = nearest.rig
+			_game.stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"armour"].cost
+			var lab_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Vector3(-7, 0, -6))
+			if _game.can_build(&"lab", lab_spot[0]):
+				_game.build(&"lab", lab_spot[0], lab_spot[1])
+				_lab = _game.built[-1]
+				print("lab: %s" % _lab.screen.pressed.call(&"armour"))
+			else:
+				push_error("couldn't place a lab by the pod")
 			_stock_before = _game.stock
 			var path := NavigationServer3D.map_get_path(_game.get_world_3d().navigation_map, _game.rovers[0].global_position, _rig.global_position, true)
 			print("built a rig %.0f m from the pod; path for the rover: %d points, ending %.1f m from it" % [nearest.global_position.distance_to(_game.pod.global_position), path.size(), path[-1].distance_to(_rig.global_position) if !path.is_empty() else INF])
@@ -59,9 +68,12 @@ func _physics_process(delta: float) -> bool:
 			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored, _rig.stalled if _rig.stalled != "" else "drilling", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
 			if _game.stock <= _stock_before:
 				push_error("the rover brought nothing home")
+			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
+			if !_game.has(&"armour"):
+				push_error("the lab didn't finish its research")
 			var screen := rover.screen
 			var rect: Rect2 = screen._rects[&"home"]
-			var uv := rect.get_center() / Vector2(Screen.PIXELS)
+			var uv := rect.get_center() / Vector2(screen.pixels)
 			var on := screen.global_transform * Vector3((uv.x - 0.5) * screen.size_m.x, (0.5 - uv.y) * screen.size_m.y, 0.0)
 			var normal := screen.global_basis.z.normalized()
 			screen.aim(on + normal * 1.2, -normal)

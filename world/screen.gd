@@ -3,14 +3,17 @@ extends Node3D
 ## Doom-style in-world screen: look at a button, press E. The owner sets
 ## size, title and buttons before adding it, then the callables.
 
-const PIXELS := Vector2i(640, 400)
 const INK := Color(0.55, 0.95, 1.0)
 const DIM := Color(0.35, 0.6, 0.68)
 const ORANGE := Color(1.0, 0.5, 0.12)
-const BUTTON_HEIGHT := 52.0
 const BUTTON_GAP := 8.0
 
 var size_m := Vector2(1.3, 0.8125)
+var pixels := Vector2i(640, 400)
+var button_height := 52.0
+var button_font := 26
+## action -> what the HUD says when it's under the crosshair, or "" to name it
+var describe := func(_action: StringName) -> String: return ""
 var title := ""
 var buttons: Array[StringName] = []
 var info := func() -> String: return ""
@@ -31,17 +34,17 @@ var _labels := {}
 
 func _ready() -> void:
 	_viewport = SubViewport.new()
-	_viewport.size = PIXELS
+	_viewport.size = pixels
 	_viewport.disable_3d = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(_viewport)
 	var back := ColorRect.new()
 	back.color = Color(0.02, 0.04, 0.07)
-	back.size = PIXELS
+	back.size = pixels
 	_viewport.add_child(back)
 	var header := ColorRect.new()
 	header.color = ORANGE
-	header.size = Vector2(PIXELS.x, 44)
+	header.size = Vector2(pixels.x, 44)
 	_viewport.add_child(header)
 	var heading := _label(title, 24, Color(0.05, 0.03, 0.02))
 	heading.position = Vector2(20, 6)
@@ -49,12 +52,12 @@ func _ready() -> void:
 	_lines = _label("", 26, INK)
 	_lines.position = Vector2(24, 54)
 	_viewport.add_child(_lines)
-	var top := PIXELS.y - 16.0 - buttons.size() * BUTTON_HEIGHT - (buttons.size() - 1) * BUTTON_GAP
+	var top := pixels.y - 16.0 - buttons.size() * button_height - (buttons.size() - 1) * BUTTON_GAP
 	_status = _label("", 22, ORANGE)
 	_status.position = Vector2(24, top - 34.0)
 	_viewport.add_child(_status)
 	for i in buttons.size():
-		var rect := Rect2(24, top + i * (BUTTON_HEIGHT + BUTTON_GAP), PIXELS.x - 48, BUTTON_HEIGHT)
+		var rect := Rect2(24, top + i * (button_height + BUTTON_GAP), pixels.x - 48, button_height)
 		var panel := Panel.new()
 		panel.position = rect.position
 		panel.size = rect.size
@@ -63,8 +66,8 @@ func _ready() -> void:
 		style.set_corner_radius_all(4)
 		panel.add_theme_stylebox_override("panel", style)
 		_viewport.add_child(panel)
-		var text := _label("", 26, INK)
-		text.position = rect.position + Vector2(18, 9)
+		var text := _label("", button_font, INK)
+		text.position = rect.position + Vector2(18, (button_height - button_font * 1.4) * 0.5)
 		_viewport.add_child(text)
 		_rects[buttons[i]] = rect
 		_styles[buttons[i]] = style
@@ -101,7 +104,7 @@ func aim(from: Vector3, dir: Vector3) -> float:
 	var uv := Vector2(local.x / size_m.x + 0.5, 0.5 - local.y / size_m.y)
 	if uv.x < 0.0 or uv.x > 1.0 or uv.y < 0.0 or uv.y > 1.0:
 		return INF
-	var pixel := uv * Vector2(PIXELS)
+	var pixel := uv * Vector2(pixels)
 	for action: StringName in _rects:
 		if _rects[action].has_point(pixel):
 			hover = action

@@ -25,8 +25,9 @@ the pod while there's power. In the dark it cools, and in 45 seconds
 you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
-Lamps (1 ore), panels (2), batteries (2), drill rigs (3) and rovers (4,
-printed from the pod's screen) are paid for from the bank, and picking something back up refunds it. What's in the
+Lamps (1 ore), panels (2), batteries (2), drill rigs (3), research labs
+(4) and rovers (4, printed from the pod's screen) are paid for from the
+bank, as is research, and picking something back up refunds it. What's in the
 bank when the pod launches, after twelve minutes, is the score (the
 quota is 100). Be beside the pod then, or be left behind.
 
@@ -38,6 +39,21 @@ spreading itself over the rigs with the most waiting. Rovers can't
 climb steep slopes, so a deposit in a crater or behind a ridge is a
 longer drive, or one they can't make at all. You can also empty a
 hopper by hand.
+
+A research lab works through upgrades for this mission, one at a time,
+picked on its screen: each costs ore, takes 30-45 s, and draws power
+while it works (it stalls when the battery's flat). Pressing the one in
+progress cancels it and refunds the ore. Researched upgrades apply to
+everything, already built or not:
+
+- Armour plating: +50 max health.
+- Heated suit: the cold takes twice as long to freeze you.
+- Bigger tanks: the jetpack burns fuel 40% slower.
+- Overcharged rounds: double damage, so one shot kills a spider.
+- Stabiliser: half the bloom from firing, and tighter at rest.
+- Faster drills: rigs drill 40% faster.
+- Rover tuning: rovers drive 40% faster and carry 4 more.
+- Efficient lamps: lamps draw half the power.
 
 In the dark, spiders climb out of the ground wherever no light falls,
 more of them and more often as the mission goes on. They go for the
@@ -60,7 +76,7 @@ hurt you for a few seconds.
   empty its hopper into your pockets. Hold on ore or a deposit to mine
   it, or on a lamp, panel or rig to pick it up.
 - **Build:** hold Q for the radial menu, move the mouse towards a lamp,
-  panel, battery or drill rig and let go of Q (or let go in the middle to put
+  panel, battery, drill rig or research lab and let go of Q (or let go in the middle to put
   away what's in hand). Then left-click the ground, or for a rig, the
   deposit; right-click puts it away.
 - **The pod's screen:** look at a button on it and press E, to print a
@@ -104,6 +120,7 @@ User arguments after `--`, e.g.
 - `radial=N` holds the build menu up with item N chosen (-1 for none).
 - `pitch=D` tilts your view by D degrees.
 - `aim` holds aim down the sights; `pause` starts paused.
+- `lab` builds a research lab ahead of you and starts it researching.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.
 

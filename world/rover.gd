@@ -84,7 +84,7 @@ func _physics_process(delta: float) -> void:
 			else:
 				_loading += delta
 				if _loading >= LOAD_TIME:
-					cargo += rig.take(CAPACITY - cargo)
+					cargo += rig.take(game.rover_capacity() - cargo)
 					task = Task.HOMEBOUND
 		Task.HOMEBOUND:
 			if _drive_to(game.pod.global_position, 4.6, delta) != 0:
@@ -131,7 +131,7 @@ func _drive_to(target: Vector3, arrive: float, delta: float) -> int:
 	var want := Vector3(waypoint.x - pos.x, 0.0, waypoint.z - pos.z).normalized()
 	var turn := _heading.signed_angle_to(want, Vector3.UP)
 	_heading = _heading.rotated(Vector3.UP, clampf(turn, -TURN * delta, TURN * delta)).normalized()
-	var speed := SPEED * clampf(_heading.dot(want), 0.15, 1.0)
+	var speed := game.rover_speed() * clampf(_heading.dot(want), 0.15, 1.0)
 	var step := _heading * speed * delta
 	_settle(pos + step, delta)
 	for wheel in _wheels:
@@ -170,7 +170,7 @@ func _build_screen() -> void:
 			Task.LOADING: "LOADING",
 			Task.HOMEBOUND: "DRIVING HOME",
 		}[task]
-		return "%s\nCARGO %d / %d    HULL %d%%" % [doing, cargo, CAPACITY, roundi(health / HEALTH * 100.0)]
+		return "%s\nCARGO %d / %d    HULL %d%%" % [doing, cargo, game.rover_capacity(), roundi(health / HEALTH * 100.0)]
 	screen.button = func(action: StringName) -> Array:
 		var names := {&"haul": "HAUL", &"stay": "STAY", &"home": "GO HOME"}
 		return [names[action], true, order == action]

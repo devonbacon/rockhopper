@@ -23,7 +23,7 @@ const POD_COLOR := Color(1.0, 0.55, 0.25)
 const ALERT := Color(1.0, 0.4, 0.3)
 const HEALTH_COLOR := Color(1.0, 0.35, 0.35)
 const FORECAST_STEPS := 120
-const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Drill rig"}
+const NAMES := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab"}
 
 var game: Game
 
@@ -183,8 +183,13 @@ func _build_meters() -> void:
 	add_child(panel)
 
 
+func announce(text: String) -> void:
+	game.player.notice = text
+	game.player.notice_time = 3.5
+
+
 func _update_meters() -> void:
-	_set_meter(&"health", game.health / Game.HEALTH, "%d" % game.health, ALERT if game.hurt > 0.0 else Color.WHITE)
+	_set_meter(&"health", game.health / game.max_health(), "%d" % game.health, ALERT if game.hurt > 0.0 else Color.WHITE)
 	var net := game.power_in - game.power_out
 	_set_meter(&"battery", game.battery / game.capacity(), "%d / %d   %+.1f/s" % [game.battery, game.capacity(), net], ALERT if net < 0.0 else Color.WHITE)
 	var warmth := game.warmth / 100.0
@@ -292,6 +297,10 @@ func _update_bottom() -> void:
 		if rover.task != Rover.Task.PARKED:
 			out += 1
 	_rovers.text = "%d rovers, %d out" % [game.rovers.size(), out]
+	for lab in game.built:
+		if lab.kind == &"lab" and lab.researching != &"":
+			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
+			_rovers.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
 	if game.player.tool != &"":
 		_hint.text = "%s in hand    [LMB] build    [RMB] put away" % NAMES[game.player.tool]
 	else:
@@ -303,7 +312,13 @@ func _draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tint: Col
 	var white := Color(0.88, 0.88, 0.86) * tint
 	var gold := Color(0.85, 0.62, 0.22) * tint
 	var dark := Color(0.15, 0.15, 0.17) * tint
-	if kind == &"battery":
+	if kind == &"lab":
+		canvas.draw_rect(Rect2(centre + Vector2(-24, -8), Vector2(48, 26)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-25, -11), Vector2(50, 4)), gold)
+		canvas.draw_rect(Rect2(centre + Vector2(-12, -2), Vector2(24, 14)), Color(0.3, 0.8, 0.9) * tint)
+		canvas.draw_line(centre + Vector2(14, -11), centre + Vector2(14, -22), white, 2.0)
+		canvas.draw_arc(centre + Vector2(14, -24), 6, PI * 0.1, PI * 0.9, 8, white, 2.0)
+	elif kind == &"battery":
 		canvas.draw_rect(Rect2(centre + Vector2(-22, -12), Vector2(44, 28)), white)
 		canvas.draw_rect(Rect2(centre + Vector2(-22, -7), Vector2(44, 5)), gold)
 		canvas.draw_rect(Rect2(centre + Vector2(-14, -18), Vector2(6, 6)), dark)
