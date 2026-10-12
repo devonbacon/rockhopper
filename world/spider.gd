@@ -46,13 +46,13 @@ func _ready() -> void:
 	_collider.disabled = true
 	add_child(_collider)
 	_build_model()
-	global_position -= global_position.normalized() * 1.0
+	global_position -= Terrain.up_at(global_position) * 1.0
 	_retarget = randf() * 0.5
 	_sun_check = randf() * 0.5
 
 
 func _physics_process(delta: float) -> void:
-	var up := global_position.normalized()
+	var up := Terrain.up_at(global_position)
 	_align(up, delta)
 	_flash = maxf(0.0, _flash - delta * 5.0)
 	_body_material.emission = Color(1.0, 0.9, 0.8) * _flash

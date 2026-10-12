@@ -1,6 +1,6 @@
 class_name Player
 extends CharacterBody3D
-## You, in first person, on a rock whose down is always its centre.
+## You, in first person, on the crater floor.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Holding Q brings up the radial
@@ -61,6 +61,9 @@ const HAMMER_REACH := 3.2
 const GRAPPLE_RANGE := 35.0
 const GRAPPLE_PULL := 30.0
 const GRAPPLE_MAX := 20.0
+## How far out from the middle you can go before the crater wall stops
+## you, in case the jetpack or the grapple gets you up it.
+const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
 const SENSITIVITY := 0.0025
 ## What the radial menu offers, clockwise from the top.
 const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab"]
@@ -178,7 +181,7 @@ func _ready() -> void:
 ## Turns the body so its up points away from the centre, keeping where it
 ## faces as near as it can.
 func align_up() -> void:
-	var up := global_position.normalized()
+	var up := Terrain.up_at(global_position)
 	var b := global_basis.orthonormalized()
 	var angle := b.y.angle_to(up)
 	if angle > 0.0001:
@@ -304,6 +307,10 @@ func _physics_process(delta: float) -> void:
 	if hooked:
 		var pull := (_hook_point - global_position).normalized()
 		velocity = (velocity + pull * GRAPPLE_PULL * delta).limit_length(GRAPPLE_MAX)
+	var flat := Vector2(global_position.x, global_position.z)
+	if flat.length() > BOUNDS and Vector2(velocity.x, velocity.z).dot(flat) > 0.0:
+		var out := Vector3(flat.x, 0.0, flat.y).normalized()
+		velocity -= out * velocity.dot(out)
 	move_and_slide()
 	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
 	_draw_rope(delta)
@@ -476,7 +483,7 @@ func _smash() -> void:
 	var from := camera.global_position
 	var ahead := -camera.global_basis.z
 	for spider: Spider in game.spiders.duplicate():
-		var to := spider.global_position + spider.global_position.normalized() * 0.4 - from
+		var to := spider.global_position + Terrain.up_at(spider.global_position) * 0.4 - from
 		if to.length() < HAMMER_REACH and to.normalized().dot(ahead) > 0.55:
 			spider.hit(HAMMER_DAMAGE)
 			if is_instance_valid(spider):

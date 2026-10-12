@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless smoke test. Generates a few asteroids and reports on them, then
+## Headless smoke test. Generates a few maps and reports on them, then
 ## plays a mission roughly:
 ## - checks you stand on the ground;
 ## - builds a drill rig on the deposit nearest the pod and lets it and the
@@ -19,9 +19,9 @@ func _initialize() -> void:
 	for seed_value in [1, 2, 3]:
 		var terrain := Terrain.new()
 		terrain.generate(seed_value)
-		var points := terrain.graph.get_point_count()
-		print("seed %d: %d ms, %d triangles, %d rover graph points, cave spots %d, surface spots %d" % [seed_value, terrain.generate_ms, terrain.triangle_count, points, terrain.cave_spots.size(), terrain.surface_spots.size()])
-		if points == 0:
+		var polygons := terrain.navigation.navigation_mesh.get_polygon_count()
+		print("seed %d: %d ms, %d triangles, %d nav polygons, cave spots %d, surface spots %d" % [seed_value, terrain.generate_ms, terrain.triangle_count, polygons, terrain.cave_spots.size(), terrain.surface_spots.size()])
+		if polygons == 0:
 			push_error("nothing baked for rovers to drive on")
 		terrain.free()
 	_game = load("res://game/game.tscn").instantiate()
@@ -36,7 +36,7 @@ func _physics_process(delta: float) -> bool:
 			if _elapsed < 4.0:
 				return false
 			var below: Array = _game.terrain.surface_point(player.global_position)
-			var height: float = player.global_position.length() - below[0].length()
+			var height: float = player.global_position.y - below[0].y
 			print("mission seed %d: %d deposits, %d ore, %d rovers" % [_game.seed_value, _game.deposits.size(), _game.ores.size(), _game.rovers.size()])
 			print("after %.1fs: on floor %s, %.2f m above the ground, battery %.1f, warmth %.0f lit by '%s'" % [_elapsed, player.is_on_floor(), height, _game.battery, _game.warmth, _game.lit_by])
 			if !player.is_on_floor() or absf(height) > 1.5:

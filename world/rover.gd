@@ -117,7 +117,7 @@ func park_point() -> Vector3:
 ## (across the ground), -1 if the path's run out short of it, else 0.
 func _drive_to(target: Vector3, arrive: float, delta: float) -> int:
 	var pos := global_position
-	var up := pos.normalized()
+	var up := Terrain.up_at(pos)
 	var across := _across(target - pos, up)
 	if across.length() <= arrive:
 		return 1
@@ -158,7 +158,7 @@ func _across(v: Vector3, up: Vector3) -> Vector3:
 
 ## Puts it at pos on the ground, tilted to the slope under it.
 func _settle(pos: Vector3, delta: float) -> void:
-	var up := pos.normalized()
+	var up := Terrain.up_at(pos)
 	var query := PhysicsRayQueryParameters3D.create(pos + up * 1.5, pos - up * 3.0, Terrain.ROCK_LAYER)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty() or absf((hit.position - global_position).dot(up)) > MAX_STEP:

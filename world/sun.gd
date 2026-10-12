@@ -1,39 +1,47 @@
 class_name Sun
 extends DirectionalLight3D
-## The star, circling the asteroid as it turns, so the line between day and
-## night crawls over the surface. It sits 20 degrees off the rock's
-## equator: one pole never sets, the other never rises.
+## The star, crossing the sky as the rock turns: up in the east, over at
+## 65 degrees, down in the west, then a night as long as the day. Low in
+## the sky, the crater rim's shadow sweeps across the floor, so the
+## valleys go dark first and the high ground holds the light longest.
 
 const DAY := 300.0
-const AXIS := Vector3.UP
-const START := Vector3(0.9396926, 0.3420201, 0.0)
+const TILT := deg_to_rad(25.0)
+## How far the sun's climbed at the start.
+const START := deg_to_rad(24.0)
 
 var time := 0.0
 
 
 func _ready() -> void:
 	shadow_enabled = true
-	directional_shadow_max_distance = 200.0
+	directional_shadow_max_distance = 220.0
 	light_energy = 1.6
 	light_color = Color(1.0, 0.96, 0.9)
 	sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
 	set_time(time)
 
 
-## Unit vector from the asteroid towards the sun at time t.
+## Unit vector towards the sun at time t.
 static func dir_at(t: float) -> Vector3:
-	return START.rotated(AXIS, TAU * t / DAY)
+	var angle := START + TAU * t / DAY
+	return Vector3(cos(angle), sin(angle) * cos(TILT), sin(angle) * sin(TILT))
 
 
 func set_time(t: float) -> void:
 	time = t
-	basis = Basis.looking_at(-dir_at(t), Vector3.UP)
+	var dir := dir_at(t)
+	basis = Basis.looking_at(-dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.FORWARD)
+	visible = dir.y > -0.1
 
 
-## Whether nothing but space lies between p and the sun, now or at time t.
+## Whether the sun's up and nothing but space lies between p and it, now
+## or at time t.
 func lights(p: Vector3, space: PhysicsDirectSpaceState3D, t: float = NAN) -> bool:
 	var dir := dir_at(time if is_nan(t) else t)
-	var query := PhysicsRayQueryParameters3D.create(p, p + dir * 300.0, Terrain.ROCK_LAYER)
+	if dir.y <= 0.0:
+		return false
+	var query := PhysicsRayQueryParameters3D.create(p, p + dir * 250.0, Terrain.ROCK_LAYER)
 	return space.intersect_ray(query).is_empty()
 
 
