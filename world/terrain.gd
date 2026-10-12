@@ -16,6 +16,10 @@ const ROCK_LAYER := 1
 const BUCKET := 12.0
 ## Steepest a rover will drive, against up from the centre.
 const ROVER_SLOPE := 30.0
+## The landing crater: a level floor this far across (arc, metres from its
+## middle), then a rim over the next few.
+const LANDING_FLOOR := 15.0
+const LANDING_RIM := 10.0
 
 var chambers: Array[Vector4] = []
 var worms: Array[Array] = []
@@ -26,20 +30,25 @@ var cave_spots: Array[Array] = []
 var triangle_count := 0
 var generate_ms := 0
 var graph := AStar3D.new()
+## Where the landing crater is, as a direction in the unstretched ball.
+var landing := Vector3.ZERO
 
 var _shape := FastNoiseLite.new()
 var _rng := RandomNumberGenerator.new()
 ## Vector3i -> [craters, chambers, worms] overlapping that cube.
 var _buckets := {}
 var _quads := PackedInt32Array()
+var _landing_r := 0.0
 
 
-func generate(seed_value: int) -> void:
+func generate(seed_value: int, landing_dir := Vector3.ZERO) -> void:
 	var started := Time.get_ticks_msec()
 	_rng.seed = seed_value
 	_shape.seed = seed_value
 	_shape.frequency = 0.045
 	_shape.fractal_octaves = 3
+	landing = (landing_dir / STRETCH).normalized() if landing_dir != Vector3.ZERO else Vector3.ZERO
+	_landing_r = RADIUS + LUMP * _shape.get_noise_3dv(landing * 30.0) - 1.0
 	_add_features()
 	var extent := maxf(STRETCH.x, maxf(STRETCH.y, STRETCH.z)) * (RADIUS + LUMP) + 3.0
 	var count := ceili(2.0 * extent / CELL)
@@ -54,8 +63,8 @@ func generate(seed_value: int) -> void:
 func density(p: Vector3) -> float:
 	var q := p / STRETCH
 	var length := q.length()
-	if length > RADIUS + LUMP + 2.0:
-		return length - (RADIUS + LUMP)
+	if length > RADIUS + LUMP + 4.0:
+		return length - (RADIUS + LUMP + 2.0)
 	var d := length - (RADIUS - LUMP) if length < RADIUS - LUMP - 2.0 else body(p)
 	if d > 3.0:
 		return d
@@ -77,7 +86,22 @@ func body(p: Vector3) -> float:
 	var length := q.length()
 	if length < 0.001:
 		return -RADIUS
-	return length - (RADIUS + LUMP * _shape.get_noise_3dv(q / length * 30.0))
+	var dir := q / length
+	var surface := RADIUS + LUMP * _shape.get_noise_3dv(dir * 30.0)
+	var arc := _landing_arc(dir)
+	if arc < LANDING_FLOOR + LANDING_RIM * 2.0:
+		var level := 1.0 - smoothstep(LANDING_FLOOR - 2.0, LANDING_FLOOR + LANDING_RIM, arc)
+		var rim := (arc - LANDING_FLOOR - 2.0) / 4.0
+		surface = lerpf(surface, _landing_r, level) + 1.2 * exp(-rim * rim)
+	return length - surface
+
+
+## How far round the surface, roughly, a direction is from the landing
+## crater's middle.
+func _landing_arc(dir: Vector3) -> float:
+	if landing == Vector3.ZERO:
+		return INF
+	return acos(clampf(dir.dot(landing), -1.0, 1.0)) * RADIUS
 
 
 ## The first rock along a ray in from outside towards the centre, through
@@ -144,6 +168,8 @@ func _add_features() -> void:
 	for i in 18:
 		var dir := _random_dir()
 		var r := _rng.randf_range(5.0, 14.0)
+		if _landing_arc((dir / STRETCH).normalized()) < LANDING_FLOOR + LANDING_RIM + r:
+			continue
 		var surface := dir * (RADIUS + LUMP * _shape.get_noise_3dv(dir * 30.0)) * STRETCH
 		var c := surface + dir * r * 0.55
 		craters.push_back(Vector4(c.x, c.y, c.z, r))
@@ -156,6 +182,10 @@ func _add_features() -> void:
 		chambers.push_back(Vector4(centre.x, centre.y, centre.z, size))
 		_add_bucketed(centre - Vector3.ONE * size, centre + Vector3.ONE * size, 1, Vector4(centre.x, centre.y, centre.z, size))
 		var out_dir := (dir + _random_dir() * 0.5).normalized()
+		for attempt in 8:
+			if _landing_arc((out_dir / STRETCH).normalized()) > LANDING_FLOOR + LANDING_RIM + 6.0:
+				break
+			out_dir = (dir + _random_dir() * 0.8).normalized()
 		var mouth := out_dir * (RADIUS + LUMP + 6.0) * STRETCH
 		var bend := centre.lerp(mouth, 0.5) + _random_dir() * 8.0
 		var width := _rng.randf_range(2.2, 2.8)

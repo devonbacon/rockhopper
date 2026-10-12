@@ -65,7 +65,7 @@ func _physics_process(delta: float) -> bool:
 			if _elapsed < 94.0:
 				return false
 			var rover := _game.rovers[0]
-			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored, _rig.stalled if _rig.stalled != "" else "drilling", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
+			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored if is_instance_valid(_rig) else -1, (_rig.stalled if _rig.stalled != "" else "drilling") if is_instance_valid(_rig) else "destroyed", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
 			if _game.stock <= _stock_before:
 				push_error("the rover brought nothing home")
 			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])

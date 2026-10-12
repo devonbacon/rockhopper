@@ -20,6 +20,8 @@ const HEALTH := 40.0
 const WHEEL_RADIUS := 0.32
 ## How long it leaves a rig it couldn't reach.
 const GIVE_UP_FOR := 30.0
+## The most it'll drop or climb in one step; past that it's a ledge.
+const MAX_STEP := 1.0
 
 var game: Game
 var task := Task.PARKED
@@ -63,7 +65,8 @@ func _physics_process(delta: float) -> void:
 		task = Task.HOMEBOUND
 	match task:
 		Task.PARKED:
-			_drive_to(park_point(), 1.0, delta)
+			if _drive_to(park_point(), 1.0, delta) != 0:
+				_settle(global_position, delta)
 			rig = game.pick_rig(self) if order == &"haul" else null
 			if rig:
 				task = Task.OUTBOUND
@@ -105,7 +108,9 @@ func damage(amount: float) -> void:
 
 func park_point() -> Vector3:
 	var angle := 2.2 + slot * 0.75
-	return game.pod.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 6.5
+	var frame := Fixture.upright(game.pod.normal)
+	var spot := game.pod.global_position + (frame.x * cos(angle) + frame.z * sin(angle)) * 6.5
+	return game.terrain.surface_point(spot)[0]
 
 
 ## Drives a step towards target along a path. 1 once it's within arrive
@@ -122,6 +127,12 @@ func _drive_to(target: Vector3, arrive: float, delta: float) -> int:
 		_repath = 3.0
 		_path = game.terrain.find_path(pos, target)
 		_next = 0
+		var closest := INF
+		for i in _path.size():
+			var gap := _path[i].distance_to(pos)
+			if gap < closest:
+				closest = gap
+				_next = i
 	while _next < _path.size() and _across(_path[_next] - pos, up).length() < 1.2:
 		_next += 1
 	var waypoint := target
@@ -148,9 +159,11 @@ func _across(v: Vector3, up: Vector3) -> Vector3:
 ## Puts it at pos on the ground, tilted to the slope under it.
 func _settle(pos: Vector3, delta: float) -> void:
 	var up := pos.normalized()
-	var query := PhysicsRayQueryParameters3D.create(pos + up * 3.0, pos - up * 6.0, Terrain.ROCK_LAYER)
+	var query := PhysicsRayQueryParameters3D.create(pos + up * 1.5, pos - up * 3.0, Terrain.ROCK_LAYER)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if !hit.is_empty():
+	if hit.is_empty() or absf((hit.position - global_position).dot(up)) > MAX_STEP:
+		pos = global_position
+	else:
 		pos = hit.position
 		_ground_up = _ground_up.slerp(hit.normal, minf(1.0, delta * 6.0)).normalized()
 	var ahead := _heading - _ground_up * _heading.dot(_ground_up)

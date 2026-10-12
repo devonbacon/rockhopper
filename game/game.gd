@@ -46,6 +46,8 @@ const WARM_RATE := 100.0 / 6.0
 const POD_RANGE := 6.0
 const SURFACE_ORE := 16
 const DEPOSITS := 8
+## The first this many are somewhere a rover can drive to from the pod.
+const REACHABLE_DEPOSITS := 4
 const START_STOCK := 10
 const START_ROVERS := 1
 ## A rover goes out for a rig with at least this much in its hopper.
@@ -112,7 +114,7 @@ func _ready() -> void:
 	_add_environment()
 	terrain = Terrain.new()
 	add_child(terrain)
-	terrain.generate(seed_value)
+	terrain.generate(seed_value, Sun.dir_at(Sun.DAY * 0.21))
 	sun = Sun.new()
 	sun.time = time
 	add_child(sun)
@@ -606,8 +608,13 @@ func _place_pod() -> void:
 func _place_deposits() -> void:
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	_shuffle(spots)
+	_place_deposits_from(spots, true)
+	_place_deposits_from(spots, false)
+
+
+func _place_deposits_from(spots: Array[Array], reachable_only: bool) -> void:
 	for spot in spots:
-		if deposits.size() == DEPOSITS:
+		if deposits.size() == (REACHABLE_DEPOSITS if reachable_only else DEPOSITS):
 			break
 		var p: Vector3 = spot[0]
 		if p.distance_to(pod.global_position) < 18.0:
@@ -619,6 +626,10 @@ func _place_deposits() -> void:
 				break
 		if crowded:
 			continue
+		if reachable_only:
+			var path := terrain.find_path(pod.global_position, p)
+			if path.is_empty() or path[-1].distance_to(p) > 4.0:
+				continue
 		var up: Vector3 = (spot[1] + p.normalized()).normalized()
 		var deposit := Fixture.make(&"deposit", p - up * 0.3, up)
 		add_child(deposit)

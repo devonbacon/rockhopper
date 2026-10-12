@@ -7,7 +7,8 @@ lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
 You drop onto a small, turning asteroid, about 130 m across. The pod
-lands just after sunrise. The sun circles the rock every five minutes, so
+lands just after sunrise, on the flat floor of a shallow impact crater,
+with room to set up. The sun circles the rock every five minutes, so
 the line between day and night crawls over the surface; one pole never
 sees night, the other never sees day. On a rock this lumpy, high ground
 keeps the sun well past where a smooth horizon would set it. There's
