@@ -96,6 +96,10 @@ var researched := {}
 var stats := {}
 ## Per soldier, by peer id: the local Player, or an Avatar.
 var bodies := {}
+## Whoever's in the pod commanding, by peer id, or 0. Their body's hidden
+## and out of harm's way till they climb out.
+var commander_peer := 0
+var commander_view: Commander
 
 var health: float:
 	get: return _me().health
@@ -258,11 +262,12 @@ func _simulate(delta: float) -> void:
 		if fixture.health <= 0.0:
 			_remove_built(fixture)
 	for peer in bodies.keys():
-		_look_after(peer, delta)
+		if peer != commander_peer:
+			_look_after(peer, delta)
 	if time >= MISSION:
-		var aboard := 0
-		for body: Node3D in bodies.values():
-			if body.global_position.distance_to(pod.global_position) < POD_RANGE + 2.0:
+		var aboard := 1 if commander_peer != 0 else 0
+		for peer in bodies:
+			if peer != commander_peer and (bodies[peer] as Node3D).global_position.distance_to(pod.global_position) < POD_RANGE + 2.0:
 				aboard += 1
 		if aboard > 0:
 			_end(State.WON, "Extracted with %d of %d ore in the pod.%s" % [stock, QUOTA, " Quota met." if stock >= QUOTA else ""])
@@ -393,6 +398,9 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 					target.screen.reply(reply)
 				else:
 					Net.event.rpc_id(peer, &"reply", [args[0], reply])
+		&"uncommand":
+			if commander_peer == peer:
+				_leave_command(peer)
 		&"hit":
 			if target is Spider:
 				(target as Spider).hit(args[1])
@@ -422,6 +430,11 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"announce":
 			if hud:
 				hud.announce(args[0])
+		&"command":
+			if args[0]:
+				_enter_view()
+			else:
+				_exit_view()
 		&"tracer":
 			if player:
 				player._tracer(args[0], args[1])
@@ -446,7 +459,63 @@ func add_soldier(peer: int) -> void:
 	avatar.target_position = spot
 
 
+func _take_command(peer: int) -> void:
+	commander_peer = peer
+	var body: Node3D = bodies.get(peer, null)
+	if body is Avatar:
+		body.visible = false
+	if peer == Net.local_id():
+		_enter_view()
+	else:
+		Net.event.rpc_id(peer, &"command", [true])
+
+
+func _leave_command(peer: int) -> void:
+	commander_peer = 0
+	var body: Node3D = bodies.get(peer, null)
+	if body is Avatar:
+		body.visible = true
+	var spot := _spawn_spot_by_pod(peer)
+	if peer == Net.local_id():
+		_exit_view()
+		place_player(spot, pod.global_position)
+	else:
+		if body:
+			body.global_position = spot
+			(body as Avatar).target_position = spot
+		Net.event.rpc_id(peer, &"command", [false])
+		Net.event.rpc_id(peer, &"respawn", [spot, "Out of the pod."])
+
+
+## Local: from the soldier's eyes to the commander's.
+func _enter_view() -> void:
+	if !player:
+		return
+	player.process_mode = Node.PROCESS_MODE_DISABLED
+	player.visible = false
+	hud.visible = false
+	if !commander_view:
+		commander_view = Commander.new()
+		commander_view.game = self
+		add_child(commander_view)
+	commander_view.enter()
+
+
+func _exit_view() -> void:
+	if !player:
+		return
+	if commander_view:
+		commander_view.leave()
+	player.process_mode = Node.PROCESS_MODE_INHERIT
+	player.visible = true
+	player.camera.make_current()
+	hud.visible = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
 func remove_soldier(peer: int) -> void:
+	if commander_peer == peer:
+		commander_peer = 0
 	if bodies.has(peer) and bodies[peer] != player:
 		bodies[peer].queue_free()
 	bodies.erase(peer)
@@ -459,12 +528,14 @@ func _make_avatar(peer: int) -> Avatar:
 	avatar.set_meta("peer", peer)
 	add_child(avatar)
 	var info: Dictionary = Net.peers.get(peer, {})
-	avatar.set_label("%s%s" % [info.get("name", "Soldier"), " (commander)" if info.get("role", &"soldier") == &"commander" else ""])
+	avatar.set_label(info.get("name", "Soldier"))
 	bodies[peer] = avatar
 	return avatar
 
 
 func remote_move(peer: int, pos: Vector3, yaw: float, pitch: float) -> void:
+	if peer == commander_peer:
+		return
 	var body: Node3D = bodies.get(peer, null)
 	if body is Avatar:
 		var avatar := body as Avatar
@@ -497,6 +568,8 @@ func _send_snapshots(delta: float) -> void:
 func _fast_state() -> Array:
 	var soldiers: Array = []
 	for peer in bodies:
+		if peer == commander_peer:
+			continue
 		var body: Node3D = bodies[peer]
 		var pitch: float = body.pitch if "pitch" in body else 0.0
 		soldiers.append([peer, body.global_position, body.global_rotation.y, pitch])
@@ -506,7 +579,7 @@ func _fast_state() -> Array:
 	var rover_rows: Array = []
 	for rover in rovers:
 		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot])
-	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows]
+	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows, commander_peer]
 
 
 func _slow_state() -> Array:
@@ -531,6 +604,7 @@ func apply_snapshot(data: Array) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	state = f[5]
 	outcome = f[6]
+	commander_peer = f[10]
 	var seen := {}
 	for row: Array in f[7]:
 		var peer: int = row[0]
@@ -834,10 +908,20 @@ func _wire_pod_screen() -> void:
 		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%\nLAUNCH IN     %d:%02d" % [
 			stock, QUOTA, rovers.size(), out, roundi(battery / capacity() * 100.0), int(left) / 60, int(left) % 60]
 	screen.button = func(action: StringName) -> Array:
+		if action == &"command":
+			if commander_peer == 0:
+				return ["TAKE COMMAND", true, false]
+			var info: Dictionary = Net.peers.get(commander_peer, {})
+			return ["COMMANDER: %s" % String(info.get("name", "YOU" if commander_peer == Net.local_id() else "TAKEN")).to_upper(), false, true]
 		if action == &"rover":
 			return ["PRINT ROVER   %d ORE" % Fixture.COST[&"rover"], stock >= Fixture.COST[&"rover"], false]
 		return ["HAND IN ORE   %d CARRIED" % carried, carried > 0, false]
 	screen.pressed = func(action: StringName) -> String:
+		if action == &"command":
+			if commander_peer != 0:
+				return "THE SEAT'S TAKEN."
+			_take_command(_acting if _acting != 0 else Net.local_id())
+			return ""
 		if action == &"rover":
 			if print_rover():
 				return "ROVER PRINTED. %d ON THE ROSTER." % rovers.size()
@@ -890,8 +974,9 @@ func spider_target(spider: Spider) -> Node3D:
 	var best: Node3D = null
 	var best_distance := Spider.SIGHT
 	var candidates: Array[Node3D] = []
-	for body: Node3D in bodies.values():
-		candidates.push_back(body)
+	for peer in bodies:
+		if peer != commander_peer:
+			candidates.push_back(bodies[peer])
 	for rover in rovers:
 		if rover.exposed():
 			candidates.push_back(rover)
@@ -965,8 +1050,9 @@ func _spawn_spiders(delta: float) -> void:
 	if spiders.size() >= roundi(lerpf(SPIDERS_START, SPIDERS_END, progress)):
 		return
 	var near: Array[Node3D] = []
-	for body: Node3D in bodies.values():
-		near.append_array([body, body, body])
+	for peer in bodies:
+		if peer != commander_peer:
+			near.append_array([bodies[peer], bodies[peer], bodies[peer]])
 	near.append_array(rovers)
 	near.append_array(built)
 	if near.is_empty():
@@ -993,8 +1079,8 @@ func _spawn_spot(around: Vector3) -> Vector3:
 	if hit.is_empty():
 		return Vector3.INF
 	var spot: Vector3 = hit.position
-	for body: Node3D in bodies.values():
-		if spot.distance_to(body.global_position) < 10.0:
+	for peer in bodies:
+		if peer != commander_peer and spot.distance_to((bodies[peer] as Node3D).global_position) < 10.0:
 			return Vector3.INF
 	if lit_at(spot + up * 0.6) != "":
 		return Vector3.INF
@@ -1210,6 +1296,8 @@ func _debug_setup() -> void:
 		hud.set_paused(true)
 	if _args.has("pitch"):
 		player.look(deg_to_rad(float(_args.pitch)))
+	if _args.has("command"):
+		_take_command(Net.local_id())
 	if _args.has("probe"):
 		_probe(_args.probe)
 	if _args.has("shot"):
@@ -1233,7 +1321,14 @@ func _probe(kind: String) -> void:
 		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d rovers %d spiders %d | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), rovers.size(), spiders.size(), others])
 	await tree.create_timer(3.0).timeout
 	report.call("joined")
-	if kind == "stander":
+	if kind == "commander":
+		act(&"press", [pod.net_id, &"command"])
+		await tree.create_timer(2.0).timeout
+		print("[commander] in the pod: commander %d (me %d), view %s" % [commander_peer, Net.local_id(), commander_view != null and commander_view.visible])
+		act(&"uncommand", [])
+		await tree.create_timer(2.0).timeout
+		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])
+	elif kind == "stander":
 		var spot: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 1.6 + pod.screen.global_basis.x * 1.2
 		for i in 60:
 			player.global_position = terrain.surface_point(spot)[0] + Vector3.UP * 0.1

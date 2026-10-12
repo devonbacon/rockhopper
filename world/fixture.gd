@@ -145,7 +145,7 @@ func _build_pod() -> void:
 	var frame := BoxMesh.new()
 	screen = Screen.new()
 	screen.title = "PROSPECTOR POD  //  FAB-2"
-	screen.buttons = [&"rover", &"hand_in"]
+	screen.buttons = [&"rover", &"hand_in", &"command"]
 	frame.size = Vector3(screen.size_m.x + 0.12, screen.size_m.y + 0.12, 0.06)
 	_add_mesh(frame, _material(Color(0.2, 0.21, 0.24), 0.6, 0.4), Vector3(1.34, 2.1, 0)).basis = screen_basis
 	screen.transform = Transform3D(screen_basis, Vector3(1.34, 2.1, 0) + out * 0.035)

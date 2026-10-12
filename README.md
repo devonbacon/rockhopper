@@ -66,8 +66,12 @@ hurt you for a few seconds.
 
 ## Playing together
 
-The menu offers solo, hosting, or joining a server, as a soldier or the
-commander (who, for now, plays as a soldier too). The server runs the
+The menu offers solo, hosting, or joining a server. Everyone starts as a
+soldier. The commander's seat is in the pod: "Take command" on the pod's
+screen climbs in (one commander at a time), out of harm's way and the
+cold, counted aboard at launch, with an overhead view of the crater (WASD
+or the screen edges pan, the wheel zooms, the middle button turns it);
+X climbs back out beside the pod. The commander can't give orders yet. The server runs the
 world: spiders, rovers, building, power, research, the bank and the
 clock. Each client moves its own soldier and asks the server for
 everything else. Every client generates the same map from the server's
@@ -80,7 +84,7 @@ From the command line, after `--`:
 - `server` (with `port=`, default 7777, and `seed=`): a dedicated server,
   headless, with no player of its own.
 - `host`: a server with you playing on it.
-- `join=address:port`, with `name=` and `role=soldier|commander`.
+- `join=address:port`, with `name=`.
 
 The dedicated server runs on a Debian box: `tools/deploy_server.sh
 [user@host] [port]` (from a machine with ssh access) installs Godot's
@@ -89,7 +93,7 @@ systemd user service, restarting on failure. Run it again after pushing
 to update. Logs: `journalctl --user -u rockhopper -f` on the box. The
 port is UDP.
 
-Debug: `probe=builder|walker|stander` scripts a joined client, for
+Debug: `command` starts in the commander's seat; `probe=builder|walker|stander|commander` scripts a joined client, for
 checking a server headlessly.
 
 ## Controls
@@ -179,6 +183,7 @@ User arguments after `--`, e.g.
 - `net/net.gd` (autoload `Net`): connections and every RPC.
 - `game/avatar.gd`: other soldiers.
 - `menu/menu.gd`: the front door.
+- `game/commander.gd`: the commander's view.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,
   `Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn`. It plays

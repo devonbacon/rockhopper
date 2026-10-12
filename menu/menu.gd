@@ -1,12 +1,11 @@
 extends Control
-## The front door: play solo, host, or join a server as a soldier or the
-## commander. On the command line (after --): server [port=], join=host:port,
-## host, name=, role=; any other argument goes straight into a solo game, so
-## the debug arguments keep working.
+## The front door: play solo, host, or join a server. Everyone starts as a
+## soldier; the commander's seat is in the pod. On the command line (after
+## --): server [port=], join=host:port, host, name=; any other argument goes
+## straight into a solo game, so the debug arguments keep working.
 
 var _name: LineEdit
 var _address: LineEdit
-var _role: OptionButton
 var _status: Label
 
 
@@ -57,12 +56,6 @@ func _build() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
 	_name = _field(column, "Name", Net.player_name)
-	_role = OptionButton.new()
-	_role.add_item("Soldier")
-	_role.add_item("Commander")
-	_role.selected = 1 if Net.role == &"commander" else 0
-	_role.custom_minimum_size.y = 40
-	column.add_child(_role)
 	_address = _field(column, "Server", "192.168.1.27:%d" % Net.PORT)
 	for entry: Array in [["Join", _on_join], ["Host here", _on_host], ["Play solo", _on_solo], ["Quit", func() -> void: get_tree().quit()]]:
 		var button := Button.new()
@@ -95,7 +88,6 @@ func _field(parent: Control, label: String, value: String) -> LineEdit:
 
 func _take_settings() -> void:
 	Net.player_name = _name.text.strip_edges() if _name.text.strip_edges() != "" else "Soldier"
-	Net.role = &"commander" if _role.selected == 1 else &"soldier"
 
 
 func _on_join() -> void:
