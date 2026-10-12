@@ -24,6 +24,7 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/size/mode=2
 window/size/initial_position_type=4
+window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
 [editor_plugins]
@@ -36,5 +37,5 @@ enabled=PackedStringArray("res://addons/godot_ai/plugin.cfg")
 
 [rendering]
 
-anti_aliasing/quality/msaa_3d=1
 lights_and_shadows/directional_shadow/size=8192
+anti_aliasing/quality/msaa_3d=1

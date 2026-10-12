@@ -32,17 +32,18 @@ func set_time(t: float) -> void:
 	basis = Basis.looking_at(-dir_at(t), Vector3.UP)
 
 
-## Seconds until the sun next crosses the horizon of a point whose up is
-## `up`, and whether that's a sunrise. INF if it never does.
-func next_crossing(up: Vector3) -> Array:
-	var was_up := dir_at(time).dot(up) > 0.0
-	for s in range(1, int(DAY) + 1):
-		if (dir_at(time + s).dot(up) > 0.0) != was_up:
-			return [float(s), !was_up]
-	return [INF, !was_up]
-
-
-## Whether nothing but space lies between p and the sun.
-func lights(p: Vector3, space: PhysicsDirectSpaceState3D) -> bool:
-	var query := PhysicsRayQueryParameters3D.create(p, p + dir_at(time) * 250.0, Asteroid.ROCK_LAYER)
+## Whether nothing but space lies between p and the sun, now or at time
+## t. On a rock this small and lumpy, that's often well past where a
+## smooth horizon would put sunset.
+func lights(p: Vector3, space: PhysicsDirectSpaceState3D, t: float = NAN) -> bool:
+	var query := PhysicsRayQueryParameters3D.create(p, p + dir_at(time if is_nan(t) else t) * 250.0, Asteroid.ROCK_LAYER)
 	return space.intersect_ray(query).is_empty()
+
+
+## Whether the sun reaches p at each of `steps` moments spread over the
+## next turn, starting now.
+func forecast(p: Vector3, space: PhysicsDirectSpaceState3D, steps: int) -> Array[bool]:
+	var lit: Array[bool] = []
+	for i in steps:
+		lit.push_back(lights(p, space, time + DAY * i / float(steps)))
+	return lit

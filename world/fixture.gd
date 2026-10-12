@@ -1,10 +1,14 @@
 class_name Fixture
 extends StaticBody3D
-## Anything standing on the rock: the drop pod, ore, and what you build.
-## Stood upright along the surface normal it was placed on.
+## Anything standing on the rock: the drop pod, ore, deposits, and what you
+## build. Stood upright along the surface normal it was placed on.
+##
+## Ore is a small cluster, gone once mined. A deposit is a big outcrop
+## that never runs out: you can chip at it by hand, or mark it for bots.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2}
+const COST := {&"lamp": 1, &"panel": 2, &"bot": 4}
+const HEALTH := 30.0
 const LAMP_RANGE := 13.0
 
 var kind: StringName
@@ -14,11 +18,16 @@ var normal := Vector3.UP
 var sunlit := false
 var on := false
 var amount := 3
+## Deposits: whether bots should mine it.
+var designated := false
+## Lamps and panels: spiders wear this down.
+var health := HEALTH
 
 var light: OmniLight3D
 var _bulb: StandardMaterial3D
 var _beacon: OmniLight3D
 var _beacon_bulb: StandardMaterial3D
+var _marker: MeshInstance3D
 
 
 static func make(fixture_kind: StringName, pos: Vector3, surface_normal: Vector3) -> Fixture:
@@ -44,6 +53,7 @@ func _ready() -> void:
 		&"lamp": _build_lamp()
 		&"panel": _build_panel()
 		&"ore": _build_ore()
+		&"deposit": _build_deposit()
 
 
 func set_on(value: bool) -> void:
@@ -52,7 +62,19 @@ func set_on(value: bool) -> void:
 	_bulb.emission_energy_multiplier = 6.0 if on else 0.0
 
 
-func _process(_delta: float) -> void:
+func set_designated(value: bool) -> void:
+	designated = value
+	_marker.visible = value
+
+
+## Where a bot mining it hovers.
+func work_point() -> Vector3:
+	return global_position + normal * 3.4
+
+
+func _process(delta: float) -> void:
+	if _marker and _marker.visible:
+		_marker.rotate_object_local(Vector3.UP, delta * 0.8)
 	if _beacon:
 		var blink := fmod(Time.get_ticks_msec() / 1000.0, 1.6) < 0.25
 		_beacon.visible = blink
@@ -161,6 +183,42 @@ func _build_ore() -> void:
 	var shape := SphereShape3D.new()
 	shape.radius = 0.75
 	_add_collider(shape, Vector3(0, 0.45, 0))
+
+
+func _build_deposit() -> void:
+	var crystal := _material(Color(0.3, 0.85, 0.92), 0.25, 0.12)
+	crystal.emission_enabled = true
+	crystal.emission = Color(0.2, 0.75, 0.9)
+	crystal.emission_energy_multiplier = 0.15
+	var rock := _material(Color(0.32, 0.3, 0.28), 0.0, 0.95)
+	var base := SphereMesh.new()
+	base.radius = 1.7
+	base.height = 1.6
+	_add_mesh(base, rock, Vector3(0, 0.1, 0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(position)
+	for i in 9:
+		var height := rng.randf_range(1.4, 3.2)
+		var mesh := _cylinder(0.0, rng.randf_range(0.3, 0.6), height)
+		mesh.radial_segments = 6
+		var angle := TAU * i / 9.0 + rng.randf_range(-0.3, 0.3)
+		var out := rng.randf_range(0.2, 1.1)
+		var shard := _add_mesh(mesh, crystal, Vector3(cos(angle) * out, height * 0.4 + 0.3, sin(angle) * out))
+		shard.rotation = Vector3(sin(angle) * out * 0.5, rng.randf_range(0, TAU), -cos(angle) * out * 0.5)
+	var ring := TorusMesh.new()
+	ring.inner_radius = 2.3
+	ring.outer_radius = 2.45
+	ring.rings = 48
+	var glow := _material(Color(0.4, 0.95, 1.0), 0.0, 0.5)
+	glow.emission_enabled = true
+	glow.emission = Color(0.3, 0.9, 1.0)
+	glow.emission_energy_multiplier = 3.0
+	_marker = _add_mesh(ring, glow, Vector3(0, 0.25, 0))
+	_marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_marker.visible = false
+	var shape := SphereShape3D.new()
+	shape.radius = 1.6
+	_add_collider(shape, Vector3(0, 0.9, 0))
 
 
 func _material(color: Color, metallic: float, roughness: float) -> StandardMaterial3D:

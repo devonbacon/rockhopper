@@ -3,20 +3,22 @@ extends CharacterBody3D
 ## You, in first person, walking on a rock whose down is always its centre.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
-## the jetpack, which refills on the ground. E is use: tap it at the pod to
-## hand in ore, hold it on ore to mine it, or on a lamp or panel to pick it
-## back up. 1 and 2 pick a lamp or a panel to build, left-click builds it,
-## right-click puts the tool away. F toggles the headlamp.
+## the jetpack, which refills on the ground. Left mouse fires, unless a
+## lamp or panel's in hand (1 and 2), when it builds one; right-click puts
+## it away. E is use: tap it at the pod to hand in ore, hold it on ore or a
+## deposit to mine it, or on a lamp or panel to pick it back up. Q marks a
+## deposit for the bots to mine, or unmarks it, from a fair way off. 3
+## prints a bot at the pod. F toggles the headlamp.
 
 const LAYER := 4
-const GRAVITY := 2.5
+const GRAVITY := 5.0
 const WALK := 5.0
 const RUN := 8.5
 const ACCEL := 30.0
 const AIR_ACCEL := 3.0
-const JUMP := 4.0
-const JET := 6.0
-const JET_DRAIN := 30.0
+const JUMP := 4.5
+const JET := 11.0
+const JET_DRAIN := 35.0
 ## The jetpack won't push you up faster than this.
 const JET_RISE := 5.0
 const JET_REFILL := 45.0
@@ -24,6 +26,10 @@ const REACH := 4.5
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
+const MARK_REACH := 45.0
+const FIRE_EVERY := 0.14
+const DAMAGE := 10.0
+const GUN_RANGE := 60.0
 const SENSITIVITY := 0.0025
 const HEIGHT := 1.8
 
@@ -36,6 +42,9 @@ var tool: StringName = &""
 var prompt := ""
 var progress := 0.0
 var jetting := false
+## A line of feedback for the HUD, and how long it's still shown.
+var notice := ""
+var notice_time := 0.0
 
 var _head: Node3D
 var _ghost: MeshInstance3D
@@ -45,6 +54,12 @@ var _pitch := 0.0
 var _use_target: Fixture
 var _use_held := 0.0
 var _use_was_down := false
+var _mark_was_down := false
+var _cooldown := 0.0
+var _recoil := 0.0
+var _gun: Node3D
+var _muzzle: Node3D
+var _muzzle_light: OmniLight3D
 
 
 func _ready() -> void:
@@ -84,6 +99,7 @@ func _ready() -> void:
 	var panel := BoxMesh.new()
 	panel.size = Vector3(1.6, 0.6, 1.0)
 	_ghost_meshes = {&"lamp": post, &"panel": panel}
+	_build_gun()
 	_ghost = MeshInstance3D.new()
 	_ghost.top_level = true
 	_ghost.material_override = _ghost_material
@@ -127,6 +143,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_ESCAPE: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 			KEY_1: tool = &"" if tool == &"lamp" else &"lamp"
 			KEY_2: tool = &"" if tool == &"panel" else &"panel"
+			KEY_3: _say("Bot printed at the pod" if game.print_bot() else "Not enough ore in the pod for a bot")
 			KEY_F: headlamp.visible = !headlamp.visible
 
 
@@ -160,9 +177,17 @@ func _physics_process(delta: float) -> void:
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
 	move_and_slide()
+	notice_time = maxf(0.0, notice_time - delta)
+	_cooldown = maxf(0.0, _cooldown - delta)
+	_recoil = maxf(0.0, _recoil - delta * 12.0)
+	_muzzle_light.light_energy = _recoil * 3.0
+	_gun.position.z = -0.36 + _recoil * 0.04
 	if playing:
 		_use(delta)
 		_aim_ghost()
+		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if trigger and tool == &"" and _cooldown <= 0.0:
+			_fire()
 	else:
 		_ghost.visible = false
 
@@ -180,21 +205,36 @@ func _aim(reach: float) -> Dictionary:
 
 
 func _use(delta: float) -> void:
-	var hit := _aim(REACH)
-	var target: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
+	var hit := _aim(MARK_REACH)
+	var aimed: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
+	var target: Fixture = aimed if aimed and camera.global_position.distance_to(hit.position) <= REACH else null
 	var down := Input.is_physical_key_pressed(KEY_E)
 	var pressed := down and !_use_was_down
 	_use_was_down = down
+	var mark_down := Input.is_physical_key_pressed(KEY_Q)
+	var mark_pressed := mark_down and !_mark_was_down
+	_mark_was_down = mark_down
 	if target != _use_target:
 		_use_target = target
 		_use_held = 0.0
 	prompt = ""
 	progress = 0.0
+	if aimed and aimed.kind == &"deposit":
+		var mark := "[Q] %s for bots" % ("Unmark" if aimed.designated else "Mark")
+		if aimed.designated:
+			mark += " (%d on it)" % game.bots_on(aimed)
+		prompt = ("[Hold E] Mine    " + mark) if target else mark
+		if mark_pressed:
+			game.toggle_designation(aimed)
+			_say("Deposit marked for mining" if aimed.designated else "Deposit unmarked")
+		if target:
+			_hold(down, delta, MINE_TIME, func() -> void: game.mine(target))
+		return
 	if !target:
 		return
 	match target.kind:
 		&"pod":
-			prompt = "[E] Hand in ore" if game.carried > 0 else "Drop pod"
+			prompt = ("[E] Hand in %d ore" % game.carried) if game.carried > 0 else ("Drop pod: %d ore banked" % game.stock)
 			if pressed:
 				game.hand_in()
 		&"ore":
@@ -239,3 +279,98 @@ func _build() -> void:
 	var hit := _placement()
 	if !hit.is_empty() and game.can_build(tool, hit.position):
 		game.build(tool, hit.position, hit.normal)
+
+
+func _say(text: String) -> void:
+	notice = text
+	notice_time = 2.5
+
+
+## Hitscan: whatever the crosshair's on, out to range. Spiders take damage;
+## anything else just stops the shot. The flash lights up the dark.
+func _fire() -> void:
+	_cooldown = FIRE_EVERY
+	_recoil = 1.0
+	var from := camera.global_position
+	var to := from - camera.global_basis.z * GUN_RANGE
+	var query := PhysicsRayQueryParameters3D.create(from, to, Asteroid.ROCK_LAYER | Fixture.LAYER | Spider.LAYER, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if !hit.is_empty():
+		to = hit.position
+		if hit.collider is Spider:
+			(hit.collider as Spider).hit(DAMAGE)
+	_tracer(_muzzle.global_position, to)
+
+
+func _tracer(from: Vector3, to: Vector3) -> void:
+	var length := from.distance_to(to)
+	if length < 0.1:
+		return
+	var along := (to - from) / length
+	var side := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.RIGHT).normalized()
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = Color(0.7, 1.0, 1.0, 0.9)
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.012
+	mesh.bottom_radius = 0.012
+	mesh.height = 1.0
+	mesh.radial_segments = 4
+	var tracer := MeshInstance3D.new()
+	tracer.mesh = mesh
+	tracer.material_override = material
+	tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	game.add_child(tracer)
+	tracer.global_transform = Transform3D(Basis(side, along * length, side.cross(along)), (from + to) * 0.5)
+	var fade := tracer.create_tween()
+	fade.tween_property(material, "albedo_color:a", 0.0, 0.08)
+	fade.tween_callback(tracer.queue_free)
+
+
+func _build_gun() -> void:
+	_gun = Node3D.new()
+	_gun.position = Vector3(0.2, -0.17, -0.36)
+	_gun.scale = Vector3.ONE * 0.55
+	camera.add_child(_gun)
+	var metal := StandardMaterial3D.new()
+	metal.albedo_color = Color(0.32, 0.33, 0.36)
+	metal.metallic = 0.7
+	metal.roughness = 0.35
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(0.5, 1.0, 1.0)
+	glow.emission_enabled = true
+	glow.emission = Color(0.4, 1.0, 1.0)
+	glow.emission_energy_multiplier = 3.0
+	var body := BoxMesh.new()
+	body.size = Vector3(0.08, 0.1, 0.42)
+	_gun_part(body, metal, Vector3.ZERO, Vector3.ZERO)
+	var grip := BoxMesh.new()
+	grip.size = Vector3(0.06, 0.14, 0.07)
+	_gun_part(grip, metal, Vector3(0, -0.1, 0.12), Vector3(-0.3, 0, 0))
+	var barrel := CylinderMesh.new()
+	barrel.top_radius = 0.022
+	barrel.bottom_radius = 0.03
+	barrel.height = 0.26
+	_gun_part(barrel, metal, Vector3(0, 0.01, -0.33), Vector3(PI * 0.5, 0, 0))
+	var strip := BoxMesh.new()
+	strip.size = Vector3(0.02, 0.015, 0.3)
+	_gun_part(strip, glow, Vector3(0, 0.055, -0.02), Vector3.ZERO)
+	_muzzle = Node3D.new()
+	_muzzle.position = Vector3(0, 0.01, -0.47)
+	_gun.add_child(_muzzle)
+	_muzzle_light = OmniLight3D.new()
+	_muzzle_light.light_color = Color(0.6, 0.95, 1.0)
+	_muzzle_light.omni_range = 9.0
+	_muzzle_light.light_energy = 0.0
+	_muzzle.add_child(_muzzle_light)
+
+
+func _gun_part(mesh: Mesh, material: Material, pos: Vector3, rotation_angles: Vector3) -> void:
+	var part := MeshInstance3D.new()
+	part.mesh = mesh
+	part.material_override = material
+	part.position = pos
+	part.rotation = rotation_angles
+	part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_gun.add_child(part)
