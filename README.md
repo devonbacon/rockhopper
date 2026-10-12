@@ -6,13 +6,13 @@ dark is the enemy. It tests whether night coming round, with too few
 lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
-You drop onto the floor of a crater on a turning asteroid. The pod lands
-mid-morning. The sun crosses the sky every five minutes, then there's a
-night as long as the day. Low in the sky, it throws the crater rim's
-shadow across the floor, so the valleys go dark first and the high
-ground holds the light longest. There's loose ore lying about, big
-deposits that never run out, and a few caves under the floor to shelter
-in.
+You drop onto a small, turning asteroid, about 130 m across. The pod
+lands just after sunrise. The sun circles the rock every five minutes, so
+the line between day and night crawls over the surface; one pole never
+sees night, the other never sees day. On a rock this lumpy, high ground
+keeps the sun well past where a smooth horizon would set it. There's
+loose ore lying about, big deposits that never run out, craters, and a
+few chambers inside, reached by tunnels from the surface.
 
 Power is one battery, shared by everything. Sunlight fills it, falling
 on the top of the pod or on panels you build (a panel makes more the
@@ -36,7 +36,7 @@ a lamp, into a hopper of 12. You start with one rover, and can print
 more at the pod. A rover waits by the pod until a rig has a load worth
 the trip. Then it drives out, empties the hopper and drives the ore home,
 spreading itself over the rigs with the most waiting. Rovers can't
-climb steep slopes, so a deposit in a crater or behind a ridge is a
+climb steep slopes, so a deposit in a crater or over a ridge is a
 longer drive, or one they can't make at all. You can also empty a
 hopper by hand.
 
@@ -88,7 +88,7 @@ hurt you for a few seconds.
   rover's doing, its cargo and its hull.
 - **F** toggles the headlamp. **Esc** pauses (Resume, New map, Quit);
   Esc again resumes.
-- **R** after a mission: a new map. **Shift+R:** the same one.
+- **R** after a mission: a new asteroid. **Shift+R:** the same one.
 
 The sunset/sunrise clock and the strip under it look along where the sun
 will be from where you stand, so they allow for the terrain round you.
@@ -97,8 +97,8 @@ will be from where you stand, so they allow for the terrain round you.
 
 Mission, power, health and spider numbers are constants at the top of
 `game/game.gd`. The day's length and the sun's path are in
-`world/sun.gd`. The map's size, rim, hills and caves are in
-`world/terrain.gd`. Rigs' drilling rate and hopper are in
+`world/sun.gd`. The rock's size, lumpiness, craters and caves
+are in `world/terrain.gd`. Rigs' drilling rate and hopper are in
 `world/fixture.gd`. Movement and the gun are in `player/player.gd`,
 rovers in `world/rover.gd`, and spiders in `world/spider.gd`.
 
@@ -107,9 +107,10 @@ rovers in `world/rover.gd`, and spiders in `world/spider.gd`.
 User arguments after `--`, e.g.
 `Godot --path . -- --seed=1 --time=200 --lamps=2`:
 
-- `seed=N`: the map.
-- `time=S`: start S seconds in (`time=150` is dusk).
-- `view=overview` looks down on the whole crater; `view=cave` stands
+- `seed=N`: the asteroid.
+- `time=S`: start S seconds in (the pod still lands at t=0's sunrise,
+  so `time=200` starts you at night).
+- `view=orbit` looks at the whole rock; `view=cave` stands
   you in a cave; `view=screen` in front of the pod's screen; `view=rover`
   behind the first rover.
 - `rig` builds a rig on the deposit nearest the pod and stands you
@@ -126,10 +127,10 @@ User arguments after `--`, e.g.
 
 ## Layout
 
-- `world/terrain.gd`: the ground, a signed distance field (crater floor
-  and rim, hills, boulders, small craters, caves) meshed once by surface
-  nets into chunks with trimesh colliders, plus a navigation mesh baked
-  from it for rovers. No deformation.
+- `world/terrain.gd`: the asteroid, a signed distance field (a lumpy,
+  stretched ball, craters, chambers and tunnels) meshed once by surface
+  nets into chunks with trimesh colliders. The mesh's own vertices make
+  the rovers' walkable graph (A*, gentle slopes only). No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, lamps, panels and rigs.
 - `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and

@@ -1,7 +1,7 @@
 class_name Game
 extends Node3D
-## One mission: drop onto the floor of a crater, get ore into the pod, and
-## be beside it when it launches.
+## One mission: drop onto a turning asteroid, get ore into the pod, and be
+## beside it when it launches.
 ##
 ## Power is one shared battery, filled by sunlight on the pod and on any
 ## panels you build, and drained by lamps, which light themselves whenever
@@ -44,8 +44,8 @@ const UPGRADES := {
 const COLD_RATE := 100.0 / 45.0
 const WARM_RATE := 100.0 / 6.0
 const POD_RANGE := 6.0
-const SURFACE_ORE := 12
-const DEPOSITS := 6
+const SURFACE_ORE := 16
+const DEPOSITS := 8
 const START_STOCK := 10
 const START_ROVERS := 1
 ## A rover goes out for a rig with at least this much in its hopper.
@@ -333,9 +333,10 @@ func build(kind: StringName, pos: Vector3, normal: Vector3) -> void:
 	else:
 		fixture = Fixture.make(kind, pos, normal)
 	if kind == &"lab":
-		var towards := Vector3(player.global_position.x - pos.x, 0.0, player.global_position.z - pos.z)
+		var towards := player.global_position - pos
+		towards -= normal * towards.dot(normal)
 		if towards.length() > 0.1:
-			fixture.basis = Basis.looking_at(-towards.normalized(), Vector3.UP)
+			fixture.basis = Basis.looking_at(-towards.normalized(), normal)
 	add_child(fixture)
 	built.push_back(fixture)
 	_light_check = 0.0
@@ -546,22 +547,23 @@ func _spawn_spiders(delta: float) -> void:
 			return
 
 
-## Somewhere dark on the ground 12-28 m from around, inside the crater and
-## not too near you, or INF if this try didn't find one.
+## Somewhere dark on the surface 12-28 m from around, and not too near you,
+## or INF if this try didn't find one.
 func _spawn_spot(around: Vector3) -> Vector3:
-	var offset := Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(12.0, 28.0)
-	var start := Vector3(around.x + offset.x, around.y + 6.0, around.z + offset.y)
-	if Vector2(start.x, start.z).length() > Terrain.FLOOR_RADIUS or terrain.density(start) < 0.0:
+	var up := around.normalized()
+	var frame := Fixture.upright(up)
+	var angle := _rng.randf() * TAU
+	var start := around + up * 6.0 + (frame.x * cos(angle) + frame.z * sin(angle)) * _rng.randf_range(12.0, 28.0)
+	if terrain.density(start) < 0.0:
 		return Vector3.INF
-	var query := PhysicsRayQueryParameters3D.create(start, start - Vector3.UP * 24.0, Terrain.ROCK_LAYER)
+	var query := PhysicsRayQueryParameters3D.create(start, start - start.normalized() * 24.0, Terrain.ROCK_LAYER)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		return Vector3.INF
 	var spot: Vector3 = hit.position
-	if spot.distance_to(player.global_position) < 10.0 or lit_at(spot + Vector3.UP * 0.6) != "":
+	if spot.distance_to(player.global_position) < 10.0 or lit_at(spot + spot.normalized() * 0.6) != "":
 		return Vector3.INF
 	return spot
-
 
 func _end(new_state: State, text: String) -> void:
 	state = new_state
@@ -590,19 +592,14 @@ func _add_environment() -> void:
 	add_child(world_env)
 
 
-## The pod comes down on open, flat ground near the middle of the crater.
+## The pod comes down where the sun's just risen at the start, so the
+## first day is long.
 func _place_pod() -> void:
-	var spots: Array[Array] = terrain.surface_spots.duplicate()
-	_shuffle(spots)
-	var landing: Array = spots[0]
-	for spot in spots:
-		if Vector2(spot[0].x, spot[0].z).length() < 20.0 and spot[1].y > 0.97:
-			landing = spot
-			break
-	pod = Fixture.make(&"pod", landing[0] - Vector3.UP * 0.4, Vector3.UP)
+	var landing: Array = terrain.surface_point(Sun.dir_at(Sun.DAY * 0.21))
+	var up: Vector3 = (landing[1] + landing[0].normalized() * 2.0).normalized()
+	pod = Fixture.make(&"pod", landing[0] - up * 0.4, up)
 	add_child(pod)
 	_wire_pod_screen()
-
 
 ## Big outcrops that never run out, spread well apart, none too near the
 ## pod, on ground flat enough for a rig.
@@ -613,16 +610,17 @@ func _place_deposits() -> void:
 		if deposits.size() == DEPOSITS:
 			break
 		var p: Vector3 = spot[0]
-		if p.distance_to(pod.global_position) < 18.0 or spot[1].y < 0.95:
+		if p.distance_to(pod.global_position) < 18.0:
 			continue
 		var crowded := false
 		for deposit in deposits:
-			if deposit.global_position.distance_to(p) < 22.0:
+			if deposit.global_position.distance_to(p) < 25.0:
 				crowded = true
 				break
 		if crowded:
 			continue
-		var deposit := Fixture.make(&"deposit", p - Vector3.UP * 0.3, Vector3.UP)
+		var up: Vector3 = (spot[1] + p.normalized()).normalized()
+		var deposit := Fixture.make(&"deposit", p - up * 0.3, up)
 		add_child(deposit)
 		deposits.push_back(deposit)
 
@@ -657,20 +655,22 @@ func _shuffle(list: Array) -> void:
 
 
 func _spawn_player() -> void:
-	var spot: Array = terrain.surface_point(pod.global_position + Vector3(4.0, 0.0, 3.0))
-	place_player(spot[0] + Vector3.UP * 0.3, pod.global_position)
+	var side := Fixture.upright(pod.global_position.normalized()).x
+	var spot: Array = terrain.surface_point(pod.global_position + side * 5.0)
+	place_player(spot[0] + spot[0].normalized() * 0.6, pod.global_position)
 
-
-## Puts the player at pos, facing towards target.
+## Puts the player at pos, standing up and facing towards target.
 func place_player(pos: Vector3, target: Vector3) -> void:
-	var ahead := Vector3(target.x - pos.x, 0.0, target.z - pos.z)
+	var up := pos.normalized()
+	var ahead := target - pos
+	ahead -= up * ahead.dot(up)
 	if ahead.length() < 0.01:
-		ahead = Vector3.FORWARD
-	player.global_transform = Transform3D(Basis.looking_at(ahead.normalized(), Vector3.UP), pos)
+		ahead = Fixture.upright(up).z
+	player.global_transform = Transform3D(Basis.looking_at(ahead.normalized(), up), pos)
 	player.velocity = Vector3.ZERO
+	player.align_up()
 
-
-## Debug setup from user args (after `--`): seed=, time=, view=overview|
+## Debug setup from user args (after `--`): seed=, time=, view=orbit|
 ## cave|screen|rover, lab (builds one ahead, researching), rig (builds one on the deposit nearest the pod and stands you by
 ## it), lamps=N (around you), spiders=N (in front of you), tool=,
 ## radial=N (the build menu up, N chosen, -1 for none), pitch=
@@ -678,49 +678,50 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 ## quit.
 func _debug_setup() -> void:
 	match _args.get("view", ""):
-		"overview":
-			var overview := Camera3D.new()
-			overview.far = 2000.0
-			add_child(overview)
-			overview.look_at_from_position(Vector3(0, 110, 120), Vector3(0, 0, 5))
-			overview.make_current()
+		"orbit":
+			var orbit := Camera3D.new()
+			orbit.far = 2000.0
+			add_child(orbit)
+			var from := Sun.dir_at(time).rotated(Vector3.UP, PI * 0.5) * 210.0 + Vector3.UP * 60.0
+			orbit.look_at_from_position(from, Vector3.ZERO)
+			orbit.make_current()
 			player.process_mode = Node.PROCESS_MODE_DISABLED
 		"screen":
 			var front: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 2.6
 			var spot: Array = terrain.surface_point(front)
-			place_player(spot[0] + Vector3.UP * 0.3, pod.screen.global_position)
+			place_player(spot[0] + spot[0].normalized() * 0.3, pod.screen.global_position)
 		"rover":
 			var rover := rovers[0]
 			var behind: Vector3 = rover.screen.global_position + rover.global_basis.z * 1.6
-			place_player(Vector3(behind.x, terrain.surface_point(behind)[0].y + 0.3, behind.z), rover.screen.global_position)
+			var spot: Array = terrain.surface_point(behind)
+			place_player(spot[0] + spot[0].normalized() * 0.3, rover.screen.global_position)
 		"cave":
 			var chamber := terrain.chambers[0]
-			var floor_point: Array = terrain.surface_point(Vector3(chamber.x, 0, chamber.z))
 			var centre := Vector3(chamber.x, chamber.y, chamber.z)
 			await get_tree().physics_frame
-			var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(centre, centre - Vector3.UP * 12.0, Terrain.ROCK_LAYER))
-			place_player((hit.position if !hit.is_empty() else centre) + Vector3.UP * 0.3, centre + Vector3(5, 0, 0))
-			print("cave floor ", hit.get("position", "none"), " ground above ", floor_point[0])
+			var hit := get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(centre, centre * 0.2, Terrain.ROCK_LAYER))
+			place_player((hit.position if !hit.is_empty() else centre) + centre.normalized() * 0.3, centre * 2.0)
 	if _args.has("rig"):
 		var nearest := deposits[0]
 		for deposit in deposits:
 			if deposit.global_position.distance_to(pod.global_position) < nearest.global_position.distance_to(pod.global_position):
 				nearest = deposit
 		stock += Fixture.COST[&"drill"]
-		build(&"drill", nearest.global_position, Vector3.UP)
-		var spot: Array = terrain.surface_point(nearest.global_position + Vector3(7.0, 0.0, 2.0))
-		place_player(spot[0] + Vector3.UP * 0.3, nearest.global_position)
+		build(&"drill", nearest.global_position, nearest.normal)
+		var spot: Array = terrain.surface_point(nearest.global_position + Fixture.upright(nearest.normal).x * 7.0)
+		place_player(spot[0] + spot[0].normalized() * 0.3, nearest.global_position)
 	await get_tree().physics_frame
 	var space := get_world_3d().direct_space_state
 	for i in int(_args.get("lamps", "0")):
-		var from := player.global_position + Vector3.UP * 1.5 + player.global_basis * Vector3(cos(i * 2.4) * 3.5, 0, sin(i * 2.4) * 3.5 - 3.0)
-		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from - Vector3.UP * 10.0, Terrain.ROCK_LAYER))
+		var up := player.global_position.normalized()
+		var from := player.global_position + up * 1.5 + player.global_basis * Vector3(cos(i * 2.4) * 3.5, 0, sin(i * 2.4) * 3.5 - 3.0)
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(from, from - up * 10.0, Terrain.ROCK_LAYER))
 		if !hit.is_empty():
 			stock += Fixture.COST[&"lamp"]
 			build(&"lamp", hit.position, hit.normal)
 	for i in int(_args.get("spiders", "0")):
-		var around := player.global_position + Vector3.UP * 4.0 - player.global_basis.z * (5.0 + i * 1.2) + player.global_basis.x * ((i % 3) - 1) * 1.8
-		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(around, around - Vector3.UP * 12.0, Terrain.ROCK_LAYER))
+		var around := player.global_position + player.global_position.normalized() * 4.0 - player.global_basis.z * (5.0 + i * 1.2) + player.global_basis.x * ((i % 3) - 1) * 1.8
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(around, around * 0.7, Terrain.ROCK_LAYER))
 		if !hit.is_empty():
 			spawn_spider(hit.position)
 	if _args.has("tool"):
@@ -730,7 +731,7 @@ func _debug_setup() -> void:
 		player.radial_choice = int(_args.radial)
 	if _args.has("lab"):
 		player.rotate_object_local(Vector3.UP, PI)
-		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 4.5)
+		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
 		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"tanks"].cost
 		build(&"lab", ahead[0], ahead[1])
 		built[-1].screen.pressed.call(&"tanks")

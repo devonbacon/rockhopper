@@ -1,106 +1,101 @@
 class_name Terrain
 extends Node3D
-## The ground: the floor of a big crater, ringed by a rim too steep to
-## climb, with rolling hills, boulders, small craters, and a few caves
-## under it. Down is -y everywhere.
+## The asteroid: a lumpy, stretched ball with craters and a few chambers
+## inside, joined to the surface by tunnels. Down is towards the centre.
 ##
 ## It's a signed distance field (negative inside rock), sampled on a grid
-## and meshed once with surface nets into chunks, each with a trimesh
-## collider. Nothing deforms it after that; the field is kept for placing
-## things on it. The rock is also baked into a navigation mesh for rovers.
+## and meshed once with surface nets into chunks with trimesh colliders.
+## The mesh's own vertices make the rovers' walkable graph.
 
-const CELL := 1.5
-## Half the width of the sampled square, and how far down and up it goes.
-const HALF := 84.0
-const BOTTOM := -16.0
-const TOP := 32.0
-## Inside this radius it's crater floor; the rim rises over the next 14 m.
-const FLOOR_RADIUS := 60.0
-const RIM_HEIGHT := 26.0
-const HILLS := 4.0
+const CELL := 1.75
+const RADIUS := 58.0
+const LUMP := 8.0
+const STRETCH := Vector3(1.2, 0.9, 1.0)
 const CHUNK := 16
 const ROCK_LAYER := 1
-## Features are bucketed by where they sit on the ground, this wide.
-const BUCKET := 16.0
+const BUCKET := 12.0
+## Steepest a rover will drive, against up from the centre.
+const ROVER_SLOPE := 30.0
 
-## Chambers: centre and radius. Worms: segments, as [a, b, radius].
 var chambers: Array[Vector4] = []
 var worms: Array[Array] = []
-## Where ore and deposits can go: [position, normal] on open, flat-ish
-## ground inside the floor, and on cave floors.
+var craters: Array[Vector4] = []
+## [position, normal] on open, flat-ish surface, and on cave floors.
 var surface_spots: Array[Array] = []
 var cave_spots: Array[Array] = []
 var triangle_count := 0
 var generate_ms := 0
-var navigation: NavigationRegion3D
+var graph := AStar3D.new()
 
 var _shape := FastNoiseLite.new()
 var _rng := RandomNumberGenerator.new()
-## Boulders (added rock) and craters (carved), as centre and radius, kept
-## in buckets by ground position: Vector2i -> [boulders, craters].
+## Vector3i -> [craters, chambers, worms] overlapping that cube.
 var _buckets := {}
-var _faces := PackedVector3Array()
+var _quads := PackedInt32Array()
 
 
 func generate(seed_value: int) -> void:
 	var started := Time.get_ticks_msec()
 	_rng.seed = seed_value
 	_shape.seed = seed_value
-	_shape.frequency = 0.022
+	_shape.frequency = 0.045
 	_shape.fractal_octaves = 3
 	_add_features()
-	var cells := Vector3i(ceili(2.0 * HALF / CELL), ceili((TOP - BOTTOM) / CELL), ceili(2.0 * HALF / CELL))
-	var origin := Vector3(-HALF, BOTTOM, -HALF)
+	var extent := maxf(STRETCH.x, maxf(STRETCH.y, STRETCH.z)) * (RADIUS + LUMP) + 3.0
+	var count := ceili(2.0 * extent / CELL)
+	var cells := Vector3i(count, count, count)
+	var origin := -Vector3.ONE * count * CELL * 0.5
 	var field := _sample(origin, cells)
 	_mesh(field, origin, cells)
-	_bake_navigation()
 	generate_ms = Time.get_ticks_msec() - started
-
-
-## The ground's height at x, z, before anything's added or carved.
-func ground_height(x: float, z: float) -> float:
-	var r := Vector2(x, z).length()
-	return HILLS * _shape.get_noise_2d(x, z) + RIM_HEIGHT * smoothstep(FLOOR_RADIUS, FLOOR_RADIUS + 14.0, r)
 
 
 ## Signed distance to rock, roughly in metres: negative inside.
 func density(p: Vector3) -> float:
-	var d := p.y - ground_height(p.x, p.z)
-	if d > 6.0:
+	var q := p / STRETCH
+	var length := q.length()
+	if length > RADIUS + LUMP + 2.0:
+		return length - (RADIUS + LUMP)
+	var d := length - (RADIUS - LUMP) if length < RADIUS - LUMP - 2.0 else body(p)
+	if d > 3.0:
 		return d
-	var bucket: Array = _buckets.get(_bucket_of(p), [[], []])
-	for b: Vector4 in bucket[0]:
-		d = minf(d, p.distance_to(Vector3(b.x, b.y, b.z)) - b.w)
-	for c: Vector4 in bucket[1]:
+	var bucket: Array = _buckets.get(_bucket_of(p), [])
+	if bucket.is_empty():
+		return d
+	for c: Vector4 in bucket[0]:
 		d = maxf(d, c.w - p.distance_to(Vector3(c.x, c.y, c.z)))
-	return maxf(d, -carve(p))
+	var open := INF
+	for c: Vector4 in bucket[1]:
+		open = minf(open, p.distance_to(Vector3(c.x, c.y, c.z)) - c.w)
+	for w: Array in bucket[2]:
+		open = minf(open, _segment_distance(p, w[0], w[1]) - w[2])
+	return maxf(d, -open)
 
 
-## Distance to open space under the ground: chambers and the worms
-## between them and up to the surface.
-func carve(p: Vector3) -> float:
-	var d := INF
-	for c in chambers:
-		d = minf(d, p.distance_to(Vector3(c.x, c.y, c.z)) - c.w)
-	for w in worms:
-		d = minf(d, _segment_distance(p, w[0], w[1]) - w[2])
-	return d
+func body(p: Vector3) -> float:
+	var q := p / STRETCH
+	var length := q.length()
+	if length < 0.001:
+		return -RADIUS
+	return length - (RADIUS + LUMP * _shape.get_noise_3dv(q / length * 30.0))
 
 
-## The first rock straight down from high above x, z, and its normal.
+## The first rock along a ray in from outside towards the centre, through
+## `at` (any point along that direction), and its normal.
 func surface_point(at: Vector3) -> Array:
-	var p := Vector3(at.x, TOP, at.z)
-	while p.y > BOTTOM and density(p) > 0.0:
-		p.y -= 0.5
-	var lo := p.y
-	var hi := p.y + 0.5
+	var dir := at.normalized()
+	var t := (RADIUS + LUMP) * maxf(STRETCH.x, maxf(STRETCH.y, STRETCH.z)) + 4.0
+	while t > 0.0 and density(dir * t) > 0.0:
+		t -= 0.5
+	var lo := t
+	var hi := t + 0.5
 	for i in 16:
 		var mid := (lo + hi) * 0.5
-		if density(Vector3(p.x, mid, p.z)) > 0.0:
+		if density(dir * mid) > 0.0:
 			hi = mid
 		else:
 			lo = mid
-	p.y = hi
+	var p := dir * hi
 	return [p, normal_at(p)]
 
 
@@ -112,63 +107,72 @@ func normal_at(p: Vector3) -> Vector3:
 		density(p + Vector3(0, 0, h)) - density(p - Vector3(0, 0, h))).normalized()
 
 
-## How far a point is below the open ground over it (negative above it).
+## How deep a point is inside the rock's outline, ignoring caves.
 func depth(p: Vector3) -> float:
-	return ground_height(p.x, p.z) - p.y
+	return -body(p)
 
 
-func _bucket_of(p: Vector3) -> Vector2i:
-	return Vector2i(floori(p.x / BUCKET), floori(p.z / BUCKET))
+## A path over the surface for a rover, from near `from` to as near `to`
+## as it can get.
+func find_path(from: Vector3, to: Vector3) -> PackedVector3Array:
+	if graph.get_point_count() == 0:
+		return PackedVector3Array()
+	return graph.get_point_path(graph.get_closest_point(from), graph.get_closest_point(to), true)
 
 
-func _add_bucketed(feature: Vector4, which: int) -> void:
-	var lo := _bucket_of(Vector3(feature.x - feature.w, 0, feature.z - feature.w))
-	var hi := _bucket_of(Vector3(feature.x + feature.w, 0, feature.z + feature.w))
-	for bx in range(lo.x, hi.x + 1):
-		for bz in range(lo.y, hi.y + 1):
-			var key := Vector2i(bx, bz)
-			if !_buckets.has(key):
-				_buckets[key] = [[], []]
-			_buckets[key][which].push_back(feature)
+func _bucket_of(p: Vector3) -> Vector3i:
+	return Vector3i((p / BUCKET).floor())
+
+
+func _add_bucketed(lo: Vector3, hi: Vector3, which: int, feature: Variant) -> void:
+	var a := _bucket_of(lo)
+	var b := _bucket_of(hi)
+	for x in range(a.x, b.x + 1):
+		for y in range(a.y, b.y + 1):
+			for z in range(a.z, b.z + 1):
+				var key := Vector3i(x, y, z)
+				if !_buckets.has(key):
+					_buckets[key] = [[], [], []]
+				_buckets[key][which].push_back(feature)
 
 
 func _add_features() -> void:
 	chambers.clear()
 	worms.clear()
+	craters.clear()
 	_buckets.clear()
-	for i in 10:
-		var at := _floor_point(FLOOR_RADIUS - 6.0)
-		var r := _rng.randf_range(4.0, 9.0)
-		var y := ground_height(at.x, at.y) + r * 0.6
-		_add_bucketed(Vector4(at.x, y, at.y, r), 1)
-	for i in 34:
-		var at := _floor_point(FLOOR_RADIUS - 2.0)
-		var r := _rng.randf_range(0.8, 3.0)
-		var y := ground_height(at.x, at.y) + r * _rng.randf_range(-0.2, 0.5)
-		_add_bucketed(Vector4(at.x, y, at.y, r), 0)
+	for i in 18:
+		var dir := _random_dir()
+		var r := _rng.randf_range(5.0, 14.0)
+		var surface := dir * (RADIUS + LUMP * _shape.get_noise_3dv(dir * 30.0)) * STRETCH
+		var c := surface + dir * r * 0.55
+		craters.push_back(Vector4(c.x, c.y, c.z, r))
+		_add_bucketed(c - Vector3.ONE * r, c + Vector3.ONE * r, 0, Vector4(c.x, c.y, c.z, r))
 	var previous := Vector3.INF
-	for i in 4:
-		var at := _floor_point(FLOOR_RADIUS - 14.0)
-		var r := _rng.randf_range(5.0, 7.0)
-		var centre := Vector3(at.x, ground_height(at.x, at.y) - r - _rng.randf_range(3.0, 6.0), at.y)
-		chambers.push_back(Vector4(centre.x, centre.y, centre.z, r))
-		# A sloping tunnel up to the surface, so every chamber can be
-		# reached on foot.
-		var away := Vector2.from_angle(_rng.randf() * TAU) * 16.0
-		var mouth := Vector3(centre.x + away.x, 0.0, centre.z + away.y)
-		mouth.y = ground_height(mouth.x, mouth.z) + 2.0
-		var bend := centre.lerp(mouth, 0.5) + Vector3(_rng.randf_range(-4, 4), -2.0, _rng.randf_range(-4, 4))
+	for i in 6:
+		var dir := _random_dir()
+		var centre := dir * RADIUS * _rng.randf_range(0.3, 0.65) * STRETCH
+		var size := _rng.randf_range(6.0, 9.0)
+		chambers.push_back(Vector4(centre.x, centre.y, centre.z, size))
+		_add_bucketed(centre - Vector3.ONE * size, centre + Vector3.ONE * size, 1, Vector4(centre.x, centre.y, centre.z, size))
+		var out_dir := (dir + _random_dir() * 0.5).normalized()
+		var mouth := out_dir * (RADIUS + LUMP + 6.0) * STRETCH
+		var bend := centre.lerp(mouth, 0.5) + _random_dir() * 8.0
 		var width := _rng.randf_range(2.2, 2.8)
-		worms.push_back([centre, bend, width])
-		worms.push_back([bend, mouth, width])
-		if previous != Vector3.INF and previous.distance_to(centre) < 50.0:
-			worms.push_back([previous, centre, _rng.randf_range(2.0, 2.4)])
+		_add_worm(centre, bend, width)
+		_add_worm(bend, mouth, width)
+		if previous != Vector3.INF and previous.distance_to(centre) < 60.0:
+			_add_worm(previous, centre, _rng.randf_range(2.0, 2.5))
 		previous = centre
 
 
-## A random point on the floor, within radius of the middle, as x, z.
-func _floor_point(radius: float) -> Vector2:
-	return Vector2.from_angle(_rng.randf() * TAU) * radius * sqrt(_rng.randf())
+func _add_worm(a: Vector3, b: Vector3, width: float) -> void:
+	worms.push_back([a, b, width])
+	_add_bucketed(a.min(b) - Vector3.ONE * width, a.max(b) + Vector3.ONE * width, 2, [a, b, width])
+
+
+func _random_dir() -> Vector3:
+	return Vector3(_rng.randfn(), _rng.randfn(), _rng.randfn()).normalized()
 
 
 func _segment_distance(p: Vector3, a: Vector3, b: Vector3) -> float:
@@ -266,6 +270,7 @@ func _mesh(field: PackedFloat32Array, origin: Vector3, cells: Vector3i) -> void:
 				cell_vert[cell - 1 - cx], cell_vert[cell - cx], cell_vert[cell], cell_vert[cell - 1]])
 	_build_chunks(chunk_tris, positions, normals)
 	_find_spots(positions, normals)
+	_build_graph(positions, normals)
 
 
 ## Adds a quad as two triangles, wound clockwise seen from the side its
@@ -283,12 +288,12 @@ func _quad(chunk_tris: Dictionary, key: Vector3i, positions: PackedVector3Array,
 	if !chunk_tris.has(key):
 		chunk_tris[key] = []
 	chunk_tris[key].append_array([a, b, c, a, c, d])
+	_quads.append_array([a, b, c, d])
 
 
 func _build_chunks(chunk_tris: Dictionary, positions: PackedVector3Array, normals: PackedVector3Array) -> void:
 	var material := _rock_material()
 	triangle_count = 0
-	_faces.clear()
 	for key: Vector3i in chunk_tris:
 		var tris := PackedInt32Array(chunk_tris[key])
 		var verts := PackedVector3Array()
@@ -299,7 +304,6 @@ func _build_chunks(chunk_tris: Dictionary, positions: PackedVector3Array, normal
 			verts[n] = positions[tris[n]]
 			norms[n] = normals[tris[n]]
 		triangle_count += tris.size() / 3
-		_faces.append_array(verts)
 		var arrays := []
 		arrays.resize(Mesh.ARRAY_MAX)
 		arrays[Mesh.ARRAY_VERTEX] = verts
@@ -321,36 +325,44 @@ func _build_chunks(chunk_tris: Dictionary, positions: PackedVector3Array, normal
 		add_child(body_node)
 
 
-## Bakes where a rover can drive: gentle slopes on the crater floor, round
-## boulders and out of the caves' mouths where it's too steep.
-func _bake_navigation() -> void:
-	var nav_mesh := NavigationMesh.new()
-	nav_mesh.cell_size = 0.25
-	nav_mesh.cell_height = 0.25
-	nav_mesh.agent_radius = 1.0
-	nav_mesh.agent_height = 1.5
-	nav_mesh.agent_max_climb = 0.5
-	nav_mesh.agent_max_slope = 28.0
-	nav_mesh.filter_baking_aabb = AABB(Vector3(-FLOOR_RADIUS - 4, BOTTOM, -FLOOR_RADIUS - 4), Vector3(FLOOR_RADIUS * 2 + 8, TOP - BOTTOM, FLOOR_RADIUS * 2 + 8))
-	var source := NavigationMeshSourceGeometryData3D.new()
-	source.add_faces(_faces, Transform3D.IDENTITY)
-	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
-	navigation = NavigationRegion3D.new()
-	navigation.navigation_mesh = nav_mesh
-	add_child(navigation)
+## Rovers drive on the outer surface where it's gentle enough, kept a
+## cell back from anything steeper.
+func _build_graph(positions: PackedVector3Array, normals: PackedVector3Array) -> void:
+	graph.clear()
+	var count := positions.size()
+	var level := PackedByteArray()
+	level.resize(count)
+	var gentle := cos(deg_to_rad(ROVER_SLOPE))
+	for n in count:
+		var p := positions[n]
+		level[n] = 1 if normals[n].dot(p.normalized()) > gentle and depth(p) < 2.0 else 0
+	var clear := level.duplicate()
+	for q in range(0, _quads.size(), 4):
+		if level[_quads[q]] == 0 or level[_quads[q + 1]] == 0 or level[_quads[q + 2]] == 0 or level[_quads[q + 3]] == 0:
+			for k in 4:
+				clear[_quads[q + k]] = 0
+	graph.reserve_space(count)
+	for n in count:
+		if clear[n] == 1:
+			graph.add_point(n, positions[n])
+	for q in range(0, _quads.size(), 4):
+		for k in 4:
+			var a := _quads[q + k]
+			var b := _quads[q + (k + 1) % 4]
+			if clear[a] == 1 and clear[b] == 1:
+				graph.connect_points(a, b)
+	_quads.clear()
 
 
-## Picks out flat-ish open floor for ore and deposits, and cave floors.
 func _find_spots(positions: PackedVector3Array, normals: PackedVector3Array) -> void:
 	surface_spots.clear()
 	cave_spots.clear()
 	for n in positions.size():
 		var p := positions[n]
-		if normals[n].y < 0.8 or Vector2(p.x, p.z).length() > FLOOR_RADIUS - 5.0:
-			continue
-		if depth(p) > 3.0:
+		var up := normals[n].dot(p.normalized())
+		if depth(p) > 3.0 and up > 0.6:
 			cave_spots.push_back([p, normals[n]])
-		elif normals[n].y > 0.9 and absf(depth(p)) < 1.0:
+		elif up > 0.9 and absf(depth(p)) < 1.5:
 			surface_spots.push_back([p, normals[n]])
 
 

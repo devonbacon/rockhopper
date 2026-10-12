@@ -1,7 +1,7 @@
 class_name Rover
 extends Node3D
 ## A six-wheeled hauler. It waits by the pod until a rig's hopper has a
-## load worth the trip, drives out along the navigation mesh, empties the
+## load worth the trip, drives out over the rock's walkable graph, empties the
 ## hopper, and drives the ore home.
 ##
 ## It drives in the dark too, by its own headlights, so it's in spiders'
@@ -50,7 +50,7 @@ var _load: Node3D
 func _ready() -> void:
 	_build_model()
 	_build_screen()
-	_heading = -global_basis.z
+	_heading = Vector3.FORWARD
 
 
 func _physics_process(delta: float) -> void:
@@ -112,41 +112,49 @@ func park_point() -> Vector3:
 ## (across the ground), -1 if the path's run out short of it, else 0.
 func _drive_to(target: Vector3, arrive: float, delta: float) -> int:
 	var pos := global_position
-	var flat := Vector2(target.x - pos.x, target.z - pos.z)
-	if flat.length() <= arrive:
+	var up := pos.normalized()
+	var across := _across(target - pos, up)
+	if across.length() <= arrive:
 		return 1
 	_repath -= delta
 	if _goal.distance_to(target) > 0.5 or _repath <= 0.0:
 		_goal = target
 		_repath = 3.0
-		_path = NavigationServer3D.map_get_path(get_world_3d().navigation_map, pos, target, true)
+		_path = game.terrain.find_path(pos, target)
 		_next = 0
-	while _next < _path.size() and Vector2(_path[_next].x - pos.x, _path[_next].z - pos.z).length() < 1.0:
+	while _next < _path.size() and _across(_path[_next] - pos, up).length() < 1.2:
 		_next += 1
 	var waypoint := target
 	if !_path.is_empty():
 		if _next >= _path.size():
-			return 1 if flat.length() < arrive * 2.5 else -1
+			return 1 if across.length() < arrive * 2.5 else -1
 		waypoint = _path[_next]
-	var want := Vector3(waypoint.x - pos.x, 0.0, waypoint.z - pos.z).normalized()
-	var turn := _heading.signed_angle_to(want, Vector3.UP)
-	_heading = _heading.rotated(Vector3.UP, clampf(turn, -TURN * delta, TURN * delta)).normalized()
+	var want := _across(waypoint - pos, up).normalized()
+	_heading = _across(_heading, up)
+	_heading = _heading.normalized() if _heading.length() > 0.01 else Fixture.upright(up).z
+	var turn := _heading.signed_angle_to(want, up)
+	_heading = _heading.rotated(up, clampf(turn, -TURN * delta, TURN * delta)).normalized()
 	var speed := game.rover_speed() * clampf(_heading.dot(want), 0.15, 1.0)
-	var step := _heading * speed * delta
-	_settle(pos + step, delta)
+	_settle(pos + _heading * speed * delta, delta)
 	for wheel in _wheels:
 		wheel.rotate_object_local(Vector3.RIGHT, -speed * delta / WHEEL_RADIUS)
 	return 0
 
 
+func _across(v: Vector3, up: Vector3) -> Vector3:
+	return v - up * v.dot(up)
+
+
 ## Puts it at pos on the ground, tilted to the slope under it.
 func _settle(pos: Vector3, delta: float) -> void:
-	var query := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 3.0, pos - Vector3.UP * 6.0, Terrain.ROCK_LAYER)
+	var up := pos.normalized()
+	var query := PhysicsRayQueryParameters3D.create(pos + up * 3.0, pos - up * 6.0, Terrain.ROCK_LAYER)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if !hit.is_empty():
-		pos.y = hit.position.y
+		pos = hit.position
 		_ground_up = _ground_up.slerp(hit.normal, minf(1.0, delta * 6.0)).normalized()
-	var ahead := (_heading - _ground_up * _heading.dot(_ground_up)).normalized()
+	var ahead := _heading - _ground_up * _heading.dot(_ground_up)
+	ahead = ahead.normalized() if ahead.length() > 0.01 else Fixture.upright(_ground_up).z
 	global_transform = Transform3D(Basis.looking_at(ahead, _ground_up), pos)
 
 

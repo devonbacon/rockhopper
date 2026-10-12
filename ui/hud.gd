@@ -403,7 +403,7 @@ func _draw_rig_markers() -> void:
 	for rig in game.built:
 		if rig.kind != &"drill":
 			continue
-		var top := rig.global_position + Vector3.UP * 4.6
+		var top := rig.global_position + rig.normal * 4.6
 		if camera.is_position_behind(top):
 			continue
 		var at := camera.unproject_position(top)

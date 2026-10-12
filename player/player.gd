@@ -1,6 +1,6 @@
 class_name Player
 extends CharacterBody3D
-## You, in first person, on the crater floor.
+## You, in first person, on a rock whose down is always its centre.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Holding Q brings up the radial
@@ -36,9 +36,6 @@ const REACH := 4.5
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
-## How far out from the middle you can go before the crater wall stops
-## you, in case the jetpack gets you up it.
-const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
 const FIRE_EVERY := 0.14
 const FOV := 80.0
 const ADS_FOV := 52.0
@@ -159,6 +156,18 @@ func _ready() -> void:
 	add_child(_ghost)
 
 
+## Turns the body so its up points away from the centre, keeping where it
+## faces as near as it can.
+func align_up() -> void:
+	var up := global_position.normalized()
+	var b := global_basis.orthonormalized()
+	var angle := b.y.angle_to(up)
+	if angle > 0.0001:
+		b = Basis(b.y.cross(up).normalized(), angle) * b
+	global_basis = b.orthonormalized()
+	up_direction = up
+
+
 func look(pitch: float) -> void:
 	_pitch = pitch
 	_head.rotation.x = _pitch
@@ -203,7 +212,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	var up := Vector3.UP
+	align_up()
+	var up := up_direction
 	var playing := game.state == Game.State.PLAYING
 	var vertical := up * velocity.dot(up)
 	var horizontal := velocity - vertical
@@ -235,7 +245,7 @@ func _physics_process(delta: float) -> void:
 			var gravity := -up * GRAVITY
 			var normal := get_floor_normal()
 			var downhill := gravity - normal * gravity.dot(normal)
-			horizontal += Vector3(downhill.x, 0.0, downhill.z) * SLIDE_SLOPE * delta
+			horizontal += (downhill - up * downhill.dot(up)) * SLIDE_SLOPE * delta
 			horizontal = horizontal.move_toward(Vector3.ZERO, SLIDE_FRICTION * delta)
 			horizontal = (horizontal + wish_dir * SLIDE_STEER * delta).limit_length(SLIDE_MAX)
 		else:
@@ -264,17 +274,13 @@ func _physics_process(delta: float) -> void:
 	camera.rotation.z = lerpf(camera.rotation.z, -side * deg_to_rad(STRAFE_TILT), minf(1.0, delta * 10.0))
 	vertical -= up * GRAVITY * delta
 	velocity = horizontal + vertical
-	var flat := Vector2(global_position.x, global_position.z)
-	if flat.length() > BOUNDS and Vector2(velocity.x, velocity.z).dot(flat) > 0.0:
-		var out := Vector3(flat.x, 0.0, flat.y).normalized()
-		velocity -= out * velocity.dot(out)
 	move_and_slide()
 	notice_time = maxf(0.0, notice_time - delta)
 	_cooldown = maxf(0.0, _cooldown - delta)
 	_recoil = maxf(0.0, _recoil - delta * 12.0)
 	_muzzle_light.light_energy = _recoil * 3.0
 	_gun.position = HIP_GUN.lerp(ADS_GUN, _ads) + Vector3(0, 0, _recoil * 0.04)
-	var moving := clampf(Vector2(velocity.x, velocity.z).length() / RUN, 0.0, 1.0)
+	var moving := clampf((velocity - up_direction * velocity.dot(up_direction)).length() / RUN, 0.0, 1.0)
 	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) * (0.6 if game.has(&"stabiliser") else 1.0) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
 	if !is_on_floor():
 		rest += 2.0
@@ -389,7 +395,7 @@ func _placement() -> Dictionary:
 		return {}
 	if tool == &"drill":
 		if hit.collider is Fixture and hit.collider.kind == &"deposit":
-			return {position = hit.collider.global_position, normal = Vector3.UP}
+			return {position = hit.collider.global_position, normal = hit.collider.normal}
 		return {}
 	if hit.collider is Fixture:
 		return {}

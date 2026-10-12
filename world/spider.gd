@@ -45,13 +45,13 @@ func _ready() -> void:
 	_collider.disabled = true
 	add_child(_collider)
 	_build_model()
-	global_position -= Vector3.UP * 1.0
+	global_position -= global_position.normalized() * 1.0
 	_retarget = randf() * 0.5
 	_sun_check = randf() * 0.5
 
 
 func _physics_process(delta: float) -> void:
-	var up := Vector3.UP
+	var up := global_position.normalized()
 	_align(up, delta)
 	_flash = maxf(0.0, _flash - delta * 5.0)
 	_body_material.emission = Color(1.0, 0.9, 0.8) * _flash
