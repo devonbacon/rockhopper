@@ -9,8 +9,11 @@ HOST=${1:-devon@192.168.1.27}
 PORT=${2:-7777}
 VERSION=4.7.2-stable
 
-ssh "$HOST" bash -s -- "$VERSION" "$PORT" <<'REMOTE'
+# The setup runs detached on the box, logging to setup.log, so a dropped ssh
+# connection can't leave it half done.
+ssh "$HOST" 'mkdir -p ~/rockhopper-server && cat > ~/rockhopper-server/setup.sh' <<'REMOTE'
 set -euo pipefail
+trap 'echo "setup error at line $LINENO"' ERR
 VERSION=$1
 PORT=$2
 for tool in curl unzip git; do
@@ -18,11 +21,17 @@ for tool in curl unzip git; do
 done
 mkdir -p ~/rockhopper-server
 cd ~/rockhopper-server
-if [ ! -x godot ]; then
-	curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/$VERSION/Godot_v${VERSION}_linux.x86_64.zip"
-	unzip -oq godot.zip
-	mv "Godot_v${VERSION}_linux.x86_64" godot
-	rm godot.zip
+if [ ! -x godot ] || ! ./godot --version >/dev/null 2>&1; then
+	rm -f godot godot.zip
+	until curl -fsSL -C - --speed-limit 1000 --speed-time 30 -o godot.zip.part "https://github.com/godotengine/godot/releases/download/$VERSION/Godot_v${VERSION}_linux.x86_64.zip"; do
+		echo "download stalled at $(stat -c %s godot.zip.part 2>/dev/null || echo 0) bytes, resuming"
+		sleep 2
+	done
+	unzip -tq godot.zip.part
+	mv godot.zip.part godot.zip
+	unzip -oq godot.zip -d unpacked
+	mv "unpacked/Godot_v${VERSION}_linux.x86_64" godot
+	rm -rf unpacked godot.zip
 fi
 if [ -d game/.git ]; then
 	git -C game pull --ff-only
@@ -52,3 +61,9 @@ sleep 2
 systemctl --user --no-pager status rockhopper.service | head -6
 echo "listening on UDP $PORT"
 REMOTE
+ssh "$HOST" "cd ~/rockhopper-server && rm -f setup.log && setsid nohup bash setup.sh $VERSION $PORT > setup.log 2>&1 < /dev/null &"
+echo "setting up on $HOST; following ~/rockhopper-server/setup.log"
+until ssh -o ConnectTimeout=8 "$HOST" 'grep -q "listening on UDP\|needs \|rror\|fatal" ~/rockhopper-server/setup.log' 2>/dev/null; do
+	sleep 5
+done
+ssh "$HOST" 'cat ~/rockhopper-server/setup.log'
