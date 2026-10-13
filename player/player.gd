@@ -1,6 +1,6 @@
 class_name Player
 extends CharacterBody3D
-## You, in first person, on the crater floor.
+## You, in first person, inside the hologram wall.
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Left mouse fires, or swings
@@ -65,9 +65,8 @@ const GRAPPLE_MAX := 10.0
 const GRAPPLE_COOLDOWN := 5.0
 const FLARE_EVERY := 0.5
 const PING_RANGE := 300.0
-## How far out from the middle you can go before the crater wall stops
-## you, in case the jetpack or the grapple gets you up it.
-const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
+## How far out from the middle you can go: the hologram wall.
+const BOUNDS := Terrain.FLOOR_RADIUS - 0.6
 const SENSITIVITY := 0.0025
 const HEIGHT := 1.8
 

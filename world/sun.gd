@@ -2,8 +2,8 @@ class_name Sun
 extends DirectionalLight3D
 ## The star, crossing the sky as the rock turns: up in the east, over at
 ## 65 degrees, down in the west, then a night as long as the day. Low in
-## the sky, the crater rim's shadow sweeps across the floor, so the
-## valleys go dark first and the high ground holds the light longest.
+## the sky the hills' shadows run long, so the hollows go dark first and
+## the high ground holds the light longest.
 
 const DAY := 300.0
 const TILT := deg_to_rad(25.0)

@@ -1,6 +1,6 @@
 class_name Game
 extends Node3D
-## One mission: drop onto the floor of a crater, get ore into the pod, and
+## One mission: drop onto a patch of asteroid inside a hologram wall, get ore into the pod, and
 ## be beside it when it launches.
 ##
 ## Power is one shared battery, filled by sunlight on the pod and on any
@@ -18,7 +18,7 @@ extends Node3D
 ## for up front that soldiers hammer up; orders rovers about; and picks
 ## what the labs research.
 ##
-## At nightfall bug holes tear open out in the crater, more of them each
+## At nightfall bug holes tear open out in the dark, more of them each
 ## night, and spiders climb out of them, more as the mission goes on and
 ## the more players there are, and go for soldiers, rovers out on
 ## the road, what's been built, and the pod. Sunlight sends them back
@@ -1316,7 +1316,7 @@ func _spawn_spiders(delta: float) -> void:
 
 
 ## Nightfall: one bug hole the first night, one more each night after, and
-## one more with three players or more, out in the crater away from the pod.
+## one more with three players or more, out away from the pod.
 func _open_holes() -> void:
 	var first_sunset := (PI - Sun.START) / TAU * Sun.DAY
 	var night := floori((time - first_sunset) / Sun.DAY) + 1
@@ -1376,7 +1376,7 @@ func _add_environment() -> void:
 	add_child(world_env)
 
 
-## The pod comes down on open, flat ground near the middle of the crater.
+## The pod comes down on open, flat ground near the middle.
 func _place_pod() -> void:
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	_shuffle(spots)

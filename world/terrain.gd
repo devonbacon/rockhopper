@@ -1,8 +1,9 @@
 class_name Terrain
 extends Node3D
-## The ground: the floor of a big crater, ringed by a rim too steep to
-## climb, with rolling hills, boulders, small craters, and a few caves
-## under it. Down is -y everywhere.
+## The ground: a round playable area, marked by a blue hologram wall, of
+## rolling hills, boulders, small craters, and a few caves under it. Past
+## it the hills flatten out into a plain to the horizon. Down is -y
+## everywhere.
 ##
 ## It's a signed distance field (negative inside rock), sampled on a grid
 ## and meshed once with surface nets into chunks, each with a trimesh
@@ -13,10 +14,10 @@ const CELL := 1.5
 ## Half the width of the sampled square, and how far down and up it goes.
 const HALF := 84.0
 const BOTTOM := -16.0
-const TOP := 32.0
-## Inside this radius it's crater floor; the rim rises over the next 14 m.
+const TOP := 12.0
+## The playable area's radius, where the hologram wall stands.
 const FLOOR_RADIUS := 60.0
-const RIM_HEIGHT := 26.0
+const WALL_HEIGHT := 12.0
 const HILLS := 4.0
 const CHUNK := 16
 const ROCK_LAYER := 1
@@ -42,7 +43,7 @@ var _buckets := {}
 var _faces := PackedVector3Array()
 
 
-## Which way is up at p. The crater's flat, so it's always +y; the rest of
+## Which way is up at p. The ground's flat, so it's always +y; the rest of
 ## the game asks here rather than assuming.
 static func up_at(_p: Vector3) -> Vector3:
 	return Vector3.UP
@@ -59,6 +60,8 @@ func generate(seed_value: int, _landing_dir := Vector3.ZERO) -> void:
 	var origin := Vector3(-HALF, BOTTOM, -HALF)
 	var field := _sample(origin, cells)
 	_mesh(field, origin, cells)
+	_add_plain()
+	_add_wall()
 	_bake_navigation()
 	generate_ms = Time.get_ticks_msec() - started
 
@@ -66,7 +69,7 @@ func generate(seed_value: int, _landing_dir := Vector3.ZERO) -> void:
 ## The ground's height at x, z, before anything's added or carved.
 func ground_height(x: float, z: float) -> float:
 	var r := Vector2(x, z).length()
-	return HILLS * _shape.get_noise_2d(x, z) + RIM_HEIGHT * smoothstep(FLOOR_RADIUS, FLOOR_RADIUS + 14.0, r)
+	return HILLS * _shape.get_noise_2d(x, z) * (1.0 - smoothstep(FLOOR_RADIUS + 4.0, HALF - 4.0, r))
 
 
 ## Signed distance to rock, roughly in metres: negative inside.
@@ -327,7 +330,49 @@ func _build_chunks(chunk_tris: Dictionary, positions: PackedVector3Array, normal
 		add_child(body_node)
 
 
-## Bakes where a rover can drive: gentle slopes on the crater floor, round
+## Flat ground at height 0 from the edge of the sampled square out to the
+## horizon, just under where the meshed ground flattens out to meet it.
+func _add_plain() -> void:
+	var far := 4000.0
+	var near := HALF - 2.0
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	tool.set_normal(Vector3.UP)
+	for rect: Rect2 in [Rect2(-far, -far, 2.0 * far, far - near), Rect2(-far, near, 2.0 * far, far - near), Rect2(-far, -near, far - near, 2.0 * near), Rect2(near, -near, far - near, 2.0 * near)]:
+		var a := Vector3(rect.position.x, -0.02, rect.position.y)
+		var b := Vector3(rect.end.x, -0.02, rect.position.y)
+		var c := Vector3(rect.end.x, -0.02, rect.end.y)
+		var d := Vector3(rect.position.x, -0.02, rect.end.y)
+		for v in [a, b, c, a, c, d]:
+			tool.add_vertex(v)
+	var plain := MeshInstance3D.new()
+	plain.mesh = tool.commit()
+	plain.material_override = _rock_material()
+	add_child(plain)
+
+
+## The edge of the playable area: a hologram wall, brighter as you near it.
+func _add_wall() -> void:
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = FLOOR_RADIUS
+	cylinder.bottom_radius = FLOOR_RADIUS
+	cylinder.height = WALL_HEIGHT + 8.0
+	cylinder.radial_segments = 128
+	cylinder.rings = 1
+	cylinder.cap_top = false
+	cylinder.cap_bottom = false
+	var material := ShaderMaterial.new()
+	material.shader = load("res://world/boundary.gdshader")
+	material.set_shader_parameter("radius", FLOOR_RADIUS)
+	var wall := MeshInstance3D.new()
+	wall.mesh = cylinder
+	wall.material_override = material
+	wall.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	wall.position.y = WALL_HEIGHT * 0.5 - 4.0
+	add_child(wall)
+
+
+## Bakes where a rover can drive: gentle slopes inside the wall, round
 ## boulders and out of the caves' mouths where it's too steep.
 func _bake_navigation() -> void:
 	var nav_mesh := NavigationMesh.new()

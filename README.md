@@ -6,12 +6,13 @@ dark is the enemy. It tests whether night coming round, with too few
 lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
-You drop onto the floor of a crater on a turning asteroid. The pod lands
-mid-morning. The sun crosses the sky every five minutes, then there's a
-night as long as the day. Low in the sky, it throws the crater rim's
-shadow across the floor, so the valleys go dark first and the high
-ground holds the light longest. There's loose ore lying about, big
-deposits that never run out, and a few caves under the floor to shelter
+You drop onto a turning asteroid, into a round patch of hills 120 m
+across, marked out by a blue hologram wall you can't go past; beyond it
+the ground flattens out to the horizon. The pod lands mid-morning. The
+sun crosses the sky every five minutes, then there's a night as long as
+the day. Low in the sky, it throws the hills' shadows long, so the
+hollows go dark first and the high ground holds the light longest. There's loose ore lying about, big
+deposits that never run out, and a few caves under the ground to shelter
 in.
 
 Power is one battery, shared by everything. Sunlight fills it, falling
@@ -41,7 +42,7 @@ a lamp, into a hopper of 12. You start with one rover, and can print
 more at the pod. A rover waits by the pod until a rig has a load worth
 the trip. Then it drives out, empties the hopper and drives the ore home,
 spreading itself over the rigs with the most waiting. Rovers can't
-climb steep slopes, so a deposit in a crater or behind a ridge is a
+climb steep slopes, so a deposit in a small crater or behind a ridge is a
 longer drive, or one they can't make at all. You can also empty a
 hopper by hand.
 
@@ -65,7 +66,7 @@ everything, already built or not:
 - Rover tuning: rovers drive 40% faster and carry 4 more.
 - Efficient lamps: lamps draw half the power.
 
-At nightfall, bug holes tear open in the crater floor, 28-46 m from the
+At nightfall, bug holes tear open in the ground, 28-46 m from the
 pod: one the first night, two the second, and one more with three or
 more players. They glow red, and close at sunrise. Spiders climb out of
 them all night (never by day, however deep the shadow), more of them and
@@ -94,7 +95,7 @@ keeps drilling, too).
 The menu offers solo, hosting, or joining a server. Everyone starts as a
 soldier. The commander's seat is in the pod: "Take command" on the pod's
 screen climbs in (one commander at a time), out of harm's way and the
-cold, counted aboard at launch, with an overhead view of the crater (WASD,
+cold, counted aboard at launch, with an overhead view of the area (WASD,
 the screen edges or the middle button pan, the wheel zooms, Q and E turn it);
 X climbs back out beside the pod. In solo, the seat's yours too: climb
 in to plan, climb out to build. The server runs the
@@ -201,7 +202,7 @@ will be from where you stand, so they allow for the terrain round you.
 
 Mission, power, health and spider numbers are constants at the top of
 `game/game.gd`. The day's length and the sun's path are in
-`world/sun.gd`. The map's size, rim, hills and caves are in
+`world/sun.gd`. The map's size, wall, hills and caves are in
 `world/terrain.gd`. Rigs' drilling rate and hopper are in
 `world/fixture.gd`. Movement and the gun are in `player/player.gd`,
 rovers in `world/rover.gd`, and spiders in `world/spider.gd`.
@@ -213,7 +214,7 @@ User arguments after `--`, e.g.
 
 - `seed=N`: the map.
 - `time=S`: start S seconds in (`time=150` is dusk).
-- `view=overview` looks down on the whole crater; `view=cave` stands
+- `view=overview` looks down on the whole area; `view=cave` stands
   you in a cave; `view=screen` in front of the pod's screen; `view=rover`
   behind the first rover.
 - `rig` builds a rig on the deposit nearest the pod and stands you
@@ -231,10 +232,11 @@ User arguments after `--`, e.g.
 
 ## Layout
 
-- `world/terrain.gd`: the ground, a signed distance field (crater floor
-  and rim, hills, boulders, small craters, caves) meshed once by surface
-  nets into chunks with trimesh colliders, plus a navigation mesh baked
-  from it for rovers. No deformation.
+- `world/terrain.gd`: the ground, a signed distance field (hills,
+  boulders, small craters, caves) meshed once by surface nets into chunks
+  with trimesh colliders, plus a navigation mesh baked from it for
+  rovers, a flat plain out to the horizon, and the hologram wall
+  (`world/boundary.gdshader`). No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, lamps, panels and rigs.
 - `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and

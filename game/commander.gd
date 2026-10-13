@@ -1,6 +1,6 @@
 class_name Commander
 extends Node3D
-## The commander's view from the pod: overhead on the crater, lit up like
+## The commander's view from the pod: overhead on the playable area, lit up like
 ## a tactical display so night doesn't blind it.
 ##
 ## WASD, the screen edges or dragging with the middle button pan, the wheel
@@ -259,7 +259,7 @@ func _placement(hit: Dictionary) -> Dictionary:
 		return {}
 	if hit.collider is Fixture:
 		return {}
-	if Vector2(hit.position.x, hit.position.z).length() > Terrain.FLOOR_RADIUS + 4.0:
+	if Vector2(hit.position.x, hit.position.z).length() > Terrain.FLOOR_RADIUS - 1.0:
 		return {}
 	return {position = hit.position, normal = hit.normal}
 
@@ -329,7 +329,8 @@ func _order_at(hit: Dictionary) -> void:
 		game.act(&"order", [ids, &"fetch", Vector3.INF, target.net_id])
 		toast("Hauling from that rig.")
 	else:
-		var point: Vector3 = game.terrain.surface_point(hit.position)[0]
+		var inside := Vector2(hit.position.x, hit.position.z).limit_length(Terrain.FLOOR_RADIUS - 2.0)
+		var point: Vector3 = game.terrain.surface_point(Vector3(inside.x, 0.0, inside.y))[0]
 		game.act(&"order", [ids, &"move", point, 0])
 	_marks.append([hit.position, 0.0])
 
