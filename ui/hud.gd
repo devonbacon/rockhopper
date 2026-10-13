@@ -114,6 +114,22 @@ func _build_pause() -> void:
 	title.text = "PAUSED"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
+	var music := HBoxContainer.new()
+	music.add_theme_constant_override("separation", 12)
+	var music_label := _label(18)
+	music_label.text = "Music"
+	music.add_child(music_label)
+	var slider := HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = Music.volume
+	slider.custom_minimum_size = Vector2(190, 32)
+	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	slider.value_changed.connect(func(value: float) -> void: Music.volume = value)
+	slider.drag_ended.connect(func(_changed: bool) -> void: Music.save_volume())
+	music.add_child(slider)
+	column.add_child(music)
 	for entry: Array in [["Resume", func() -> void: set_paused(false)],
 			["Leave" if Net.networked() else "New map", func() -> void:
 				get_tree().paused = false

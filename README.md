@@ -234,6 +234,21 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 The sunset/sunrise clock and the strip under it look along where the sun
 will be from where you stand, so they allow for the terrain round you.
 
+## Music
+
+A synth score in D minor after Tron: Legacy, with Deep Rock Galactic in
+its fights, rendered at startup and following the mission. By day, a
+wide pad and a soft bass, now and then an arpeggio. At night the bass
+pulses in sixteenths, pumping, the arpeggio runs, low brass swells on
+the chord changes, and every other phrase the brass plays the theme.
+With three or more spiders near you (or the pod, from the command
+chair), rock drums and chugging guitar come in under the theme. When the
+pod's being bitten, or in the last minute, it goes four on the floor
+with the arpeggio an octave up. It climbs straight away, with a crash,
+and comes back down only after four calmer bars. The pause menu has its
+volume, kept between runs. The score is `audio/music.gd`; the synth,
+`audio/instruments.gd`, comes from Real-Time Logistics.
+
 ## Tuning
 
 Mission, power, health and spider numbers are constants at the top of
@@ -271,6 +286,11 @@ User arguments after `--`, e.g.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.
 
+- `mood=0-3` holds the music in a mood (day, night, swarm, siege);
+  `record=path.wav` records the music for `record_for` seconds (default
+  30) once it's ready, then quits; `solo=name` plays only the sounds
+  whose names start with it (bass, arp, brass, braam, guitar, kick,
+  snare, hat, tom, pad).
 ## Layout
 
 - `world/terrain.gd`: the ground, a signed distance field (hills,
@@ -293,6 +313,8 @@ User arguments after `--`, e.g.
 - `net/net.gd` (autoload `Net`): connections and every RPC.
 - `game/avatar.gd`: other soldiers.
 - `menu/menu.gd`: the front door.
+- `audio/music.gd` (autoload `Music`), `audio/instruments.gd`: the
+  soundtrack and its synth.
 - `game/commander.gd`: the commander's view.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,

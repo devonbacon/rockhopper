@@ -10,6 +10,7 @@ var _status: Label
 
 
 func _ready() -> void:
+	Music.in_game = false
 	if Net.launched:
 		_build()
 		return

@@ -184,6 +184,8 @@ var _end_in := INF
 var _pod_alert := 0.0
 var _pod_bitten := 99.0
 var _link_turn := 0
+## When the pod was last bitten, for the music.
+var _pod_hurt_at := -INF
 var _args := {}
 
 
@@ -230,6 +232,8 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if player:
+		_feed_music()
 	for ping in pings:
 		ping.age += delta
 	pings.assign(pings.filter(func(p: Dictionary) -> bool: return p.age < PING_TIME))
@@ -326,6 +330,22 @@ func _simulate(delta: float) -> void:
 			_end(State.WON, "Extracted with %d of %d ore in the pod.%s" % [stock, QUOTA, " Quota met." if stock >= QUOTA else ""])
 		else:
 			_end(State.LOST, "The pod launched without anyone.")
+
+
+## Tells the soundtrack how things stand where you are (or at the pod,
+## from the command chair).
+func _feed_music() -> void:
+	var commanding := commander_view != null and commander_view.visible
+	var centre := pod.global_position if commanding else player.global_position
+	var near := 0
+	for spider in spiders:
+		if spider.global_position.distance_to(centre) < 30.0:
+			near += 1
+	Music.in_game = state == State.PLAYING
+	Music.night = Sun.dir_at(time).y < 0.05
+	Music.danger = near
+	Music.alarm = time - _pod_hurt_at < 6.0
+	Music.final = MISSION - time < 60.0
 
 
 ## One soldier's warmth and health, and a trip back to the pod if they've
@@ -717,6 +737,8 @@ func apply_snapshot(data: Array) -> void:
 	state = f[5]
 	outcome = f[6]
 	commander_peer = f[9]
+	if f[11] < pod.health:
+		_pod_hurt_at = time
 	if f[11] < pod.health and commander_view and commander_view.visible:
 		commander_view.pod_hit()
 	pod.health = f[11]
@@ -1349,6 +1371,7 @@ func damage(target: Node3D, amount: float) -> void:
 		(target as Fixture).health -= amount
 		if target == pod:
 			_pod_bitten = 0.0
+			_pod_hurt_at = time
 		if target == pod and _pod_alert <= 0.0:
 			_pod_alert = POD_ALERT_EVERY
 			_announce("The pod is under attack!")
