@@ -4,7 +4,7 @@ extends Node
 ## - checks you stand on the ground;
 ## - builds a drill rig on the deposit nearest the pod and lets it and the
 ##   rover work for a minute and a half in daylight;
-## - skips to the middle of the night and watches the spiders come.
+## - skips to midnight and watches the spiders come.
 ## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
 ## Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn
 
@@ -67,7 +67,6 @@ func _step(delta: float) -> bool:
 			else:
 				push_error("couldn't place a lab by the pod")
 			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
-			_game.stock += Fixture.COST[&"lamp"]
 			_plan = _game.place_blueprint(&"lamp", plan_spot[0], plan_spot[1])
 			_game.commander_peer = Net.local_id()
 			_game.handle(Net.local_id(), &"order", [[_game.rovers[0].net_id], &"build", Vector3.INF, _plan.net_id])
@@ -99,14 +98,12 @@ func _step(delta: float) -> bool:
 			screen.press()
 			if rover.order != &"home":
 				push_error("pressing the rover's screen didn't send it home")
-			var forecast := _game.sun.forecast(player.camera.global_position, _game.get_world_3d().direct_space_state, 120)
-			var dark := forecast.find(false)
-			var light_again := forecast.find(true, maxi(dark, 0))
-			if dark >= 0:
-				var middle := (dark + (light_again if light_again > dark else 120)) * 0.5
-				_game.time += Sun.DAY * middle / 120.0
-				_game.sun.set_time(_game.time)
-			print("skipped to t=%.0f, the middle of the night here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])
+			var midnight := (1.5 * PI - Sun.START) / TAU * Sun.DAY
+			while midnight < _game.time:
+				midnight += Sun.DAY
+			_game.time = midnight
+			_game.sun.set_time(_game.time)
+			print("skipped to midnight, t=%.0f, dark here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])
 			_game.handle(Net.local_id(), &"flare", [player.global_position + Vector3.UP * 1.6, Vector3.DOWN])
 			_phase = 2
 		2:

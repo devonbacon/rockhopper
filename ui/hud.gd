@@ -309,7 +309,7 @@ func _update_bottom() -> void:
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
 			_rovers.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
-	_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [Q] flare    [MMB] ping    [E] use    [F] headlamp    [Esc] pause" % attack
+	_hint.text = "%s    [1/2/wheel] gun/hammer    %s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[MMB] grapple    " if game.has(&"grapple") else ""]
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
@@ -379,7 +379,7 @@ func _draw_blueprint_markers() -> void:
 		if camera.is_position_behind(top) or camera.global_position.distance_to(top) > 70.0:
 			continue
 		var at := camera.unproject_position(top)
-		var text := "BUILD %s %d/%d" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed()]
+		var text := "BUILD %s %d/%d%s" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed(), "  NO ORE" if game.stock < plan.blow_cost() else ""]
 		_overlay.draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), BLUEPRINT_COLOR, false, 2.0)
 		_overlay.draw_string_outline(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, 4, Color(0, 0, 0, 0.7))
 		_overlay.draw_string(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, BLUEPRINT_COLOR)

@@ -28,10 +28,11 @@ Ore is banked in the pod. What you carry counts once you hand it in.
 Lamps (1 ore), panels (2), batteries (2), drill rigs (3), research labs
 (4) and rovers (4, printed from the pod's screen) are paid for from the
 bank, as is research, and picking something back up refunds it.
-Buildings are placed by the commander, from the pod, as blueprints: paid
-for when placed, glowing blue holograms that do nothing until soldiers
+Buildings are placed by the commander, from the pod, as blueprints:
+glowing blue holograms, free to place, that do nothing until soldiers
 hammer them up (2 blows for a lamp, 3 for a panel or battery, 5 for a rig,
-6 for a lab). What's in the
+6 for a lab). Each blow pays its share of the cost from the bank, the
+first blows first, and lands only if the bank can pay it. What's in the
 bank when the pod launches, after twelve minutes, is the score (the
 quota is 100). Be beside the pod then, or be left behind.
 
@@ -57,6 +58,7 @@ everything, already built or not:
 - Bigger tanks (after the jetpack): it burns fuel 40% slower.
 - Overcharged rounds: double damage, so one shot kills a spider.
 - Stabiliser: half the bloom from firing, and tighter at rest.
+- Grapple: middle mouse hooks what you're looking at (see Controls).
 - Faster drills: rigs drill 40% faster.
 - Rover tuning: rovers drive 40% faster and carry 4 more.
 - Efficient lamps: lamps draw half the power.
@@ -95,6 +97,11 @@ seed. Online, freezing or being killed sends you back to the pod without
 what you carried, rather than ending the mission, and a new mission
 starts 15 s after one ends.
 
+The server turns away a client on a different build. The build is a hash
+of the game's scripts and shaders (everything but `addons`, `tests` and
+`tools`), shown under the menu and in the server's log, so uncommitted
+edits count too.
+
 From the command line, after `--`:
 
 - `server` (with `port=`, default 7777, and `seed=`): a dedicated server,
@@ -131,7 +138,8 @@ diamonds), spiders (red dots), rigs and blueprints.
 - **Building:** 1-5 or the bar at the bottom picks a lamp, panel,
   battery, rig or lab; left-click places it as a blueprint (Shift keeps
   placing), right-click or Esc puts it away. A rig snaps to the deposit
-  nearest the mouse. Delete over a blueprint cancels it, refunded.
+  nearest the mouse. Delete over a blueprint cancels it, refunding what
+  its blows have paid.
 - **Ping:** right-click with no rovers selected.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
@@ -151,8 +159,10 @@ diamonds), spiders (red dots), rigs and blueprints.
   The hammer smashes everything in a short arc in front, one-shotting
   spiders and knocking them flying, chips ore off a deposit, and puts up
   the commander's blueprints a blow at a time.
-- **Grapple (G):** a spider gets yanked to you; anything else (rock, a
-  building) pulls you to it for as long as you hold G, about 35 m.
+- **Grapple (middle mouse, once researched):** a spider gets tugged
+  towards you; anything else (rock, a building) reels you in, up to
+  10 m/s, for as long as you hold the button, from up to 25 m. It takes
+  5 s to be ready again after you let go or tug a spider.
 - **Fire:** left mouse, held. Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
@@ -168,7 +178,7 @@ diamonds), spiders (red dots), rigs and blueprints.
   it carries, until you tell it to haul again. It also shows what the
   rover's doing, its cargo and its hull.
 - **Flare (Q):** throws one where you're looking.
-- **Ping (middle mouse):** marks the spot you're looking at for everyone
+- **Ping (G):** marks the spot you're looking at for everyone
   for 8 s: a beam of light, and a marker on screen with your name and how
   far it is. The commander's pings are gold.
 - **F** toggles the headlamp. **Esc** pauses (Resume, New map, Quit);

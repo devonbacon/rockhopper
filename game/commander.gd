@@ -15,9 +15,9 @@ extends Node3D
 ## the spot for the soldiers.
 ##
 ## Building: 1-5 or the bar picks something, left-click places it as a
-## blueprint, paid for now, for soldiers to hammer up (Shift keeps placing),
-## and right-click or Esc puts it away. Delete over a blueprint cancels it,
-## refunded. R opens the research panel.
+## blueprint for soldiers to hammer up, each blow paying its share from the
+## bank (Shift keeps placing), and right-click or Esc puts it away. Delete
+## over a blueprint cancels it, refunding what's been paid. R opens the research panel.
 
 const PAN_SPEED := 40.0
 const TURN_SPEED := 1.8
@@ -217,7 +217,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_DELETE, KEY_BACKSPACE:
 				if _hover_plan:
 					game.act(&"cancel", [_hover_plan.net_id])
-					toast("%s blueprint cancelled, %d ore back." % [Fixture.NAMES[_hover_plan.kind], Fixture.COST[_hover_plan.kind]])
+					toast("%s blueprint cancelled, %d ore back." % [Fixture.NAMES[_hover_plan.kind], _hover_plan.paid()])
 			KEY_ESCAPE:
 				if placing != &"" or !selected.is_empty() or _research.visible:
 					_choose(&"")
@@ -280,9 +280,6 @@ func _aim_ghost(hit: Dictionary) -> void:
 func _place(keep_placing: bool) -> void:
 	var spot := _placement(_mouse_hit())
 	if spot.is_empty():
-		return
-	if game.stock < Fixture.COST[placing]:
-		toast("Not enough ore banked: a %s needs %d." % [String(Fixture.NAMES[placing]).to_lower(), Fixture.COST[placing]])
 		return
 	if !game.can_build(placing, spot.position):
 		toast("Too close to something.")
@@ -403,7 +400,7 @@ func _build_ui() -> void:
 		var button := _button("", Vector2(96, 92))
 		button.draw.connect(func() -> void: _draw_build_button(button, kind, i))
 		button.pressed.connect(func() -> void: _choose(&"" if placing == kind else kind))
-		button.tooltip_text = "%s: %d ore, %d hammer blows" % [Fixture.NAMES[kind], Fixture.COST[kind], Fixture.BUILD_HITS[kind]]
+		button.tooltip_text = "%s: %d ore, paid over %d hammer blows" % [Fixture.NAMES[kind], Fixture.COST[kind], Fixture.BUILD_HITS[kind]]
 		bar.add_child(button)
 		_build_buttons[kind] = button
 	var spacer := Control.new()
@@ -421,7 +418,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] turn  |  [click / drag] select rovers  [Tab] all  [right-click] send  [right-click, none selected] ping  |  [1-5] build  [Del] cancel blueprint  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [click / drag] select rovers  [Tab] all  [right-click] send  [right-click, none selected] ping  |  [1-5] build  [Del] cancel blueprint  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -500,7 +497,7 @@ func _update_ui() -> void:
 
 func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
 	var affordable: bool = game.stock >= Fixture.COST[kind]
-	var tint := Color.WHITE if affordable else Color(1, 1, 1, 0.35)
+	var tint := Color.WHITE
 	var size := button.size
 	if placing == kind:
 		button.draw_rect(Rect2(Vector2.ZERO, size), Color(Hud.DAY_COLOR, 0.25))

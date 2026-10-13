@@ -10,6 +10,10 @@ var _status: Label
 
 
 func _ready() -> void:
+	if Net.launched:
+		_build()
+		return
+	Net.launched = true
 	var args := {}
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
@@ -68,7 +72,13 @@ func _build() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.modulate = Color(1.0, 0.7, 0.4)
 	column.add_child(_status)
+	_status.text = Net.last_error
 	Net.status.connect(func(text: String) -> void: _status.text = text)
+	var build := Label.new()
+	build.text = "build %s" % Net.version
+	build.modulate = Color(1, 1, 1, 0.35)
+	build.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(build)
 
 
 func _field(parent: Control, label: String, value: String) -> LineEdit:

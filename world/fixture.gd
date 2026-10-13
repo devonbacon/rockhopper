@@ -8,8 +8,9 @@ extends StaticBody3D
 ## over it. A rig drills while it's lit, by the sun or a lamp, into a
 ## hopper that rovers come and empty, or you can by hand.
 ##
-## What the commander places starts as a blueprint: a hologram, paid for,
-## that does nothing till soldiers hammer it up.
+## What the commander places starts as a blueprint: a hologram that does
+## nothing till soldiers hammer it up, each blow paying its share of the
+## cost from the bank.
 
 const LAYER := 2
 const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"rover": 4}
@@ -148,6 +149,20 @@ func take(amount: int) -> int:
 
 func hits_needed() -> int:
 	return BUILD_HITS[kind]
+
+
+## Ore paid into a blueprint after this many blows, rounded up so the
+## first blows pay first.
+func paid_after(blows: int) -> int:
+	return ceili(COST[kind] * blows / float(hits_needed()))
+
+
+func paid() -> int:
+	return paid_after(hits)
+
+
+func blow_cost() -> int:
+	return paid_after(hits + 1) - paid()
 
 
 ## Every part see-through and glowing, nothing lit or working.
@@ -428,8 +443,8 @@ func _build_lab() -> void:
 	_add_mesh(dish, white, Vector3(0.7, 2.65, -0.4)).rotation = Vector3(0.5, 0, 0.3)
 	screen = Screen.new()
 	screen.title = "RESEARCH LAB"
-	screen.size_m = Vector2(1.5, 1.3)
-	screen.pixels = Vector2i(640, 556)
+	screen.size_m = Vector2(1.5, 1.4)
+	screen.pixels = Vector2i(640, 598)
 	screen.button_height = 34.0
 	screen.button_font = 19
 	screen.buttons.assign(Game.UPGRADES.keys())

@@ -53,6 +53,7 @@ const UPGRADES := {
 	&"drills": {name = "FASTER DRILLS", cost = 6, time = 45.0, text = "Rigs drill 40% faster"},
 	&"rovers": {name = "ROVER TUNING", cost = 5, time = 40.0, text = "Rovers drive 40% faster and carry 4 more"},
 	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, time = 30.0, text = "Lamps draw half the power"},
+	&"grapple": {name = "GRAPPLE", cost = 4, time = 30.0, text = "Middle mouse: reel yourself to rock, or tug a spider to you"},
 }
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
@@ -431,7 +432,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				place_blueprint(args[0], args[1], args[2], args[3])
 		&"cancel":
 			if peer == commander_peer and target is Fixture and blueprints.has(target):
-				stock += Fixture.COST[target.kind]
+				stock += target.paid()
 				_remove_blueprint(target)
 		&"construct":
 			if target is Fixture and blueprints.has(target):
@@ -931,7 +932,7 @@ func lit_at(pos: Vector3) -> String:
 
 ## Whether kind can go at pos; for a rig, pos is the deposit's.
 func can_build(kind: StringName, pos: Vector3) -> bool:
-	if !Fixture.COST.has(kind) or stock < Fixture.COST[kind]:
+	if !Fixture.COST.has(kind):
 		return false
 	if kind == &"drill":
 		var deposit := deposit_at(pos)
@@ -975,10 +976,9 @@ func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from:
 	return fixture
 
 
-## The commander's: kind, paid for now, as a hologram for soldiers to
-## hammer up.
+## The commander's: kind, as a hologram for soldiers to hammer up, paid
+## for a blow at a time.
 func place_blueprint(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> Fixture:
-	stock -= Fixture.COST[kind]
 	var plan := _make_fixture(kind, pos, normal, facing_from)
 	plan.blueprint = true
 	add_child(plan)
@@ -987,17 +987,22 @@ func place_blueprint(kind: StringName, pos: Vector3, normal: Vector3, facing_fro
 	return plan
 
 
-## A hammer blow on a blueprint; the last one puts it up for real.
-func construct(plan: Fixture) -> void:
+## A hammer blow on a blueprint, if the bank can pay for it; the last one
+## puts it up for real.
+func construct(plan: Fixture) -> bool:
+	if stock < plan.blow_cost():
+		return false
+	stock -= plan.blow_cost()
 	plan.hits += 1
 	if plan.hits < plan.hits_needed():
-		return
+		return true
 	var at := plan.global_transform
 	_remove_blueprint(plan)
 	stock += Fixture.COST[plan.kind]
 	var fixture := build(plan.kind, at.origin, plan.normal)
 	fixture.basis = at.basis
 	_announce("%s built" % Fixture.NAMES[plan.kind])
+	return true
 
 
 func _remove_blueprint(plan: Fixture) -> void:
@@ -1514,7 +1519,6 @@ func _debug_setup() -> void:
 		for i in int(_args.plan):
 			var kind: StringName = [&"lab", &"lamp", &"panel", &"battery"][i % 4]
 			var spot: Array = terrain.surface_point(pod.global_position + (frame.x * cos(i * 1.3 + 2.0) + frame.z * sin(i * 1.3 + 2.0)) * (8.0 + i * 1.5))
-			stock += Fixture.COST[kind]
 			var plan := place_blueprint(kind, spot[0], spot[1], pod.global_position)
 			plan.hits = i % plan.hits_needed()
 	if _args.has("lab"):

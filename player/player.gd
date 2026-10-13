@@ -5,8 +5,8 @@ extends CharacterBody3D
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Left mouse fires, or swings
 ## the hammer, which also mines, puts up the commander's blueprints and
-## patches up the pod and anything damaged. Q throws a flare; middle mouse
-## pings what you're looking at for everyone. E
+## patches up the pod and anything damaged. Q throws a flare; G pings what
+## you're looking at for everyone; middle mouse, once researched, grapples. E
 ## is use: tap it at the pod to hand in ore, on a button on a screen to
 ## press it, or at a rig to empty its hopper; hold it on ore or a deposit
 ## to mine it, or on a lamp, panel or rig to pick it back up. F toggles the
@@ -58,9 +58,11 @@ const GUN_RANGE := 60.0
 const HAMMER_EVERY := 0.75
 const HAMMER_DAMAGE := 30.0
 const HAMMER_REACH := 3.2
-const GRAPPLE_RANGE := 35.0
-const GRAPPLE_PULL := 30.0
-const GRAPPLE_MAX := 20.0
+const GRAPPLE_RANGE := 25.0
+const GRAPPLE_PULL := 14.0
+const GRAPPLE_MAX := 10.0
+## After letting go, or yanking a spider, before it'll fire again.
+const GRAPPLE_COOLDOWN := 5.0
 const FLARE_EVERY := 0.5
 const PING_RANGE := 300.0
 ## How far out from the middle you can go before the crater wall stops
@@ -176,13 +178,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_switch(&"hammer" if weapon == &"gun" else &"gun")
 		elif event.button_index == MOUSE_BUTTON_MIDDLE:
-			_ping()
+			_throw_hook()
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_F: headlamp.visible = !headlamp.visible
 			KEY_1: _switch(&"gun")
 			KEY_2: _switch(&"hammer")
-			KEY_G: _throw_hook()
+			KEY_G: _ping()
 			KEY_Q: _throw_flare()
 
 
@@ -319,7 +321,8 @@ func _use(delta: float) -> void:
 	if !target:
 		return
 	if target.blueprint:
-		prompt = "%s blueprint: %d / %d\n%s" % [Fixture.NAMES[target.kind], target.hits, target.hits_needed(), "[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up"]
+		var cost := target.blow_cost()
+		prompt = "%s blueprint: %d / %d\n%s%s" % [Fixture.NAMES[target.kind], target.hits, target.hits_needed(), "[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up", "" if cost == 0 else (" (%d ore from the pod)" % cost if game.stock >= cost else "\nNot enough ore in the pod")]
 		return
 	match target.kind:
 		&"deposit":
@@ -403,6 +406,9 @@ func _smash() -> void:
 		return
 	var fixture: Fixture = hit.collider
 	if fixture.blueprint:
+		if game.stock < fixture.blow_cost():
+			_say("Not enough ore in the pod")
+			return
 		game.act(&"construct", [fixture.net_id])
 		_say("%s %d / %d" % [Fixture.NAMES[fixture.kind], mini(fixture.hits + 1, fixture.hits_needed()), fixture.hits_needed()])
 	elif fixture.kind == &"deposit" or fixture.kind == &"ore":
@@ -433,9 +439,12 @@ func _ping() -> void:
 
 
 ## Hooks what's under the crosshair. A spider gets yanked to you; anything
-## else pulls you to it while G's held.
+## else pulls you to it while the middle button's held.
 func _throw_hook() -> void:
 	if hooked or _hook_cooldown > 0.0:
+		return
+	if !game.has(&"grapple"):
+		_say("The grapple needs researching")
 		return
 	var from := camera.global_position
 	var to := from - camera.global_basis.z * GRAPPLE_RANGE
@@ -443,11 +452,11 @@ func _throw_hook() -> void:
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		return
-	_hook_cooldown = 0.4
 	if hit.collider is Spider:
+		_hook_cooldown = GRAPPLE_COOLDOWN
 		var spider: Spider = hit.collider
 		var home := (from - spider.global_position)
-		game.act(&"fling", [spider.net_id, home.normalized() * minf(16.0, home.length() * 1.6) + up_direction * 3.0, 0.7])
+		game.act(&"fling", [spider.net_id, home.normalized() * minf(9.0, home.length()) + up_direction * 2.0, 0.6])
 		_yank_from = spider.global_position
 		_rope_flash = 0.2
 		return
@@ -456,9 +465,9 @@ func _throw_hook() -> void:
 
 
 func _reel(_delta: float, playing: bool) -> void:
-	if !playing or !Input.is_physical_key_pressed(KEY_G) or global_position.distance_to(_hook_point) < 2.0:
+	if !playing or !Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE) or global_position.distance_to(_hook_point) < 2.0:
 		hooked = false
-		_hook_cooldown = 0.3
+		_hook_cooldown = GRAPPLE_COOLDOWN
 
 
 func _draw_rope(delta: float) -> void:
