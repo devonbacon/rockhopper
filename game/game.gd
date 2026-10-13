@@ -276,6 +276,8 @@ func _simulate(delta: float) -> void:
 			fixture.smelt(delta, battery > 0.0)
 			if fixture.stalled == "":
 				power_out += FOUNDRY_DRAW
+		elif fixture.kind == &"turret" and state == State.PLAYING:
+			_run_turret(fixture, delta)
 	for lab in built:
 		if lab.kind == &"lab" and lab.researching != &"" and lab.enabled and state == State.PLAYING:
 			lab.unpowered = battery <= 0.0
@@ -436,6 +438,9 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"empty_rig":
 			if target is Fixture and built.has(target):
 				empty_rig(target)
+		&"load":
+			if target is Fixture and built.has(target) and target.kind == &"turret":
+				load_turret(target)
 		&"hand_in":
 			hand_in()
 		&"blueprint":
@@ -682,7 +687,7 @@ func _fast_state() -> Array:
 func _slow_state() -> Array:
 	var rows: Array = []
 	for f in built:
-		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0, f.enabled, f.ore_in, f.alloy_out, f.smelted, f.holding.duplicate()])
+		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0, f.enabled, f.ore_in, f.alloy_out, f.smelted, f.holding.duplicate(), f.ammo, f.aim, f.since_shot])
 	var alive := PackedInt32Array()
 	for ore in ores:
 		alive.append(ore.net_id)
@@ -810,6 +815,9 @@ func apply_slow(data: Array) -> void:
 		fixture.alloy_out = row[16]
 		fixture.smelted = row[17]
 		fixture.holding.assign(row[18])
+		fixture.ammo = row[19]
+		fixture.aim = row[20]
+		fixture.since_shot = row[21]
 	for fixture in built.duplicate():
 		if !seen.has(fixture.net_id):
 			_remove_built(fixture)
@@ -969,6 +977,8 @@ func can_build(kind: StringName, pos: Vector3, normal := Vector3.UP) -> bool:
 		return false
 	for fixture: Fixture in built + blueprints + ores + deposits + [pod]:
 		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
+		if kind == &"barricade" and fixture.kind == &"barricade":
+			room = 2.9
 		if kind == &"lab" or fixture.kind == &"lab" or kind == &"foundry" or fixture.kind == &"foundry":
 			room += 1.6
 		if fixture.global_position.distance_to(pos) < room:
@@ -1007,7 +1017,7 @@ func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from:
 	else:
 		normal = Terrain.up_at(pos)
 		fixture = Fixture.make(kind, pos, normal)
-	if (kind == &"lab" or kind == &"foundry") and facing_from != Vector3.INF:
+	if (kind == &"lab" or kind == &"foundry" or kind == &"barricade") and facing_from != Vector3.INF:
 		var towards := facing_from - pos
 		towards -= normal * towards.dot(normal)
 		if towards.length() > 0.1:
@@ -1072,7 +1082,7 @@ func deposit_at(pos: Vector3) -> Fixture:
 func pick_up(fixture: Fixture) -> void:
 	stock += Fixture.COST[fixture.kind]
 	alloy += Fixture.ALLOY.get(fixture.kind, 0) + fixture.alloy_out
-	carried += fixture.stored + fixture.ore_in
+	carried += fixture.stored + fixture.ore_in + fixture.ammo / Fixture.ROUNDS_PER_ORE
 	if fixture.researching != &"":
 		stock += UPGRADES[fixture.researching].cost
 		alloy += UPGRADES[fixture.researching].alloy
@@ -1160,6 +1170,68 @@ func _take_in(fixture: Fixture, item: StringName) -> void:
 			fixture.ore_in += 1
 		&"pylon":
 			fixture.holding.push_back(item)
+		&"turret":
+			fixture.ammo += Fixture.ROUNDS_PER_ORE
+
+
+## A turret: when it's ready, turns on the nearest spider in range that
+## it can see and that's in light, and shoots it, if it has ammo and
+## there's power.
+func _run_turret(turret: Fixture, delta: float) -> void:
+	turret.since_shot += delta
+	turret.cooldown -= delta
+	if !turret.enabled:
+		turret.stalled = "off"
+	elif turret.ammo <= 0:
+		turret.stalled = "no ammo"
+	elif battery <= 0.0:
+		turret.stalled = "no power"
+	else:
+		turret.stalled = ""
+	if turret.stalled != "" or turret.cooldown > 0.0:
+		return
+	turret.cooldown = 0.25
+	var from := turret.muzzle()
+	var space := get_world_3d().direct_space_state
+	var best: Spider = null
+	var best_distance := Fixture.TURRET_RANGE
+	for spider in spiders:
+		var at := spider.global_position + Terrain.up_at(spider.global_position) * 0.4
+		var distance := from.distance_to(at)
+		if distance >= best_distance or !spider.active() or lit_at(at) == "":
+			continue
+		if !space.intersect_ray(PhysicsRayQueryParameters3D.create(from, at, Terrain.ROCK_LAYER)).is_empty():
+			continue
+		best_distance = distance
+		best = spider
+	if !best:
+		return
+	var at := best.global_position + Terrain.up_at(best.global_position) * 0.4
+	var local := turret.global_basis.inverse() * (at - from)
+	turret.aim = atan2(-local.x, -local.z)
+	turret.cooldown = Fixture.TURRET_EVERY
+	turret.since_shot = 0.0
+	turret.ammo -= 1
+	battery = maxf(0.0, battery - Fixture.TURRET_SHOT)
+	best.hit(Fixture.TURRET_DAMAGE, turret)
+	_tracer_for_all(from, at)
+
+
+## A shot's tracer, for everyone who can see.
+func _tracer_for_all(from: Vector3, to: Vector3) -> void:
+	if player:
+		player._tracer(from, to)
+	for id in Net.peers:
+		if id != Net.local_id():
+			Net.effect.rpc_id(id, &"tracer", [from, to])
+
+
+## Loads a turret from your pockets, as much as it'll take.
+func load_turret(turret: Fixture) -> void:
+	var room := (Fixture.MAGAZINE - turret.ammo) / Fixture.ROUNDS_PER_ORE
+	var given := mini(room, carried)
+	carried -= given
+	turret.ammo += given * Fixture.ROUNDS_PER_ORE
 
 
 ## Mining by hand: an ore cluster comes away whole, a deposit a piece at a
@@ -1256,6 +1328,8 @@ func bite_reach(target: Node3D) -> float:
 		return 1.7
 	if target is Fixture and (target as Fixture).kind == &"drill":
 		return 2.8
+	if target is Fixture and (target as Fixture).kind == &"barricade":
+		return 2.4
 	if target is Fixture and (target as Fixture).kind == &"foundry":
 		return 2.2
 	if target == pod:
@@ -1573,6 +1647,10 @@ func _debug_setup() -> void:
 		place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, nearest.global_position)
 	await get_tree().physics_frame
 	var space := get_world_3d().direct_space_state
+	if _args.has("defence"):
+		var away := player.global_position - pod.global_position
+		away.y = 0.0
+		print(debug_defence(player.global_position + away.normalized() * 6.0, player.global_position))
 	if _args.has("cables"):
 		print(debug_cables())
 		var foundry: Fixture = built[-1]
@@ -1629,6 +1707,31 @@ func _debug_setup() -> void:
 		image.save_png(_args.shot)
 		print("saved ", _args.shot)
 		get_tree().quit()
+
+
+## Debug: a loaded turret at spot with a lamp beside it, and three
+## barricades in a line past it, away from from, all free. Says what it
+## built.
+func debug_defence(spot: Vector3, from: Vector3) -> String:
+	var ahead := spot - from
+	ahead.y = 0.0
+	ahead = ahead.normalized()
+	var side := ahead.cross(Vector3.UP)
+	var made: Array[String] = []
+	var plan := [[&"turret", spot], [&"lamp", spot + side * 2.5]]
+	for i in 3:
+		plan.append([&"barricade", spot + ahead * 6.0 + side * (i - 1) * 3.0])
+	for entry: Array in plan:
+		var at: Array = terrain.surface_point(entry[1])
+		if !can_build(entry[0], at[0], at[1]):
+			continue
+		stock += Fixture.COST[entry[0]]
+		alloy += Fixture.ALLOY.get(entry[0], 0)
+		var fixture := build(entry[0], at[0], at[1], from)
+		if fixture.kind == &"turret":
+			fixture.ammo = Fixture.MAGAZINE
+		made.append(String(fixture.kind))
+	return "defence: built %s" % ", ".join(made)
 
 
 ## Debug: a rig on the deposit nearest the pod, and a foundry halfway home,

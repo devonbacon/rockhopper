@@ -341,6 +341,17 @@ static func draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tin
 		canvas.draw_rect(Rect2(centre + Vector2(-25, -9), Vector2(50, 4)), gold)
 		canvas.draw_rect(Rect2(centre + Vector2(-18, -24), Vector2(8, 16)), dark)
 		canvas.draw_rect(Rect2(centre + Vector2(-9, 6), Vector2(18, 10)), Color(1.0, 0.5, 0.15) * tint)
+	elif kind == &"turret":
+		canvas.draw_rect(Rect2(centre + Vector2(-14, 4), Vector2(28, 18)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-14, 8), Vector2(28, 3)), Color(1.0, 0.45, 0.1) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-10, -10), Vector2(18, 10)), gold)
+		canvas.draw_line(centre + Vector2(6, -6), centre + Vector2(26, -14), dark, 4.0)
+	elif kind == &"barricade":
+		canvas.draw_rect(Rect2(centre + Vector2(-24, -12), Vector2(48, 30)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-24, -4), Vector2(48, 4)), Color(1.0, 0.45, 0.1) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-24, 8), Vector2(48, 4)), Color(1.0, 0.45, 0.1) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-27, -14), Vector2(5, 34)), dark)
+		canvas.draw_rect(Rect2(centre + Vector2(22, -14), Vector2(5, 34)), dark)
 	elif kind == &"lamp":
 		canvas.draw_circle(centre + Vector2(0, -12), 13, Color(1.0, 0.75, 0.4, 0.18) * tint)
 		canvas.draw_line(centre + Vector2(0, -8), centre + Vector2(0, 18), Color(0.7, 0.7, 0.72) * tint, 3.0)

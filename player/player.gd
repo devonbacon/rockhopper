@@ -431,7 +431,16 @@ func _use(delta: float) -> void:
 		&"foundry":
 			prompt = "Foundry: %d ore in, %d alloy made, %s\n[Hold E] Pick up" % [target.ore_in, target.alloy_out, "smelting" if target.stalled == "" else target.stalled]
 			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
-		&"lamp", &"panel", &"battery", &"lab", &"pylon":
+		&"turret":
+			var state: String = "ready" if target.stalled == "" else target.stalled
+			prompt = "Turret: %d / %d shots, %s\n%s[Hold E] Pick up" % [target.ammo, Fixture.MAGAZINE, state, "[E] Load ore    " if game.carried > 0 else ""]
+			# A tap loads it; holding on picks it up.
+			if released and _use_held < 0.3 and game.carried > 0:
+				game.act(&"load", [target.net_id])
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
+			if progress < 0.3 / (PICK_UP_TIME * 2.0):
+				progress = 0.0
+		&"lamp", &"panel", &"battery", &"lab", &"pylon", &"barricade":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
 

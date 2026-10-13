@@ -3,7 +3,8 @@ extends CharacterBody3D
 ## Climbs up out of the ground in the dark and goes for whatever's nearest
 ## that it can bite, you or anything built, or for anything working loud
 ## enough to hear; and for a while, for whoever last hurt it. Sunlight
-## drives it back underground. You can outrun one, but not by walking.
+## drives it back underground. You can outrun one, but not by walking. A
+## barricade in its way, it chews through.
 
 const LAYER := 16
 const SPEED := 4.6
@@ -47,7 +48,7 @@ var _body_material: StandardMaterial3D
 
 func _ready() -> void:
 	collision_layer = LAYER
-	collision_mask = Terrain.ROCK_LAYER
+	collision_mask = Terrain.ROCK_LAYER | Fixture.BARRIER_LAYER
 	floor_max_angle = deg_to_rad(65.0)
 	floor_snap_length = 0.5
 	var shape := SphereShape3D.new()
@@ -139,6 +140,7 @@ func _physics_process(delta: float) -> void:
 	velocity = horizontal + vertical
 	up_direction = up
 	move_and_slide()
+	_chew_if_blocked()
 	_animate(delta, horizontal.length() / SPEED)
 
 
@@ -259,3 +261,18 @@ func _add_mesh(mesh: Mesh, material: Material, pos: Vector3) -> MeshInstance3D:
 	instance.position = pos
 	add_child(instance)
 	return instance
+
+
+## Whether it's up out of the ground, and not on its way back down.
+func active() -> bool:
+	return _rising <= 0.0 and _sinking < 0.0
+
+
+## Walked into a barricade: bites its way through.
+func _chew_if_blocked() -> void:
+	for i in get_slide_collision_count():
+		var other := get_slide_collision(i).get_collider()
+		if other is Fixture and (other as Fixture).kind == &"barricade" and other != target:
+			target = other
+			_retarget = 3.0
+			_stuck = 0.0

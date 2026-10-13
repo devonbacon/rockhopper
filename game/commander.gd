@@ -6,7 +6,7 @@ extends Node3D
 ## WASD, the screen edges or dragging with the middle button pan, the wheel
 ## zooms, Q and E turn it, and X climbs back out.
 ##
-## Building: 1-7 or the bar picks something, left-click places it as a
+## Building: 1-9 or the bar picks something, left-click places it as a
 ## blueprint for soldiers to hammer up, each blow paying its share from the
 ## bank (Shift keeps placing), and right-click or Esc puts it away. Delete
 ## over a blueprint cancels it, refunding what's been paid.
@@ -23,8 +23,8 @@ const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
 const MAX_HEIGHT := 140.0
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry"]
-const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry"}
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade"]
+const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Wall"}
 const PICK := 26.0
 const SELECTED := Color(0.45, 1.0, 0.55)
 const SOLDIER := Color(0.45, 0.85, 1.0)
@@ -221,7 +221,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_X:
 				game.act(&"uncommand", [])
-			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
 				var kind := BUILD[event.physical_keycode - KEY_1]
 				_choose(&"" if placing == kind else kind)
 			KEY_L:
@@ -361,7 +361,12 @@ func _aim_ghost(hit: Dictionary) -> void:
 	var ok := game.can_build(placing, spot.position, spot.normal)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.4) if ok else Color(1.0, 0.3, 0.25, 0.4)
 	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
-	_ghost.global_transform = Transform3D(Fixture.upright(up), spot.position + up * Fixture.GHOST_LIFT[placing])
+	var turn := Fixture.upright(up)
+	var towards: Vector3 = game.pod.global_position - spot.position
+	towards -= up * towards.dot(up)
+	if (placing == &"lab" or placing == &"foundry" or placing == &"barricade") and towards.length() > 0.1:
+		turn = Basis.looking_at(-towards.normalized(), up)
+	_ghost.global_transform = Transform3D(turn, spot.position + up * Fixture.GHOST_LIFT[placing])
 
 
 func _place(keep_placing: bool) -> void:
@@ -463,7 +468,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-7] build  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -556,6 +561,8 @@ func _describe(fixture: Fixture) -> String:
 			parts.append("ore %d/%d, alloy %d/%d, %s (%.0f power/s)" % [fixture.ore_in, Fixture.BIN, fixture.alloy_out, Fixture.BIN, "smelting" if fixture.stalled == "" else fixture.stalled, Game.FOUNDRY_DRAW])
 		&"pylon":
 			parts.append("passing on %d" % fixture.holding.size())
+		&"turret":
+			parts.append("ammo %d/%d, %s (%.1f power a shot, fires at spiders in light)" % [fixture.ammo, Fixture.MAGAZINE, "ready" if fixture.stalled == "" else fixture.stalled, Fixture.TURRET_SHOT])
 		&"lab":
 			parts.append("off" if !fixture.enabled else ("idle" if fixture.researching == &"" else String(Game.UPGRADES[fixture.researching].name).capitalize()))
 		&"lamp":
@@ -627,6 +634,9 @@ func _draw_overlay() -> void:
 			&"foundry":
 				text = "FOUNDRY %d>%d%s" % [fixture.ore_in, fixture.alloy_out, "" if fixture.stalled == "" else "  " + fixture.stalled.to_upper()]
 				color = Link.ALLOY if fixture.stalled == "" else (OFF if fixture.stalled == "off" else Hud.DAY_COLOR)
+			&"turret":
+				text = "TURRET %d%s" % [fixture.ammo, "" if fixture.stalled == "" else "  " + fixture.stalled.to_upper()]
+				color = Hud.ORE_COLOR if fixture.stalled == "" else (OFF if fixture.stalled == "off" else Hud.ALERT)
 			_:
 				if Fixture.SWITCHED.has(fixture.kind) and !fixture.enabled:
 					text = "OFF"

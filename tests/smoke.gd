@@ -6,6 +6,7 @@ extends Node
 ##   foundry cabled to the pod, and lets them work for a minute and a half
 ##   in daylight, with a lab researching;
 ## - rides a cable;
+## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
 ## - skips to midnight and watches the spiders come.
@@ -126,6 +127,7 @@ func _step(delta: float) -> bool:
 			screen.press()
 			if _game.stock != stock + 3:
 				push_error("pressing the pod's screen didn't hand in what we carried")
+			print(_game.debug_defence(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 8.0, _game.pod.global_position))
 			var midnight := (1.5 * PI - Sun.START) / TAU * Sun.DAY
 			while midnight < _game.time:
 				midnight += Sun.DAY
@@ -143,6 +145,9 @@ func _step(delta: float) -> bool:
 			print("30 s into the night: %d spiders (%d going for something loud), %.0f m from the pod, health %.0f, state %s, built %d, rig %s, foundry %s" % [_game.spiders.size(), loud, player.global_position.distance_to(_game.pod.global_position), _game.health, Game.State.keys()[_game.state], _game.built.size(), _rig.stalled if is_instance_valid(_rig) else "destroyed", _foundry.stalled if is_instance_valid(_foundry) else "destroyed"])
 			if _game.spiders.is_empty() and _game.state == Game.State.PLAYING:
 				push_error("no spiders came")
+			var turrets := _game.built.filter(func(f: Fixture) -> bool: return f.kind == &"turret")
+			var walls := _game.built.filter(func(f: Fixture) -> bool: return f.kind == &"barricade")
+			print("defences: turret fired %d shots, barricades standing %d, worst hull %s" % [Fixture.MAGAZINE - turrets[0].ammo if !turrets.is_empty() else -1, walls.size(), walls.map(func(w: Fixture) -> int: return roundi(w.health)).min() if !walls.is_empty() else -1])
 			var flare_lit := _game.flares.any(func(f: Flare) -> bool: return f.global_position.distance_to(player.global_position) < 12.0)
 			print("flare thrown at our feet 30 s ago (we may have been shoved): still burning %s, flares left %d, pod hull %.0f" % [flare_lit, _game.flares_left, _game.pod.health])
 			if !flare_lit:

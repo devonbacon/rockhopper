@@ -30,13 +30,15 @@ the pod while there's power. In the dark it cools, and in 45 seconds
 you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
-Lamps (1 ore), pylons (1), panels (2), batteries (2 ore and 1 alloy),
-drill rigs (3), research labs (4) and foundries (5) are paid for from the
+Lamps (1 ore), pylons (1), barricades (1), panels (2), batteries (2 ore
+and 1 alloy), drill rigs (3), research labs (4), turrets (4 ore and 2
+alloy) and foundries (5) are paid for from the
 bank, as is research, and picking something back up refunds it.
 Buildings are placed by the commander, from the pod, as blueprints:
 glowing blue holograms, free to place, that do nothing until soldiers
 hammer them up (2 blows for a lamp or pylon, 3 for a panel or battery, 5
-for a rig, 6 for a lab or foundry). Each blow pays its share of the cost
+for a rig or barricade, 6 for a lab, foundry or turret). Each blow pays
+its share of the cost
 from the bank, the first blows first, and lands only if the bank can pay
 it. Buildings stand upright on a concrete plinth sunk into the rock, on
 ground up to 20° steep (35° for lamps and pylons). What's in the bank
@@ -45,23 +47,34 @@ when the pod launches, after twelve minutes, is the score (the quota is
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
-it away. The commander strings a cable from one pylon, rig, foundry or
-the pod to another, up to 20 m, with clear air under it (1 ore each,
+it away. The commander strings a cable from one pylon, rig, foundry,
+turret or the pod to another, up to 20 m, with clear air under it (1 ore each,
 refunded when cut). Ore and alloy travel along it one way at 3 m/s, 1.5
 m apart. Rigs send ore, foundries send alloy, pylons pass on whatever
-reaches them (holding 4), and the pod takes everything into the bank. A
+reaches them (holding 4), turrets take ore as ammunition, and the pod
+takes everything into the bank. A
 place with several cables out takes turns between them. When something
 can't take any more, what's on the cable waits at the end.
 
 A foundry smelts 2 ore into 1 alloy every 6 s, drawing 1 power a second
 while it works, with bins of 10 for each. Alloy pays for batteries and
-the bigger upgrades.
+the bigger upgrades and turrets.
+
+A turret shoots the nearest spider within 22 m that it can see, if the
+spider's in light (sun, lamp or flare), a shot every 0.9 s, 10 damage
+each. Each shot spends a round and 0.3 of the battery. A piece of ore
+makes 10 rounds and a turret holds 40: feed it by cable, or tap E on it
+with ore in your pockets. It's loud for 2 s after it fires, and a spider
+it shoots comes for it. Spiders can't get past a barricade (a wall 3 m
+long and 2 m high, 120 hull, set across the way to the pod); one that
+walks into it chews through instead.
 
 Soldiers ride cables: E while looking at one grabs it, and you slide
 along underneath at 11 m/s, the way you're facing. E or Space lets go,
 keeping your speed, and you drop off at the end.
 
-The commander can switch lamps, rigs, labs and foundries off and on, to
+The commander can switch lamps, rigs, labs, foundries and turrets off and
+on, to
 save power at night or to quiet them. A rig that's drilling is loud, a
 foundry that's smelting louder, and a lab at work a little; the pod hums.
 Spiders hear them from further than they can see.
@@ -162,11 +175,12 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 
 - **Camera:** WASD, the screen edges or dragging with the middle button
   pan, the wheel zooms, Q and E turn it.
-- **Building:** 1-7 or the bar at the bottom picks a lamp, panel,
-  battery, rig, lab, pylon or foundry; left-click places it as a
+- **Building:** 1-9 or the bar at the bottom picks a lamp, panel,
+  battery, rig, lab, pylon, foundry, turret or barricade; left-click places it as a
   blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
   snaps to the deposit nearest the mouse; labs and foundries face the
-  pod. Delete over a blueprint cancels it, refunding what its blows have
+  pod, and barricades stand across the way to it. Delete over a
+  blueprint cancels it, refunding what its blows have
   paid.
 - **Cables (L, or the bar):** click where it runs from, then where it
   runs to; a dashed line shows whether it can go, and why not. Shift
@@ -241,6 +255,8 @@ User arguments after `--`, e.g.
   you in a cave; `view=screen` in front of the pod's screen.
 - `rig` builds a rig on the deposit nearest the pod and stands you
   beside it.
+- `defence` builds a loaded turret, a lamp and three barricades on the
+  side of you away from the pod.
 - `cables` builds a rig on the deposit nearest the pod and a foundry
   halfway home, cables them rig to foundry to pod, and stands you by
   the foundry.

@@ -18,10 +18,17 @@ extends StaticBody3D
 ## carry ore and alloy along. Rigs, foundries, labs and lamps can be
 ## switched off; working rigs, foundries and labs make noise that draws
 ## spiders.
+##
+## A turret shoots the nearest spider it can see in the light, using ore
+## fed to it by cable (or loaded by hand) as ammunition, and power for
+## each shot; it's loud while it fires. A barricade is a wall spiders
+## can't get past, only chew through.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5}
-const ALLOY := {&"battery": 1}
+## Barricades are on this too, which spiders collide with.
+const BARRIER_LAYER := 32
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5, &"turret": 4, &"barricade": 1}
+const ALLOY := {&"battery": 1, &"turret": 2}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
@@ -32,20 +39,30 @@ const SMELT_EVERY := 6.0
 const SMELT_ORE := 2
 const BIN := 10
 const PYLON_HOLDS := 4
+## Turrets: shots a piece of ore makes, and the most it holds.
+const ROUNDS_PER_ORE := 10
+const MAGAZINE := 40
+const TURRET_RANGE := 22.0
+const TURRET_EVERY := 0.9
+const TURRET_DAMAGE := 10.0
+## Battery spent per shot.
+const TURRET_SHOT := 0.3
+## How long a turret stays loud after it last fired.
+const LOUD_FOR := 2.0
 ## Hammer blows to put up a blueprint.
-const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6}
-const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry"}
+const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6, &"turret": 6, &"barricade": 5}
+const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Barricade"}
 ## How high a placement ghost sits over the ground.
-const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1}
+const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1, &"turret": 1.6, &"barricade": 1.0}
 ## Steepest ground each can go on, in degrees; the bigger ones sit level
 ## on a plinth.
 const MAX_SLOPE := {&"lamp": 35.0, &"pylon": 35.0}
 const SLOPE := 20.0
 ## How much further than they'd see that spiders hear it working.
-const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0}
-const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry"]
+const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0}
+const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry", &"turret"]
 ## Where cables tie on, above the base.
-const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4}
+const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4, &"turret": 3.4}
 
 var kind: StringName
 var net_id := 0
@@ -80,6 +97,13 @@ var ore_in := 0
 var alloy_out := 0
 var smelted := 0.0
 var holding: Array[StringName] = []
+## Turrets: shots left, which way the gun's turned, and the time since it
+## last fired and till it can again.
+var ammo := 0
+var aim := 0.0
+var since_shot := 99.0
+var cooldown := 0.0
+var _gun: Node3D
 
 var light: OmniLight3D
 ## The pod's screen.
@@ -134,6 +158,16 @@ static func ghost_mesh(ghost_kind: StringName) -> Mesh:
 			var hall := BoxMesh.new()
 			hall.size = Vector3(2.6, 2.2, 2.2)
 			return hall
+		&"turret":
+			var mount := CylinderMesh.new()
+			mount.top_radius = 0.4
+			mount.bottom_radius = 0.6
+			mount.height = 3.2
+			return mount
+		&"barricade":
+			var wall := BoxMesh.new()
+			wall.size = Vector3(3.0, 2.0, 0.5)
+			return wall
 	var lab := BoxMesh.new()
 	lab.size = Vector3(2.2, 1.7, 1.6)
 	return lab
@@ -160,6 +194,10 @@ func _ready() -> void:
 		&"lab": _build_lab()
 		&"pylon": _build_pylon()
 		&"foundry": _build_foundry()
+		&"turret": _build_turret()
+		&"barricade": _build_barricade()
+	if kind == &"barricade" and !blueprint:
+		collision_layer |= BARRIER_LAYER
 	if blueprint:
 		_hologram()
 	max_health = health
@@ -171,7 +209,13 @@ func noise() -> float:
 		&"pod": return NOISE.pod
 		&"drill", &"foundry": return NOISE[kind] if enabled and stalled == "" else 0.0
 		&"lab": return NOISE.lab if enabled and researching != &"" and !unpowered else 0.0
+		&"turret": return NOISE.turret if since_shot < LOUD_FOR else 0.0
 	return 0.0
+
+
+## Turrets: where shots come from.
+func muzzle() -> Vector3:
+	return global_position + normal * 1.75
 
 
 func cable_point() -> Vector3:
@@ -199,6 +243,7 @@ func accepts(item: StringName) -> bool:
 	match kind:
 		&"foundry": return item == &"ore" and ore_in < BIN
 		&"pylon": return holding.size() < PYLON_HOLDS
+		&"turret": return item == &"ore" and ammo <= MAGAZINE - ROUNDS_PER_ORE
 		&"pod": return true
 	return false
 
@@ -308,6 +353,12 @@ func _process(delta: float) -> void:
 	if kind == &"battery":
 		_fill.scale.y = maxf(0.02, charge)
 		_fill.position.y = 0.12 + 0.24 * _fill.scale.y
+	if _gun:
+		var turn := Basis(Vector3.UP, aim)
+		_gun.basis = _gun.basis.slerp(turn, minf(1.0, delta * 12.0))
+		_fill.scale.y = maxf(0.02, ammo / float(MAGAZINE))
+		_fill.position.y = 0.3 + 0.3 * _fill.scale.y
+		return
 	if kind == &"foundry":
 		var working := stalled == ""
 		_status.emission = Color(1.0, 0.45, 0.1) if working else Color(0.2, 0.2, 0.25)
@@ -652,6 +703,76 @@ func _build_foundry() -> void:
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(2.6, 1.9, 2.2)
 	_add_collider(shape, Vector3(0, 0.95, 0))
+
+
+## An ammo box on a plinth, a gun on a swivel above it, and a mast behind
+## for the cable.
+func _build_turret() -> void:
+	health = 60.0
+	_plinth(Vector2(1.2, 1.2))
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var dark := _material(Color(0.2, 0.21, 0.24), 0.6, 0.4)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var box := BoxMesh.new()
+	box.size = Vector3(1.1, 0.9, 1.1)
+	_add_mesh(box, white, Vector3(0, 0.45, 0))
+	var band := BoxMesh.new()
+	band.size = Vector3(1.12, 0.12, 1.12)
+	_add_mesh(band, orange, Vector3(0, 0.75, 0))
+	_add_mesh(_cylinder(0.12, 0.16, 0.6), dark, Vector3(0, 1.2, 0))
+	_add_mesh(_cylinder(0.05, 0.07, 2.6), white, Vector3(-0.45, 2.1, -0.45))
+	_gun = Node3D.new()
+	_gun.position = Vector3(0, 1.6, 0)
+	add_child(_gun)
+	var housing := BoxMesh.new()
+	housing.size = Vector3(0.6, 0.4, 0.8)
+	var body := MeshInstance3D.new()
+	body.mesh = housing
+	body.material_override = gold
+	_gun.add_child(body)
+	var barrel := MeshInstance3D.new()
+	barrel.mesh = _cylinder(0.06, 0.08, 1.0)
+	barrel.material_override = dark
+	barrel.rotation.x = PI * 0.5
+	barrel.position = Vector3(0, 0.05, -0.8)
+	_gun.add_child(barrel)
+	var gauge := BoxMesh.new()
+	gauge.size = Vector3(0.2, 0.62, 0.05)
+	_add_mesh(gauge, _material(Color(0.05, 0.05, 0.06), 0.0, 0.8), Vector3(0, 0.45, 0.56))
+	var fill_material := _material(Color(0.3, 0.85, 0.92), 0.0, 0.3)
+	fill_material.emission_enabled = true
+	fill_material.emission = Color(0.2, 0.75, 0.9)
+	fill_material.emission_energy_multiplier = 2.0
+	var fill := BoxMesh.new()
+	fill.size = Vector3(0.14, 0.6, 0.06)
+	_fill = _add_mesh(fill, fill_material, Vector3(0, 0.3, 0.57))
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.1, 1.9, 1.1)
+	_add_collider(shape, Vector3(0, 0.95, 0))
+
+
+## A wall of white panels between two posts, striped orange.
+func _build_barricade() -> void:
+	health = 120.0
+	_plinth(Vector2(3.0, 0.5))
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var dark := _material(Color(0.2, 0.21, 0.24), 0.6, 0.4)
+	var panel := BoxMesh.new()
+	panel.size = Vector3(2.8, 1.8, 0.3)
+	_add_mesh(panel, white, Vector3(0, 0.95, 0))
+	for y in [0.5, 1.4]:
+		var stripe := BoxMesh.new()
+		stripe.size = Vector3(2.82, 0.16, 0.32)
+		_add_mesh(stripe, orange, Vector3(0, y, 0))
+	for x in [-1.45, 1.45]:
+		var post := BoxMesh.new()
+		post.size = Vector3(0.2, 2.1, 0.45)
+		_add_mesh(post, dark, Vector3(x, 1.05, 0))
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(3.1, 2.1, 0.5)
+	_add_collider(shape, Vector3(0, 1.05, 0))
 
 
 ## A block of concrete under it, down into the rock, so it sits level on
