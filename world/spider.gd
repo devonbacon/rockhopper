@@ -7,7 +7,7 @@ extends CharacterBody3D
 const LAYER := 16
 const SPEED := 4.6
 const GRAVITY := 5.0
-const HEALTH := 20.0
+const HEALTH := 40.0
 const BITE := 6.0
 const BITE_EVERY := 0.8
 const RISE_TIME := 1.2

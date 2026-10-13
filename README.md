@@ -46,7 +46,9 @@ longer drive, or one they can't make at all. You can also empty a
 hopper by hand.
 
 A research lab works through upgrades for this mission, one at a time,
-picked on its screen: each costs ore, takes 30-45 s, and draws power
+picked by the commander from the command chair (its screen shows how
+it's going, but soldiers can't start or cancel anything there): each
+costs ore, takes 30-45 s, and draws power
 while it works (it stalls when the battery's flat). Pressing the one in
 progress cancels it and refunds the ore. Researched upgrades apply to
 everything, already built or not:
@@ -56,7 +58,7 @@ everything, already built or not:
 - Armour plating: +50 max health.
 - Heated suit: the cold takes twice as long to freeze you.
 - Bigger tanks (after the jetpack): it burns fuel 40% slower.
-- Overcharged rounds: double damage, so one shot kills a spider.
+- Overcharged rounds: double damage, so two shots kill a spider, not four.
 - Stabiliser: half the bloom from firing, and tighter at rest.
 - Grapple: middle mouse hooks what you're looking at (see Controls).
 - Faster drills: rigs drill 40% faster.
@@ -68,8 +70,9 @@ pod: one the first night, two the second, and one more with three or
 more players. They glow red, and close at sunrise. Spiders climb out of
 them all night (never by day, however deep the shadow), more of them and
 more often as the mission goes on, and with more players: at most 3 at
-once at first and 8 by the end, solo, with each player past the first
-adding half as many again. They go for the nearest thing within 40 m:
+once at first and 8 by the end, solo, coming up as often as every 1.7 s
+at first and 0.8 s by the end, with each player past the first adding
+half as much again. They go for the nearest thing within 40 m:
 one of you, a rover out on the road (their own headlights don't help
 them), anything you've built, or the pod; with nothing that near, they
 make for the pod. What they destroy is
@@ -161,14 +164,15 @@ diamonds), spiders (red dots), rigs and blueprints.
   while running slides: a burst of speed, faster downhill, and a jump
   out of it keeps the momentum. Land with it held to slide on.
 - **Weapons:** 1, 2 or the wheel switch between the gun and the hammer.
-  The hammer smashes everything in a short arc in front, one-shotting
-  spiders and knocking them flying, chips ore off a deposit, and puts up
+  The hammer smashes everything in a short arc in front, hurting
+  spiders badly (two blows kill one) and knocking them flying, chips ore off a deposit, and puts up
   the commander's blueprints a blow at a time.
 - **Grapple (middle mouse, once researched):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
   5 s to be ready again after you let go or tug a spider.
-- **Fire:** left mouse, held. Shots land in a
+- **Fire:** left mouse, held, about 2.4 shots a second; a spider takes
+  four (40 health, 10 a shot). Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
   tighter, but slow on your feet.

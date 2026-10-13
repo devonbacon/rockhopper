@@ -49,7 +49,7 @@ const UPGRADES := {
 	&"armour": {name = "ARMOUR PLATING", cost = 5, time = 40.0, text = "+50 max health"},
 	&"heated": {name = "HEATED SUIT", cost = 4, time = 30.0, text = "Cold takes twice as long to freeze you"},
 	&"tanks": {name = "BIGGER TANKS", cost = 3, time = 30.0, text = "The jetpack burns fuel 40% slower"},
-	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 6, time = 45.0, text = "Double damage: one shot kills a spider"},
+	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 6, time = 45.0, text = "Double damage from the gun"},
 	&"stabiliser": {name = "STABILISER", cost = 4, time = 30.0, text = "Half the bloom from firing, tighter at rest"},
 	&"drills": {name = "FASTER DRILLS", cost = 6, time = 45.0, text = "Rigs drill 40% faster"},
 	&"rovers": {name = "ROVER TUNING", cost = 5, time = 40.0, text = "Rovers drive 40% faster and carry 4 more"},
@@ -78,8 +78,8 @@ const HEAL_DELAY := 4.0
 ## Each player past the first adds half as much again.
 const SPIDERS_START := 3
 const SPIDERS_END := 8
-const SPAWN_GAP_START := 5.0
-const SPAWN_GAP_END := 2.5
+const SPAWN_GAP_START := 5.0 / 3.0
+const SPAWN_GAP_END := 2.5 / 3.0
 ## Bug holes open this far from the pod, at least this far apart.
 const HOLE_NEAR := 28.0
 const HOLE_FAR := 46.0
@@ -471,7 +471,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 						rover.command(args[1], args[2], onto)
 		&"press":
 			if target and "screen" in target and target.screen:
-				var reply: String = target.screen.pressed.call(args[1])
+				var reply: String = "RESEARCH IS PICKED FROM THE COMMAND CHAIR." if target is Fixture and target.kind == &"lab" and peer != commander_peer else target.screen.pressed.call(args[1])
 				if peer == Net.local_id():
 					_show_reply(target, reply)
 				else:
@@ -896,6 +896,8 @@ func _wire_lab_screen(lab: Fixture) -> void:
 		var upgrade: Dictionary = UPGRADES[action]
 		if has(action):
 			return "%s: researched" % String(upgrade.name).capitalize()
+		if commander_peer != Net.local_id():
+			return "%s: %s\nResearch is picked from the command chair" % [String(upgrade.name).capitalize(), upgrade.text]
 		if lab.researching == action:
 			return "[E] Cancel %s, refunding %d ore" % [String(upgrade.name).capitalize(), upgrade.cost]
 		return "[E] Research %s: %s" % [String(upgrade.name).capitalize(), upgrade.text]

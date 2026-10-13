@@ -80,14 +80,18 @@ func _step(delta: float) -> bool:
 				return false
 			var rover := _game.rovers[0]
 			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored if is_instance_valid(_rig) else -1, (_rig.stalled if _rig.stalled != "" else "drilling") if is_instance_valid(_rig) else "destroyed", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
-			if _game.stock <= _stock_before:
-				push_error("the rover brought nothing home")
+			if _game.stock <= _stock_before and rover.cargo == 0:
+				push_error("the rover brought nothing home, and has nothing aboard")
 			print("rover sent to build a lamp blueprint: built %s, lamps %d" % [!is_instance_valid(_plan), _game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lamp").size()])
 			if is_instance_valid(_plan):
 				push_error("the rover didn't build the blueprint")
 			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")
+			_game.handle(Net.local_id(), &"press", [_lab.net_id, &"stabiliser"])
+			print("a soldier pressing the lab's screen: researching '%s'" % _lab.researching)
+			if _lab.researching != &"":
+				push_error("a soldier started research from the lab's screen")
 			var screen := rover.screen
 			var rect: Rect2 = screen._rects[&"home"]
 			var uv := rect.get_center() / Vector2(screen.pixels)
