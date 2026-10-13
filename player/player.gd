@@ -9,8 +9,9 @@ extends CharacterBody3D
 ## you're looking at for everyone; middle mouse, once researched, grapples. E
 ## is use: tap it at the pod to hand in ore, on a button on a screen to
 ## press it, or at a rig to empty its hopper; hold it on ore or a deposit
-## to mine it, or on a lamp, panel or rig to pick it back up. F toggles the
-## headlamp.
+## to mine it, or on something built to pick it back up. E on a cable
+## overhead grabs it and rides it the way you're facing; E again or Space
+## lets go, and you drop off at the end. F toggles the headlamp.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -63,6 +64,9 @@ const GRAPPLE_PULL := 14.0
 const GRAPPLE_MAX := 10.0
 ## After letting go, or yanking a spider, before it'll fire again.
 const GRAPPLE_COOLDOWN := 5.0
+const ZIP_SPEED := 11.0
+## How far a cable can be from the crosshair's line to grab it.
+const ZIP_GRAB := 0.7
 const FLARE_EVERY := 0.5
 const PING_RANGE := 300.0
 ## How far out from the middle you can go: the hologram wall.
@@ -76,6 +80,11 @@ var headlamp: SpotLight3D
 var fuel := 100.0
 var weapon := &"gun"
 var hooked := false
+## The cable you're riding, how far along, and which way.
+var zip: Link
+var _zip_at := 0.0
+var _zip_dir := 1.0
+var _jump_was_down := false
 ## What E would do now, and how far through a hold it is, for the HUD.
 var prompt := ""
 var progress := 0.0
@@ -189,8 +198,94 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	align_up()
-	var up := up_direction
 	var playing := game.state == Game.State.PLAYING
+	if is_instance_valid(zip):
+		_ride(delta, playing)
+	else:
+		zip = null
+		_walk(delta, playing)
+	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
+	_flare_cooldown = maxf(0.0, _flare_cooldown - delta)
+	_draw_rope(delta)
+	_swing = maxf(0.0, _swing - delta / HAMMER_EVERY)
+	_hammer.rotation.x = -1.3 * sin(_swing * PI) if _swing > 0.0 else 0.0
+	notice_time = maxf(0.0, notice_time - delta)
+	_cooldown = maxf(0.0, _cooldown - delta)
+	_recoil = maxf(0.0, _recoil - delta * 12.0)
+	_muzzle_light.light_energy = _recoil * 3.0
+	_gun.position = HIP_GUN.lerp(ADS_GUN, _ads) + Vector3(0, 0, _recoil * 0.04)
+	var moving := clampf((velocity - up_direction * velocity.dot(up_direction)).length() / RUN, 0.0, 1.0)
+	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) * (0.6 if game.has(&"stabiliser") else 1.0) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
+	if !is_on_floor():
+		rest += 2.0
+	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
+	if playing:
+		_use(delta)
+		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if trigger and _cooldown <= 0.0:
+			if weapon == &"gun":
+				_fire()
+			else:
+				_smash()
+
+
+## Hanging under a cable, sliding along it; off at either end, or on Space,
+## carrying the speed.
+func _ride(delta: float, playing: bool) -> void:
+	aiming = false
+	sliding = false
+	jetting = false
+	_ads = move_toward(_ads, 0.0, delta * 7.0)
+	camera.fov = lerpf(FOV + 6.0, ADS_FOV, _ads)
+	var jump := playing and Input.is_physical_key_pressed(KEY_SPACE)
+	var start := zip.start()
+	var span := start.distance_to(zip.end())
+	var along := (zip.end() - start) / span
+	_zip_at += _zip_dir * ZIP_SPEED * delta
+	velocity = along * _zip_dir * ZIP_SPEED
+	if !playing or _zip_at <= 0.6 or _zip_at >= span - 0.6 or (jump and !_jump_was_down):
+		let_go(jump)
+		return
+	_jump_was_down = jump
+	global_position = start + along * _zip_at - up_direction * Link.HANG
+
+
+func _grab(link: Link, at: float) -> void:
+	hooked = false
+	zip = link
+	var span := link.length()
+	_zip_at = clampf(at, 0.7, span - 0.7)
+	var along := (link.end() - link.start()) / span
+	var ahead := -global_basis.z
+	_zip_dir = 1.0 if along.dot(ahead) >= 0.0 else -1.0
+	_jump_was_down = Input.is_physical_key_pressed(KEY_SPACE)
+	_say("Riding the cable: [E] or [Space] to let go")
+
+
+func let_go(jump := false) -> void:
+	zip = null
+	velocity *= 0.8
+	if jump:
+		velocity += up_direction * JUMP * 0.6
+
+
+## The cable the crosshair's on, within reach: [link, metres along, how
+## far off], or [] for none.
+func _aim_cable(reach: float) -> Array:
+	var from := camera.global_position
+	var dir := -camera.global_basis.z
+	var best: Array = []
+	for link in game.links:
+		var near: Array = link.nearest_to_ray(from, dir)
+		if near[0] < ZIP_GRAB and near[2] < reach and (best.is_empty() or near[2] < best[2]):
+			best = [link, near[1], near[2]]
+	return best
+
+
+## On foot, or in the air: walking, running, sliding, jumping, the jetpack
+## and the grapple.
+func _walk(delta: float, playing: bool) -> void:
+	var up := up_direction
 	var vertical := up * velocity.dot(up)
 	var horizontal := velocity - vertical
 	var input := Vector2.ZERO
@@ -261,29 +356,6 @@ func _physics_process(delta: float) -> void:
 		var out := Vector3(flat.x, 0.0, flat.y).normalized()
 		velocity -= out * velocity.dot(out)
 	move_and_slide()
-	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
-	_flare_cooldown = maxf(0.0, _flare_cooldown - delta)
-	_draw_rope(delta)
-	_swing = maxf(0.0, _swing - delta / HAMMER_EVERY)
-	_hammer.rotation.x = -1.3 * sin(_swing * PI) if _swing > 0.0 else 0.0
-	notice_time = maxf(0.0, notice_time - delta)
-	_cooldown = maxf(0.0, _cooldown - delta)
-	_recoil = maxf(0.0, _recoil - delta * 12.0)
-	_muzzle_light.light_energy = _recoil * 3.0
-	_gun.position = HIP_GUN.lerp(ADS_GUN, _ads) + Vector3(0, 0, _recoil * 0.04)
-	var moving := clampf((velocity - up_direction * velocity.dot(up_direction)).length() / RUN, 0.0, 1.0)
-	var rest := lerpf(HIP_SPREAD, ADS_SPREAD, _ads) * (0.6 if game.has(&"stabiliser") else 1.0) + moving * MOVING_SPREAD * lerpf(1.0, 0.3, _ads)
-	if !is_on_floor():
-		rest += 2.0
-	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
-	if playing:
-		_use(delta)
-		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if trigger and _cooldown <= 0.0:
-			if weapon == &"gun":
-				_fire()
-			else:
-				_smash()
 
 
 func _axis(positive: Key, negative: Key) -> float:
@@ -310,6 +382,11 @@ func _use(delta: float) -> void:
 		_use_held = 0.0
 	prompt = ""
 	progress = 0.0
+	if zip:
+		prompt = "[E] / [Space] Let go"
+		if pressed:
+			let_go()
+		return
 	if _aim_screen():
 		if _screen.hover != &"":
 			var described: String = _screen.describe.call(_screen.hover)
@@ -317,18 +394,24 @@ func _use(delta: float) -> void:
 			if pressed:
 				_screen.press()
 		return
+	var cable := _aim_cable(REACH + 2.0)
+	if !cable.is_empty() and (!target or cable[2] < camera.global_position.distance_to(hit.position)):
+		prompt = "[E] Ride the cable"
+		if pressed:
+			_grab(cable[0], cable[1])
+		return
 	if !target:
 		return
 	if target.blueprint:
-		var cost := target.blow_cost()
-		prompt = "%s blueprint: %d / %d\n%s%s" % [Fixture.NAMES[target.kind], target.hits, target.hits_needed(), "[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up", "" if cost == 0 else (" (%d ore from the pod)" % cost if game.stock >= cost else "\nNot enough ore in the pod")]
+		var cost := Game.price(target.blow_cost(), target.blow_cost(true))
+		prompt = "%s blueprint: %d / %d\n%s%s" % [Fixture.NAMES[target.kind], target.hits, target.hits_needed(), "[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up", "" if target.blow_cost() + target.blow_cost(true) == 0 else (" (%s from the pod)" % cost if game.can_pay(target) else "\nNot enough in the pod: %s a blow" % cost)]
 		return
 	match target.kind:
 		&"deposit":
 			prompt = "[Hold E] Mine" + ("" if target.rig == null else "    a rig's on it")
 			_hold(down, delta, MINE_TIME, func() -> void: game.act(&"mine", [target.net_id]))
 		&"drill":
-			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full"}[target.stalled]
+			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full", "off": "switched off"}[target.stalled]
 			prompt = "Rig: %d / %d, %s\n[E] Empty hopper    [Hold E] Pick up" % [target.stored, Fixture.HOPPER, why]
 			# A tap empties the hopper; holding on picks the rig up.
 			if released and _use_held < 0.3 and target.stored > 0:
@@ -345,7 +428,10 @@ func _use(delta: float) -> void:
 		&"ore":
 			prompt = "[Hold E] Mine ore (%d)" % target.amount
 			_hold(down, delta, MINE_TIME, func() -> void: game.act(&"mine", [target.net_id]))
-		&"lamp", &"panel", &"battery", &"lab":
+		&"foundry":
+			prompt = "Foundry: %d ore in, %d alloy made, %s\n[Hold E] Pick up" % [target.ore_in, target.alloy_out, "smelting" if target.stalled == "" else target.stalled]
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
+		&"lamp", &"panel", &"battery", &"lab", &"pylon":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
 
@@ -405,8 +491,8 @@ func _smash() -> void:
 		return
 	var fixture: Fixture = hit.collider
 	if fixture.blueprint:
-		if game.stock < fixture.blow_cost():
-			_say("Not enough ore in the pod")
+		if !game.can_pay(fixture):
+			_say("Not enough in the pod")
 			return
 		game.act(&"construct", [fixture.net_id])
 		_say("%s %d / %d" % [Fixture.NAMES[fixture.kind], mini(fixture.hits + 1, fixture.hits_needed()), fixture.hits_needed()])

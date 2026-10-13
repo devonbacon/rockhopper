@@ -9,19 +9,24 @@ extends Node3D
 ## it runs out you freeze.
 ##
 ## Ore is banked in the pod: what you carry counts once you hand it in.
-## Build a drill rig over a deposit and it drills while it's lit; rovers
-## drive out to rigs with a load worth the trip and haul it home. Lamps,
-## panels, rigs and rovers are paid for from the bank, and what's in it at
-## launch is the score.
+## Build a drill rig over a deposit and it drills while it's lit; cables
+## carry what it drills home. What's built is paid for from the bank, and
+## what's in it at launch is the score.
 ##
-## The commander, in the pod, places what gets built, as blueprints paid
-## for up front that soldiers hammer up; orders rovers about; and picks
-## what the labs research.
+## The commander, in the pod, places what gets built, as blueprints that
+## soldiers hammer up, paid for a blow at a time; strings the cables; and
+## picks what the labs research.
+##
+## Foundries smelt ore into alloy, which pays for batteries and the bigger
+## upgrades. The commander strings cables between pylons, rigs, foundries
+## and the pod to carry ore and alloy about, and switches things off to
+## save power at night, or to quiet them: spiders can hear working rigs,
+## foundries and labs from further than they can see.
 ##
 ## At nightfall bug holes tear open out in the dark, more of them each
 ## night, and spiders climb out of them, more as the mission goes on and
-## the more players there are, and go for soldiers, rovers out on
-## the road, what's been built, and the pod. Sunlight sends them back
+## the more players there are, and go for soldiers, what's been built, and
+## the pod. Sunlight sends them back
 ## under. If they tear the pod open, nobody's going home; hammering it
 ## patches it up. Soldiers carry flares, which recharge, to light the dark
 ## for a while.
@@ -43,18 +48,21 @@ const PANEL_SOLAR := 1.6
 const LAMP_DRAW := 0.4
 const BATTERY_BANK := 80.0
 const LAB_DRAW := 0.6
+const FOUNDRY_DRAW := 1.0
+const LINK_COST := 1
+## Each costs ore, and some alloy too.
 const UPGRADES := {
-	&"runners": {name = "BLADE RUNNERS", cost = 3, time = 25.0, text = "Walk and run as fast as you're built to"},
-	&"jetpack": {name = "JETPACK", cost = 5, time = 35.0, text = "Hold Space in the air to fly"},
-	&"armour": {name = "ARMOUR PLATING", cost = 5, time = 40.0, text = "+50 max health"},
-	&"heated": {name = "HEATED SUIT", cost = 4, time = 30.0, text = "Cold takes twice as long to freeze you"},
-	&"tanks": {name = "BIGGER TANKS", cost = 3, time = 30.0, text = "The jetpack burns fuel 40% slower"},
-	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 6, time = 45.0, text = "Double damage from the gun"},
-	&"stabiliser": {name = "STABILISER", cost = 4, time = 30.0, text = "Half the bloom from firing, tighter at rest"},
-	&"drills": {name = "FASTER DRILLS", cost = 6, time = 45.0, text = "Rigs drill 40% faster"},
-	&"rovers": {name = "ROVER TUNING", cost = 5, time = 40.0, text = "Rovers drive 40% faster and carry 4 more"},
-	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, time = 30.0, text = "Lamps draw half the power"},
-	&"grapple": {name = "GRAPPLE", cost = 4, time = 30.0, text = "Middle mouse: reel yourself to rock, or tug a spider to you"},
+	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, text = "Walk and run as fast as you're built to"},
+	&"jetpack": {name = "JETPACK", cost = 3, alloy = 2, time = 35.0, text = "Hold Space in the air to fly"},
+	&"armour": {name = "ARMOUR PLATING", cost = 3, alloy = 3, time = 40.0, text = "+50 max health"},
+	&"heated": {name = "HEATED SUIT", cost = 4, alloy = 0, time = 30.0, text = "Cold takes twice as long to freeze you"},
+	&"tanks": {name = "BIGGER TANKS", cost = 3, alloy = 0, time = 30.0, text = "The jetpack burns fuel 40% slower"},
+	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 3, alloy = 3, time = 45.0, text = "Double damage from the gun"},
+	&"stabiliser": {name = "STABILISER", cost = 4, alloy = 0, time = 30.0, text = "Half the bloom from firing, tighter at rest"},
+	&"drills": {name = "FASTER DRILLS", cost = 4, alloy = 2, time = 45.0, text = "Rigs drill 40% faster"},
+	&"cables": {name = "FAST CABLES", cost = 3, alloy = 2, time = 40.0, text = "Cables carry ore and alloy twice as fast"},
+	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, alloy = 0, time = 30.0, text = "Lamps draw half the power"},
+	&"grapple": {name = "GRAPPLE", cost = 4, alloy = 0, time = 30.0, text = "Middle mouse: reel yourself to rock, or tug a spider to you"},
 }
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
@@ -63,12 +71,10 @@ const WARM_RATE := 100.0 / 6.0
 const POD_RANGE := 6.0
 const SURFACE_ORE := 16
 const DEPOSITS := 8
-## The first this many are somewhere a rover can drive to from the pod.
+## The first this many are somewhere you can walk to from the pod without
+## climbing.
 const REACHABLE_DEPOSITS := 4
 const START_STOCK := 10
-const START_ROVERS := 1
-## A rover goes out for a rig with at least this much in its hopper.
-const WORTH_A_TRIP := 4
 const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
 const HEAL_RATE := 4.0
@@ -113,6 +119,7 @@ var power_in := 0.0
 var power_out := 0.0
 ## Ore in the pod.
 var stock := START_STOCK
+var alloy := 0
 var researched := {}
 ## Per soldier, by peer id: health, warmth, carried, lit_by, hurt,
 ## since_hurt.
@@ -154,10 +161,10 @@ var built: Array[Fixture] = []
 var blueprints: Array[Fixture] = []
 var ores: Array[Fixture] = []
 var deposits: Array[Fixture] = []
-var rovers: Array[Rover] = []
 var spiders: Array[Spider] = []
 var flares: Array[Flare] = []
 var holes: Array[Hole] = []
+var links: Array[Link] = []
 ## Lately pinged spots: {position, name, commander, age, peer}.
 var pings: Array[Dictionary] = []
 ## Net id -> node, for everything that has one.
@@ -176,6 +183,7 @@ var _move_in := 0.0
 var _end_in := INF
 var _pod_alert := 0.0
 var _pod_bitten := 99.0
+var _link_turn := 0
 var _args := {}
 
 
@@ -203,9 +211,6 @@ func _ready() -> void:
 	_place_deposits()
 	_place_ore()
 	_next_id = FIRST_SPAWNED_ID
-	if Net.authority():
-		for i in START_ROVERS:
-			_add_rover()
 	if Net.has_local_player():
 		var me := Net.local_id()
 		player = Player.new()
@@ -236,6 +241,8 @@ func _physics_process(delta: float) -> void:
 		if state == State.PLAYING:
 			time += delta
 		sun.set_time(time)
+		for link in links:
+			link.advance(delta, cable_speed())
 		_move_in -= delta
 		if player and _move_in <= 0.0:
 			_move_in = MOVE_EVERY
@@ -260,13 +267,17 @@ func _simulate(delta: float) -> void:
 		if fixture.kind == &"panel" and fixture.sunlit:
 			power_in += PANEL_SOLAR * maxf(0.0, fixture.normal.dot(sun_dir))
 		elif fixture.kind == &"lamp":
-			var want := !fixture.sunlit and battery > 0.0
+			var want := fixture.enabled and !fixture.sunlit and battery > 0.0
 			if want != fixture.on:
 				fixture.set_on(want)
 			if fixture.on:
 				power_out += LAMP_DRAW * (0.5 if has(&"lamps") else 1.0)
+		elif fixture.kind == &"foundry" and state == State.PLAYING:
+			fixture.smelt(delta, battery > 0.0)
+			if fixture.stalled == "":
+				power_out += FOUNDRY_DRAW
 	for lab in built:
-		if lab.kind == &"lab" and lab.researching != &"" and state == State.PLAYING:
+		if lab.kind == &"lab" and lab.researching != &"" and lab.enabled and state == State.PLAYING:
 			lab.unpowered = battery <= 0.0
 			if !lab.unpowered:
 				power_out += LAB_DRAW
@@ -289,12 +300,8 @@ func _simulate(delta: float) -> void:
 	for fixture in built:
 		if fixture.kind == &"drill":
 			fixture.drill(delta, fixture.sunlit or lit_at(fixture.global_position + fixture.normal * 1.0) != "", Fixture.DRILL_EVERY * (0.6 if has(&"drills") else 1.0))
+	_move_goods(delta)
 	_spawn_spiders(delta)
-	for rover in rovers.duplicate():
-		if rover.health <= 0.0:
-			rovers.erase(rover)
-			entities.erase(rover.net_id)
-			rover.queue_free()
 	for fixture in built.duplicate():
 		if fixture.health <= 0.0:
 			_remove_built(fixture)
@@ -392,12 +399,8 @@ func max_health() -> float:
 	return HEALTH + (50.0 if has(&"armour") else 0.0)
 
 
-func rover_capacity() -> int:
-	return Rover.CAPACITY + (4 if has(&"rovers") else 0)
-
-
-func rover_speed() -> float:
-	return Rover.SPEED * (1.4 if has(&"rovers") else 1.0)
+func cable_speed() -> float:
+	return Link.SPEED * (2.0 if has(&"cables") else 1.0)
 
 
 ## Whether a lab is working on it, and which.
@@ -436,12 +439,25 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"hand_in":
 			hand_in()
 		&"blueprint":
-			if peer == commander_peer and can_build(args[0], args[1]):
+			if peer == commander_peer and can_build(args[0], args[1], args[2]):
 				place_blueprint(args[0], args[1], args[2], args[3])
 		&"cancel":
 			if peer == commander_peer and target is Fixture and blueprints.has(target):
 				stock += target.paid()
+				alloy += target.paid(true)
 				_remove_blueprint(target)
+		&"switch":
+			if peer == commander_peer and target is Fixture and built.has(target) and Fixture.SWITCHED.has(target.kind):
+				target.enabled = !target.enabled
+		&"link":
+			var onto: Node = entities.get(args[1], null)
+			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "" and stock >= LINK_COST:
+				stock -= LINK_COST
+				add_link(target, onto)
+		&"unlink":
+			if peer == commander_peer and target is Link:
+				stock += LINK_COST
+				remove_link(target)
 		&"construct":
 			if target is Fixture and blueprints.has(target):
 				construct(target)
@@ -462,13 +478,6 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			for id in Net.peers:
 				if id != Net.local_id():
 					Net.event.rpc_id(id, &"ping", ping)
-		&"order":
-			if peer == commander_peer:
-				var onto: Fixture = entities.get(args[3], null) if args[3] != 0 else null
-				for id in args[0] if args[1] != &"build" or blueprints.has(onto) else []:
-					var rover: Rover = entities.get(id, null) if entities.get(id, null) is Rover else null
-					if rover:
-						rover.command(args[1], args[2], onto)
 		&"press":
 			if target and "screen" in target and target.screen:
 				var reply: String = "RESEARCH IS PICKED FROM THE COMMAND CHAIR." if target is Fixture and target.kind == &"lab" and peer != commander_peer else target.screen.pressed.call(args[1])
@@ -481,7 +490,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				_leave_command(peer)
 		&"hit":
 			if target is Spider:
-				(target as Spider).hit(args[1])
+				(target as Spider).hit(args[1], bodies.get(peer, null))
 		&"fling":
 			if target is Spider:
 				(target as Spider).fling(args[1], args[2])
@@ -664,19 +673,16 @@ func _fast_state() -> Array:
 	var spider_rows: Array = []
 	for spider in spiders:
 		spider_rows.append([spider.net_id, spider.global_position, spider.global_basis.get_rotation_quaternion(), spider.health])
-	var rover_rows: Array = []
-	for rover in rovers:
-		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot, rover.move_to, rover.assigned.net_id if is_instance_valid(rover.assigned) else 0])
 	var flare_rows: Array = []
 	for flare in flares:
 		flare_rows.append([flare.net_id, flare.global_position, flare.life])
-	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows, commander_peer, flare_rows, pod.health]
+	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, commander_peer, flare_rows, pod.health, alloy]
 
 
 func _slow_state() -> Array:
 	var rows: Array = []
 	for f in built:
-		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0])
+		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0, f.enabled, f.ore_in, f.alloy_out, f.smelted, f.holding.duplicate()])
 	var alive := PackedInt32Array()
 	for ore in ores:
 		alive.append(ore.net_id)
@@ -686,7 +692,10 @@ func _slow_state() -> Array:
 	var hole_rows: Array = []
 	for hole in holes:
 		hole_rows.append([hole.net_id, hole.global_position, hole.normal])
-	return [rows, alive, researched.keys(), plans, hole_rows]
+	var link_rows: Array = []
+	for link in links:
+		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true)])
+	return [rows, alive, researched.keys(), plans, hole_rows, link_rows]
 
 
 ## Client: the server's latest of everything that moves.
@@ -697,16 +706,17 @@ func apply_snapshot(data: Array) -> void:
 	power_in = f[2]
 	power_out = f[3]
 	stock = f[4]
+	alloy = f[12]
 	if state == State.PLAYING and f[5] != State.PLAYING:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	state = f[5]
 	outcome = f[6]
-	commander_peer = f[10]
-	if f[12] < pod.health and commander_view and commander_view.visible:
+	commander_peer = f[9]
+	if f[11] < pod.health and commander_view and commander_view.visible:
 		commander_view.pod_hit()
-	pod.health = f[12]
+	pod.health = f[11]
 	var lit := {}
-	for row: Array in f[11]:
+	for row: Array in f[10]:
 		lit[row[0]] = true
 		var flare: Flare = entities.get(row[0], null)
 		if !flare:
@@ -757,33 +767,6 @@ func apply_snapshot(data: Array) -> void:
 			spiders.erase(spider)
 			entities.erase(spider.net_id)
 			spider.queue_free()
-	seen.clear()
-	for row: Array in f[9]:
-		seen[row[0]] = true
-		var rover: Rover = entities.get(row[0], null)
-		if !rover:
-			rover = Rover.new()
-			rover.game = self
-			rover.puppet = true
-			rover.slot = row[7]
-			add_child(rover)
-			rover.global_position = row[1]
-			_track(rover, row[0])
-			rovers.push_back(rover)
-			_send_presses(rover)
-		rover.target_position = row[1]
-		rover.target_basis = Basis(row[2])
-		rover.task = row[3]
-		rover.order = row[4]
-		rover.cargo = row[5]
-		rover.show_health(row[6])
-		rover.move_to = row[8]
-		rover.assigned = entities.get(row[9], null) if row[9] != 0 else null
-	for rover in rovers.duplicate():
-		if !seen.has(rover.net_id):
-			rovers.erase(rover)
-			entities.erase(rover.net_id)
-			rover.queue_free()
 	var mine: Array = data[1]
 	var s: Dictionary = _me()
 	s.health = mine[0]
@@ -822,6 +805,11 @@ func apply_slow(data: Array) -> void:
 		fixture.research_time = row[10]
 		fixture.unpowered = row[11]
 		fixture.charge = row[12]
+		fixture.enabled = row[14]
+		fixture.ore_in = row[15]
+		fixture.alloy_out = row[16]
+		fixture.smelted = row[17]
+		fixture.holding.assign(row[18])
 	for fixture in built.duplicate():
 		if !seen.has(fixture.net_id):
 			_remove_built(fixture)
@@ -861,6 +849,18 @@ func apply_slow(data: Array) -> void:
 			holes.erase(hole)
 			entities.erase(hole.net_id)
 			hole.queue_free()
+	seen.clear()
+	for row: Array in data[5]:
+		seen[row[0]] = true
+		var link: Link = entities.get(row[0], null)
+		if !link:
+			if !entities.has(row[1]) or !entities.has(row[2]):
+				continue
+			link = add_link(entities[row[1]], entities[row[2]], row[0])
+		link.items = row[3]
+	for link in links.duplicate():
+		if !seen.has(link.net_id):
+			remove_link(link)
 	for upgrade: StringName in data[2]:
 		if !researched.has(upgrade):
 			researched[upgrade] = true
@@ -891,7 +891,7 @@ func _wire_lab_screen(lab: Fixture) -> void:
 		if lab.researching == action:
 			return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
 		var busy := lab.researching != &"" or researching(action) != null
-		return ["%s   %d ORE  %ds" % [upgrade.name, upgrade.cost, upgrade.time], !busy and stock >= upgrade.cost, false]
+		return ["%s   %s  %ds" % [upgrade.name, price(upgrade.cost, upgrade.alloy).to_upper(), upgrade.time], !busy and stock >= upgrade.cost and alloy >= upgrade.alloy, false]
 	screen.describe = func(action: StringName) -> String:
 		var upgrade: Dictionary = UPGRADES[action]
 		if has(action):
@@ -899,7 +899,7 @@ func _wire_lab_screen(lab: Fixture) -> void:
 		if commander_peer != Net.local_id():
 			return "%s: %s\nResearch is picked from the command chair" % [String(upgrade.name).capitalize(), upgrade.text]
 		if lab.researching == action:
-			return "[E] Cancel %s, refunding %d ore" % [String(upgrade.name).capitalize(), upgrade.cost]
+			return "[E] Cancel %s, refunding %s" % [String(upgrade.name).capitalize(), price(upgrade.cost, upgrade.alloy)]
 		return "[E] Research %s: %s" % [String(upgrade.name).capitalize(), upgrade.text]
 	screen.pressed = func(action: StringName) -> String:
 		var upgrade: Dictionary = UPGRADES[action]
@@ -908,7 +908,8 @@ func _wire_lab_screen(lab: Fixture) -> void:
 		if lab.researching == action:
 			lab.researching = &""
 			stock += upgrade.cost
-			return "CANCELLED. %d ORE REFUNDED." % upgrade.cost
+			alloy += upgrade.alloy
+			return "CANCELLED. %s REFUNDED." % price(upgrade.cost, upgrade.alloy).to_upper()
 		if action == &"tanks" and !has(&"jetpack"):
 			return "RESEARCH THE JETPACK FIRST."
 		if lab.researching != &"":
@@ -917,7 +918,10 @@ func _wire_lab_screen(lab: Fixture) -> void:
 			return "ANOTHER LAB IS ON IT."
 		if stock < upgrade.cost:
 			return "NOT ENOUGH ORE BANKED."
+		if alloy < upgrade.alloy:
+			return "NOT ENOUGH ALLOY BANKED."
 		stock -= upgrade.cost
+		alloy -= upgrade.alloy
 		lab.researching = action
 		lab.research_time = 0.0
 		return "RESEARCHING %s." % upgrade.name
@@ -953,25 +957,34 @@ func lit_at(pos: Vector3) -> String:
 	return ""
 
 
-## Whether kind can go at pos; for a rig, pos is the deposit's.
-func can_build(kind: StringName, pos: Vector3) -> bool:
-	if !Fixture.COST.has(kind):
+## Whether kind can go at pos, on ground facing normal; for a rig, pos is
+## the deposit's.
+func can_build(kind: StringName, pos: Vector3, normal := Vector3.UP) -> bool:
+	if !Fixture.BUILD_HITS.has(kind):
 		return false
 	if kind == &"drill":
 		var deposit := deposit_at(pos)
 		return deposit != null and deposit.rig == null
+	if normal.angle_to(Terrain.up_at(pos)) > deg_to_rad(Fixture.MAX_SLOPE.get(kind, Fixture.SLOPE)):
+		return false
 	for fixture: Fixture in built + blueprints + ores + deposits + [pod]:
 		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
-		if kind == &"lab" or fixture.kind == &"lab":
+		if kind == &"lab" or fixture.kind == &"lab" or kind == &"foundry" or fixture.kind == &"foundry":
 			room += 1.6
 		if fixture.global_position.distance_to(pos) < room:
 			return false
 	return true
 
 
-## Builds kind at pos; a lab turns its screen towards facing_from.
+## "3 ore", or "3 ore + 2 alloy".
+static func price(ore: int, alloy_cost: int) -> String:
+	return "%d ore" % ore + (" + %d alloy" % alloy_cost if alloy_cost > 0 else "")
+
+
+## Builds kind at pos; a lab or foundry turns its front towards facing_from.
 func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> Fixture:
 	stock -= Fixture.COST[kind]
+	alloy -= Fixture.ALLOY.get(kind, 0)
 	var fixture := _make_fixture(kind, pos, normal, facing_from)
 	add_child(fixture)
 	_track(fixture)
@@ -982,6 +995,8 @@ func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vecto
 	return fixture
 
 
+## Rigs stand on their deposit's slope; everything else stands upright,
+## on a plinth if the ground slopes.
 func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from: Vector3) -> Fixture:
 	var fixture: Fixture
 	if kind == &"drill":
@@ -990,8 +1005,9 @@ func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from:
 		fixture.deposit = deposit
 		deposit.rig = fixture
 	else:
+		normal = Terrain.up_at(pos)
 		fixture = Fixture.make(kind, pos, normal)
-	if kind == &"lab" and facing_from != Vector3.INF:
+	if (kind == &"lab" or kind == &"foundry") and facing_from != Vector3.INF:
 		var towards := facing_from - pos
 		towards -= normal * towards.dot(normal)
 		if towards.length() > 0.1:
@@ -1010,18 +1026,25 @@ func place_blueprint(kind: StringName, pos: Vector3, normal: Vector3, facing_fro
 	return plan
 
 
+## Whether the bank can pay for the next blow on a blueprint.
+func can_pay(plan: Fixture) -> bool:
+	return stock >= plan.blow_cost() and alloy >= plan.blow_cost(true)
+
+
 ## A hammer blow on a blueprint, if the bank can pay for it; the last one
 ## puts it up for real.
 func construct(plan: Fixture) -> bool:
-	if stock < plan.blow_cost():
+	if !can_pay(plan):
 		return false
 	stock -= plan.blow_cost()
+	alloy -= plan.blow_cost(true)
 	plan.hits += 1
 	if plan.hits < plan.hits_needed():
 		return true
 	var at := plan.global_transform
 	_remove_blueprint(plan)
 	stock += Fixture.COST[plan.kind]
+	alloy += Fixture.ALLOY.get(plan.kind, 0)
 	var fixture := build(plan.kind, at.origin, plan.normal)
 	fixture.basis = at.basis
 	_announce("%s built" % Fixture.NAMES[plan.kind])
@@ -1043,22 +1066,100 @@ func deposit_at(pos: Vector3) -> Fixture:
 	return null
 
 
-## Picks up a lamp, panel or rig, refunding it to the bank; a rig's hopper
-## comes with it, into your pockets.
+## Picks up something built, refunding it to the bank; what's in a rig's
+## hopper or a foundry's bin comes with it, ore into your pockets and
+## alloy into the bank.
 func pick_up(fixture: Fixture) -> void:
 	stock += Fixture.COST[fixture.kind]
-	carried += fixture.stored
+	alloy += Fixture.ALLOY.get(fixture.kind, 0) + fixture.alloy_out
+	carried += fixture.stored + fixture.ore_in
 	if fixture.researching != &"":
 		stock += UPGRADES[fixture.researching].cost
+		alloy += UPGRADES[fixture.researching].alloy
 	_remove_built(fixture)
 
 
 func _remove_built(fixture: Fixture) -> void:
 	if fixture.deposit:
 		fixture.deposit.rig = null
+	for link in links.duplicate():
+		if link.from == fixture or link.to == fixture:
+			remove_link(link)
 	built.erase(fixture)
 	entities.erase(fixture.net_id)
 	fixture.queue_free()
+
+
+## Why a cable can't go from a to b, or "" if it can.
+func can_link(a: Fixture, b: Fixture) -> String:
+	if a == b:
+		return "Pick somewhere else to run it to."
+	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind) or a.blueprint or b.blueprint:
+		return "Cables tie to pylons, rigs, foundries and the pod, once they're built."
+	if a == pod:
+		return "The pod only takes cables in."
+	if b.kind == &"drill":
+		return "A rig only sends."
+	for link in links:
+		if (link.from == a and link.to == b) or (link.from == b and link.to == a):
+			return "They're already linked."
+	var start := a.cable_point()
+	var end := b.cable_point()
+	if start.distance_to(end) > Link.RANGE:
+		return "Too far: a cable reaches %d m." % Link.RANGE
+	var space := get_world_3d().direct_space_state
+	for drop in [0.0, Link.HANG]:
+		var query := PhysicsRayQueryParameters3D.create(start - Vector3.UP * drop, end - Vector3.UP * drop, Terrain.ROCK_LAYER)
+		if !space.intersect_ray(query).is_empty():
+			return "The ground's in the way."
+	return ""
+
+
+func add_link(a: Fixture, b: Fixture, id := 0) -> Link:
+	var link := Link.make(a, b)
+	add_child(link)
+	_track(link, id)
+	links.push_back(link)
+	return link
+
+
+func remove_link(link: Link) -> void:
+	links.erase(link)
+	entities.erase(link.net_id)
+	link.queue_free()
+
+
+## Moves what's on the cables along, takes in what's reached the far end
+## if there's room for it, and puts the next thing on each cable that has
+## room, taking turns between a place's cables.
+func _move_goods(delta: float) -> void:
+	var speed := cable_speed()
+	for link in links:
+		link.advance(delta, speed)
+		if !link.items.is_empty() and link.items[0][1] >= link.length() - 0.01 and link.to.accepts(link.items[0][0]):
+			_take_in(link.to, link.items.pop_front()[0])
+	if links.is_empty():
+		return
+	_link_turn = (_link_turn + 1) % links.size()
+	for i in links.size():
+		var link := links[(i + _link_turn) % links.size()]
+		var item := link.from.output()
+		if item != &"" and link.has_room():
+			link.from.take_output()
+			link.items.push_back([item, 0.0])
+
+
+func _take_in(fixture: Fixture, item: StringName) -> void:
+	match fixture.kind:
+		&"pod":
+			if item == &"alloy":
+				alloy += 1
+			else:
+				stock += 1
+		&"foundry":
+			fixture.ore_in += 1
+		&"pylon":
+			fixture.holding.push_back(item)
 
 
 ## Mining by hand: an ore cluster comes away whole, a deposit a piece at a
@@ -1083,38 +1184,26 @@ func hand_in() -> void:
 	carried = 0
 
 
-func deliver(amount: int) -> void:
-	stock += amount
-
-
 func screens() -> Array[Screen]:
 	var all: Array[Screen] = [pod.screen]
 	for fixture in built:
 		if fixture.kind == &"lab":
 			all.push_back(fixture.screen)
-	for rover in rovers:
-		all.push_back(rover.screen)
 	return all
 
 
 func _wire_pod_screen() -> void:
 	var screen := pod.screen
 	screen.info = func() -> String:
-		var out := 0
-		for rover in rovers:
-			if rover.task != Rover.Task.PARKED:
-				out += 1
 		var left := maxf(0.0, MISSION - time)
-		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%   HULL %d%%\nLAUNCH IN     %d:%02d" % [
-			stock, QUOTA, rovers.size(), out, roundi(battery / capacity() * 100.0), roundi(pod.health / pod.max_health * 100.0), int(left) / 60, int(left) % 60]
+		return "ORE BANKED    %d / %d\nALLOY         %d\nBATTERY       %d%%   HULL %d%%\nLAUNCH IN     %d:%02d" % [
+			stock, QUOTA, alloy, roundi(battery / capacity() * 100.0), roundi(pod.health / pod.max_health * 100.0), int(left) / 60, int(left) % 60]
 	screen.button = func(action: StringName) -> Array:
 		if action == &"command":
 			if commander_peer == 0:
 				return ["TAKE COMMAND", true, false]
 			var info: Dictionary = Net.peers.get(commander_peer, {})
 			return ["COMMANDER: %s" % String(info.get("name", "YOU" if commander_peer == Net.local_id() else "TAKEN")).to_upper(), false, true]
-		if action == &"rover":
-			return ["PRINT ROVER   %d ORE" % Fixture.COST[&"rover"], stock >= Fixture.COST[&"rover"], false]
 		return ["HAND IN ORE   %d CARRIED" % carried, carried > 0, false]
 	screen.pressed = func(action: StringName) -> String:
 		if action == &"command":
@@ -1122,10 +1211,6 @@ func _wire_pod_screen() -> void:
 				return "THE SEAT'S TAKEN."
 			_take_command(_acting if _acting != 0 else Net.local_id())
 			return ""
-		if action == &"rover":
-			if print_rover():
-				return "ROVER PRINTED. %d ON THE ROSTER." % rovers.size()
-			return "NOT ENOUGH ORE BANKED: A ROVER NEEDS %d." % Fixture.COST[&"rover"]
 		if carried == 0:
 			return "NOTHING TO HAND IN."
 		var amount := carried
@@ -1134,42 +1219,14 @@ func _wire_pod_screen() -> void:
 	_send_presses(pod)
 
 
-## Prints a rover at the pod from the bank, if there's enough in it.
-func print_rover() -> bool:
-	if stock < Fixture.COST[&"rover"]:
-		return false
-	stock -= Fixture.COST[&"rover"]
-	_add_rover()
-	return true
-
-
-## The rig most worth a trip for this rover: the fullest, after what other
-## rovers are already headed for, over the distance, skipping rigs it
-## couldn't reach lately.
-func pick_rig(rover: Rover) -> Fixture:
-	var best: Fixture = null
-	var best_score := 0.0
-	for rig in built:
-		if rig.kind != &"drill" or rover.unreachable.get(rig, -INF) > time:
-			continue
-		var spoken_for := 0
-		for other in rovers:
-			if other != rover and other.rig == rig and (other.task == Rover.Task.OUTBOUND or other.task == Rover.Task.LOADING):
-				spoken_for += rover_capacity()
-		var waiting := rig.stored - spoken_for
-		if waiting < WORTH_A_TRIP:
-			continue
-		var score := waiting / (10.0 + rover.global_position.distance_to(rig.global_position))
-		if score > best_score:
-			best_score = score
-			best = rig
-	return best
-
-
-## The nearest thing a spider would bite: a soldier, a rover out on the
-## road, or something built. Soldiers count as a little nearer than they
-## are.
+## What a spider goes for: the nearest soldier or thing built that it can
+## see, or anything working loud enough to hear from further off; noise
+## counts for less the closer it gets, so up close it bites what's nearest.
+## Soldiers count as a little nearer than they are, and the pod further;
+## whoever's hurt it lately, it goes for regardless.
 func spider_target(spider: Spider) -> Node3D:
+	if spider.grudge and is_instance_valid(spider.grudge) and spider.grudge_time > 0.0 and spider.grudge.visible:
+		return spider.grudge
 	var from := spider.global_position
 	var best: Node3D = null
 	var best_distance := Spider.SIGHT
@@ -1177,13 +1234,16 @@ func spider_target(spider: Spider) -> Node3D:
 	for peer in bodies:
 		if peer != commander_peer:
 			candidates.push_back(bodies[peer])
-	for rover in rovers:
-		if rover.exposed():
-			candidates.push_back(rover)
 	candidates.append_array(built)
 	candidates.push_back(pod)
 	for candidate in candidates:
-		var distance := from.distance_to(candidate.global_position) * (0.75 if candidate.has_meta("peer") else (1.4 if candidate == pod else 1.0))
+		var distance := from.distance_to(candidate.global_position)
+		if candidate.has_meta("peer"):
+			distance *= 0.75
+		else:
+			if candidate == pod:
+				distance *= 1.4
+			distance -= (candidate as Fixture).noise() * clampf((distance - Spider.NEAR) / 10.0, 0.0, 1.0)
 		if distance < best_distance:
 			best_distance = distance
 			best = candidate
@@ -1192,12 +1252,12 @@ func spider_target(spider: Spider) -> Node3D:
 
 ## How close a spider has to be to bite target.
 func bite_reach(target: Node3D) -> float:
-	if target is Rover:
-		return 2.0
 	if target.has_meta("peer"):
 		return 1.7
 	if target is Fixture and (target as Fixture).kind == &"drill":
 		return 2.8
+	if target is Fixture and (target as Fixture).kind == &"foundry":
+		return 2.2
 	if target == pod:
 		return 2.7
 	return 1.9
@@ -1211,8 +1271,6 @@ func damage(target: Node3D, amount: float) -> void:
 		s.health -= amount
 		s.hurt = 1.0
 		s.since_hurt = 0.0
-	elif target is Rover:
-		(target as Rover).damage(amount)
 	elif target is Fixture:
 		(target as Fixture).health -= amount
 		if target == pod:
@@ -1277,18 +1335,10 @@ func _ping_beam(at: Vector3, from_commander: bool) -> void:
 	tween.tween_callback(beam.queue_free)
 
 
-func _add_rover() -> void:
-	var rover := Rover.new()
-	rover.game = self
-	rover.slot = rovers.size()
-	add_child(rover)
-	rover.global_position = rover.park_point()
-	_track(rover)
-	rovers.push_back(rover)
 
 
 ## Brings spiders up out of the ground, somewhere unlit not far from a
-## soldier, a rover, or something built.
+## soldier or something built.
 func _spawn_spiders(delta: float) -> void:
 	if Sun.dir_at(time).y > 0.0:
 		_night = false
@@ -1480,13 +1530,15 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 	if ahead.length() < 0.01:
 		ahead = Fixture.upright(up).z
 	player.global_transform = Transform3D(Basis.looking_at(ahead.normalized(), up), pos)
+	player.zip = null
 	player.velocity = Vector3.ZERO
 	player.align_up()
 
 
 ## Debug setup from user args (after `--`): seed=, time=, view=overview|
-## cave|screen|rover, lab (builds one ahead, researching), rig (builds one
-## on the deposit nearest the pod and stands you by it), lamps=N (around
+## cave|screen, lab (builds one ahead, researching), rig (builds one
+## on the deposit nearest the pod and stands you by it), cables (a rig,
+## cabled to a foundry cabled to the pod), lamps=N (around
 ## you), spiders=N (in front of you), plan=N (blueprints round the pod),
 ## flares=N (thrown ahead), ping (25 m ahead),
 ## command (in the commander's seat), aim, hammer, pause, pitch=degrees,
@@ -1504,12 +1556,6 @@ func _debug_setup() -> void:
 			var front: Vector3 = pod.screen.global_position + pod.screen.global_basis.z * 2.6
 			var spot: Array = terrain.surface_point(front)
 			place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, pod.screen.global_position)
-		"rover":
-			if !rovers.is_empty():
-				var rover := rovers[0]
-				var behind: Vector3 = rover.screen.global_position + rover.global_basis.z * 1.6
-				var spot: Array = terrain.surface_point(behind)
-				place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, rover.screen.global_position)
 		"cave":
 			var chamber := terrain.chambers[0]
 			var centre := Vector3(chamber.x, chamber.y, chamber.z)
@@ -1527,6 +1573,11 @@ func _debug_setup() -> void:
 		place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, nearest.global_position)
 	await get_tree().physics_frame
 	var space := get_world_3d().direct_space_state
+	if _args.has("cables"):
+		print(debug_cables())
+		var foundry: Fixture = built[-1]
+		var side: Vector3 = terrain.surface_point(foundry.global_position + Fixture.upright(foundry.normal).x * 6.0)[0]
+		place_player(side + Vector3.UP * 0.3, foundry.global_position)
 	for i in int(_args.get("lamps", "0")):
 		var up := Terrain.up_at(player.global_position)
 		var from := player.global_position + up * 1.5 + player.global_basis * Vector3(cos(i * 2.4) * 3.5, 0, sin(i * 2.4) * 3.5 - 3.0)
@@ -1567,11 +1618,6 @@ func _debug_setup() -> void:
 		player.look(deg_to_rad(float(_args.pitch)))
 	if _args.has("command"):
 		_take_command(Net.local_id())
-		if _args.has("select"):
-			commander_view.selected.assign(rovers)
-			var out: Vector3 = terrain.surface_point(pod.global_position + Fixture.upright(pod.normal).z * 20.0)[0]
-			for rover in rovers:
-				rover.command(&"move", out)
 		commander_view._research.visible = _args.has("research")
 	if _args.has("probe"):
 		_probe(_args.probe)
@@ -1583,8 +1629,41 @@ func _debug_setup() -> void:
 		get_tree().quit()
 
 
-## Debug, networked: a scripted client. "builder" builds, mines, hands in
-## and prints a rover, checking each reached the server; "walker" walks in
+## Debug: a rig on the deposit nearest the pod, and a foundry halfway home,
+## a rig cabled to the foundry and the foundry to the pod, all free. Says
+## how it went.
+func debug_cables() -> String:
+	var nearest := deposits[0]
+	for deposit in deposits:
+		if deposit.global_position.distance_to(pod.global_position) < nearest.global_position.distance_to(pod.global_position):
+			nearest = deposit
+	stock += Fixture.COST[&"drill"] + Fixture.COST[&"foundry"]
+	var rig := build(&"drill", nearest.global_position, nearest.normal)
+	var foundry: Fixture = null
+	var why := ""
+	for step in 24:
+		var t := 0.5 + (step % 2 * 2 - 1) * (step / 2 % 4) * 0.06
+		var side := Fixture.upright(pod.normal).x * (step / 8 - 1) * 3.0
+		var spot: Array = terrain.surface_point(nearest.global_position.lerp(pod.global_position, t) + side)
+		if !can_build(&"foundry", spot[0], spot[1]):
+			continue
+		if foundry:
+			_remove_built(foundry)
+		stock += Fixture.COST[&"foundry"]
+		foundry = build(&"foundry", spot[0], spot[1], pod.global_position)
+		why = can_link(rig, foundry) + can_link(foundry, pod)
+		if why == "":
+			break
+	stock -= Fixture.COST[&"foundry"]
+	if why == "":
+		add_link(rig, foundry)
+		add_link(foundry, pod)
+	return "cables: rig %.0f m from the pod, %d links %s" % [nearest.global_position.distance_to(pod.global_position), links.size(), why]
+
+
+## Debug, networked: a scripted client. "builder" mines and hands in,
+## checking each reached the server; "commander" plans a pylon, hammers it
+## up and cables it to the pod; "walker" walks in
 ## circles round the pod; "stander" stands by the pod's screen. Both report what they see, then quit.
 func _probe(kind: String) -> void:
 	var tree := get_tree()
@@ -1593,7 +1672,7 @@ func _probe(kind: String) -> void:
 		for peer in bodies:
 			if peer != Net.local_id():
 				others.append("%d@%s" % [peer, (bodies[peer] as Node3D).global_position.snapped(Vector3.ONE * 0.1)])
-		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d rovers %d spiders %d flares %d (mine %d left) pings %s pod %.0f | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), rovers.size(), spiders.size(), flares.size(), flares_left, pings.map(func(p: Dictionary) -> String: return p.name), pod.health, others])
+		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d links %d spiders %d flares %d (mine %d left) pings %s pod %.0f | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), links.size(), spiders.size(), flares.size(), flares_left, pings.map(func(p: Dictionary) -> String: return p.name), pod.health, others])
 	await tree.create_timer(3.0).timeout
 	report.call("joined")
 	if kind == "commander":
@@ -1603,11 +1682,9 @@ func _probe(kind: String) -> void:
 		var frame := Fixture.upright(pod.normal)
 		var spot: Array = terrain.surface_point(pod.global_position + frame.x * 9.0)
 		var stock_before := stock
-		act(&"blueprint", [&"lamp", spot[0], spot[1], pod.global_position])
-		var target: Vector3 = terrain.surface_point(pod.global_position + frame.z * 14.0)[0]
-		act(&"order", [[rovers[0].net_id], &"move", target, 0])
+		act(&"blueprint", [&"pylon", spot[0], spot[1], pod.global_position])
 		await tree.create_timer(1.0).timeout
-		print("[commander] blueprints %d, stock %d -> %d, rover order %s task %s" % [blueprints.size(), stock_before, stock, rovers[0].order, Rover.Task.keys()[rovers[0].task]])
+		print("[commander] blueprints %d, stock %d -> %d" % [blueprints.size(), stock_before, stock])
 		act(&"uncommand", [])
 		await tree.create_timer(1.0).timeout
 		if !blueprints.is_empty():
@@ -1615,9 +1692,14 @@ func _probe(kind: String) -> void:
 			for i in plan.hits_needed():
 				act(&"construct", [plan.net_id])
 			await tree.create_timer(1.0).timeout
-			print("[commander] hammered it: blueprints %d, lamps %d" % [blueprints.size(), built.filter(func(f: Fixture) -> bool: return f.kind == &"lamp").size()])
-		await tree.create_timer(6.0).timeout
-		print("[commander] rover %.1f m from where it was sent" % rovers[0].global_position.distance_to(target))
+			var pylons := built.filter(func(f: Fixture) -> bool: return f.kind == &"pylon")
+			print("[commander] hammered it: blueprints %d, pylons %d" % [blueprints.size(), pylons.size()])
+			if !pylons.is_empty():
+				act(&"press", [pod.net_id, &"command"])
+				await tree.create_timer(1.0).timeout
+				act(&"link", [pylons[0].net_id, pod.net_id])
+				await tree.create_timer(1.0).timeout
+				print("[commander] cabled the pylon to the pod: links %d" % links.size())
 		await tree.create_timer(2.0).timeout
 		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])
 	elif kind == "stander":
@@ -1648,9 +1730,7 @@ func _probe(kind: String) -> void:
 		print("[builder] stock %d -> %d, carrying %d" % [stock_before, stock, carried])
 		act(&"press", [pod.net_id, &"hand_in"])
 		await tree.create_timer(1.0).timeout
-		act(&"press", [pod.net_id, &"rover"])
-		await tree.create_timer(1.5).timeout
-		report.call("handed in + rover")
+		report.call("handed in")
 		for i in 8:
 			await tree.create_timer(1.0).timeout
 			report.call("watching")

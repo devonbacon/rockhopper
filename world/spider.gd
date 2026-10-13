@@ -1,8 +1,9 @@
 class_name Spider
 extends CharacterBody3D
 ## Climbs up out of the ground in the dark and goes for whatever's nearest
-## that it can bite: you, a rover out on the road, or anything built. Sunlight drives
-## it back underground. You can outrun one, but not by walking.
+## that it can bite, you or anything built, or for anything working loud
+## enough to hear; and for a while, for whoever last hurt it. Sunlight
+## drives it back underground. You can outrun one, but not by walking.
 
 const LAYER := 16
 const SPEED := 4.6
@@ -13,6 +14,10 @@ const BITE_EVERY := 0.8
 const RISE_TIME := 1.2
 const SINK_TIME := 1.0
 const SIGHT := 40.0
+## Nearer than this, noise doesn't sway it; it fades in over the next 10 m.
+const NEAR := 5.0
+## How long it goes after whoever hurt it.
+const GRUDGE := 4.0
 
 var game: Game
 var net_id := 0
@@ -22,6 +27,8 @@ var target_position := Vector3.ZERO
 var target_basis := Basis.IDENTITY
 var health := HEALTH
 var target: Node3D
+var grudge: Node3D
+var grudge_time := 0.0
 
 ## Counting down while it climbs out of the rock, or sinks back in.
 var _rising := RISE_TIME
@@ -103,6 +110,7 @@ func _physics_process(delta: float) -> void:
 		_animate(delta, 1.5)
 		return
 	_retarget -= delta
+	grudge_time -= delta
 	if _retarget <= 0.0 or !is_instance_valid(target):
 		_retarget = 0.5
 		target = game.spider_target(self)
@@ -141,11 +149,16 @@ func show_health(value: float) -> void:
 	health = value
 
 
-func hit(amount: float) -> void:
+func hit(amount: float, by: Node3D = null) -> void:
 	if _rising > 0.0 or _sinking >= 0.0:
 		return
 	health -= amount
 	_flash = 1.0
+	if by:
+		grudge = by
+		grudge_time = GRUDGE
+		target = by
+		_retarget = 0.5
 	if health <= 0.0:
 		game.remove_spider(self)
 

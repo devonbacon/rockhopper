@@ -26,32 +26,48 @@ the pod while there's power. In the dark it cools, and in 45 seconds
 you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
-Lamps (1 ore), panels (2), batteries (2), drill rigs (3), research labs
-(4) and rovers (4, printed from the pod's screen) are paid for from the
+Lamps (1 ore), pylons (1), panels (2), batteries (2 ore and 1 alloy),
+drill rigs (3), research labs (4) and foundries (5) are paid for from the
 bank, as is research, and picking something back up refunds it.
 Buildings are placed by the commander, from the pod, as blueprints:
 glowing blue holograms, free to place, that do nothing until soldiers
-hammer them up (2 blows for a lamp, 3 for a panel or battery, 5 for a rig,
-6 for a lab). Each blow pays its share of the cost from the bank, the
-first blows first, and lands only if the bank can pay it. What's in the
-bank when the pod launches, after twelve minutes, is the score (the
-quota is 100). Be beside the pod then, or be left behind.
+hammer them up (2 blows for a lamp or pylon, 3 for a panel or battery, 5
+for a rig, 6 for a lab or foundry). Each blow pays its share of the cost
+from the bank, the first blows first, and lands only if the bank can pay
+it. Buildings stand upright on a concrete plinth sunk into the rock, on
+ground up to 20° steep (35° for lamps and pylons). What's in the bank
+when the pod launches, after twelve minutes, is the score (the quota is
+100 ore; alloy doesn't count). Be beside the pod then, or be left behind.
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
-a lamp, into a hopper of 12. You start with one rover, and can print
-more at the pod. A rover waits by the pod until a rig has a load worth
-the trip. Then it drives out, empties the hopper and drives the ore home,
-spreading itself over the rigs with the most waiting. Rovers can't
-climb steep slopes, so a deposit in a small crater or behind a ridge is a
-longer drive, or one they can't make at all. You can also empty a
-hopper by hand.
+a lamp, into a hopper of 12, which you can empty by hand. Cables carry
+it away. The commander strings a cable from one pylon, rig, foundry or
+the pod to another, up to 20 m, with clear air under it (1 ore each,
+refunded when cut). Ore and alloy travel along it one way at 3 m/s, 1.5
+m apart. Rigs send ore, foundries send alloy, pylons pass on whatever
+reaches them (holding 4), and the pod takes everything into the bank. A
+place with several cables out takes turns between them. When something
+can't take any more, what's on the cable waits at the end.
+
+A foundry smelts 2 ore into 1 alloy every 6 s, drawing 1 power a second
+while it works, with bins of 10 for each. Alloy pays for batteries and
+the bigger upgrades.
+
+Soldiers ride cables: E while looking at one grabs it, and you slide
+along underneath at 11 m/s, the way you're facing. E or Space lets go,
+keeping your speed, and you drop off at the end.
+
+The commander can switch lamps, rigs, labs and foundries off and on, to
+save power at night or to quiet them. A rig that's drilling is loud, a
+foundry that's smelting louder, and a lab at work a little; the pod hums.
+Spiders hear them from further than they can see.
 
 A research lab works through upgrades for this mission, one at a time,
 picked by the commander from the command chair (its screen shows how
 it's going, but soldiers can't start or cancel anything there): each
-costs ore, takes 30-45 s, and draws power
-while it works (it stalls when the battery's flat). Pressing the one in
-progress cancels it and refunds the ore. Researched upgrades apply to
+costs ore, the bigger ones alloy too, takes 30-45 s, and draws power
+while it works (it stalls when the battery's flat, or it's switched off).
+Pressing the one in progress cancels it and refunds the cost. Researched upgrades apply to
 everything, already built or not:
 
 - Blade runners: walk 5 and run 8.5, from 3.5 and 6.
@@ -59,11 +75,11 @@ everything, already built or not:
 - Armour plating: +50 max health.
 - Heated suit: the cold takes twice as long to freeze you.
 - Bigger tanks (after the jetpack): it burns fuel 40% slower.
-- Overcharged rounds: double damage, so two shots kill a spider, not four.
+- Overcharged rounds: double damage, so two shots kill a spider, not three.
 - Stabiliser: half the bloom from firing, and tighter at rest.
 - Grapple: middle mouse hooks what you're looking at (see Controls).
 - Faster drills: rigs drill 40% faster.
-- Rover tuning: rovers drive 40% faster and carry 4 more.
+- Fast cables: cables carry twice as fast.
 - Efficient lamps: lamps draw half the power.
 
 At nightfall, bug holes tear open in the ground, 28-46 m from the
@@ -73,10 +89,13 @@ them all night (never by day, however deep the shadow), more of them and
 more often as the mission goes on, and with more players: at most 3 at
 once at first and 8 by the end, solo, coming up as often as every 1.7 s
 at first and 0.8 s by the end, with each player past the first adding
-half as much again. They go for the nearest thing within 40 m:
-one of you, a rover out on the road (their own headlights don't help
-them), anything you've built, or the pod; with nothing that near, they
-make for the pod. What they destroy is
+half as much again. They go for the nearest thing within 40 m, one of
+you or anything you've built, counting you a little nearer than you are
+and the pod a little further; but anything working loud enough draws
+them from further off (a drilling rig counts as 20 m nearer, a smelting
+foundry 30, a lab at work 8, the pod 5), until they're within 15 m of it,
+where noise counts for less and less. Shoot or hammer one and it comes
+for you for the next 4 s. With nothing near, they make for the pod. What they destroy is
 gone. Sunlight sends them back under. Your health comes back once
 nothing's hurt you for a few seconds.
 
@@ -99,7 +118,7 @@ cold, counted aboard at launch, with an overhead view of the area (WASD,
 the screen edges or the middle button pan, the wheel zooms, Q and E turn it);
 X climbs back out beside the pod. In solo, the seat's yours too: climb
 in to plan, climb out to build. The server runs the
-world: spiders, rovers, building, power, research, the bank and the
+world: spiders, building, cables, power, research, the bank and the
 clock. Each client moves its own soldier and asks the server for
 everything else. Every client generates the same map from the server's
 seed. Online, freezing or being killed sends you back to the pod without
@@ -125,34 +144,36 @@ systemd user service, restarting on failure. Run it again after pushing
 to update. Logs: `journalctl --user -u rockhopper -f` on the box. The
 port is UDP.
 
-Debug: `command` starts in the commander's seat (with `select`, every
-rover selected and sent out; with `research`, the research panel open);
+Debug: `command` starts in the commander's seat (with `research`, the
+research panel open);
 `probe=builder|walker|stander|commander` scripts a joined client, for
 checking a server headlessly.
 
 ## Commanding
 
 The commander's view is overhead, lit up like a tactical display so the
-night doesn't blind it, with markers on rovers, soldiers (blue
-diamonds), spiders (red dots), rigs and blueprints.
+night doesn't blind it, with markers on soldiers (blue diamonds),
+spiders (red dots), bug holes, blueprints, rigs and foundries (LOUD
+under the ones spiders can hear), and OFF on whatever's switched off.
 
 - **Camera:** WASD, the screen edges or dragging with the middle button
   pan, the wheel zooms, Q and E turn it.
-- **Rovers:** click one, or drag a box round some, to select them (Shift
-  adds; Tab selects all). Right-click sends them: on the ground, to drive
-  there and wait; on a rig (or the deposit under it), to haul from that
-  rig alone; on a blueprint, to hammer it up (a blow every 2 s, slower
-  than a soldier), then back to hauling; on the pod, home. The Haul button sets them back to hauling
-  wherever's worth it; Stay holds them still; Go home parks them.
-- **Building:** 1-5 or the bar at the bottom picks a lamp, panel,
-  battery, rig or lab; left-click places it as a blueprint (Shift keeps
-  placing), right-click or Esc puts it away. A rig snaps to the deposit
-  nearest the mouse. Delete over a blueprint cancels it, refunding what
-  its blows have paid.
-- **Ping:** right-click with no rovers selected.
+- **Building:** 1-7 or the bar at the bottom picks a lamp, panel,
+  battery, rig, lab, pylon or foundry; left-click places it as a
+  blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
+  snaps to the deposit nearest the mouse; labs and foundries face the
+  pod. Delete over a blueprint cancels it, refunding what its blows have
+  paid.
+- **Cables (L, or the bar):** click where it runs from, then where it
+  runs to; a dashed line shows whether it can go, and why not. Shift
+  carries on from where it ended. Right-click or Esc stops. Delete over a
+  cable cuts it.
+- **Inspect:** click something built to see how it's doing (a foundry's
+  bins, a rig's hopper, its hull, whether it's loud). P, or the button
+  beside it, switches it off or on; P over a building does the same.
+- **Ping:** right-click.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
-- **Print rover:** on the bar, from the bank.
 - **Research (R):** every upgrade, started on an idle lab; press the one
   in progress to cancel it.
 - **X** climbs out; **Esc** pauses.
@@ -166,7 +187,7 @@ diamonds), spiders (red dots), rigs and blueprints.
   out of it keeps the momentum. Land with it held to slide on.
 - **Weapons:** 1, 2 or the wheel switch between the gun and the hammer.
   The hammer smashes everything in a short arc in front, hurting
-  spiders badly (two blows kill one) and knocking them flying, chips ore off a deposit, and puts up
+  spiders badly (one blow kills one) and knocking them flying, chips ore off a deposit, and puts up
   the commander's blueprints a blow at a time.
 - **Grapple (middle mouse, once researched):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to
@@ -179,14 +200,11 @@ diamonds), spiders (red dots), rigs and blueprints.
   tighter, but slow on your feet.
 - **Use (E):** tap at the pod to hand in what you carry, or at a rig to
   empty its hopper into your pockets. Hold on ore or a deposit to mine
-  it, or on a lamp, panel or rig to pick it up.
-- **The pod's screen:** look at a button on it and press E, to print a
-  rover (4 ore), hand in what you carry, or take command. It also shows what's banked,
-  the rovers, the battery and the launch clock.
-- **A rover's screen** (on a stand at its back): HAUL is the usual, STAY
-  stops it where it is, GO HOME drives it back to park, unloading what
-  it carries, until you tell it to haul again. It also shows what the
-  rover's doing, its cargo and its hull.
+  it, or on anything built to pick it up. On a cable overhead, E rides it
+  (E or Space lets go).
+- **The pod's screen:** look at a button on it and press E, to hand in
+  what you carry, or take command. It also shows the ore and alloy
+  banked, the battery, the hull and the launch clock.
 - **Flare (Q):** throws one where you're looking.
 - **Ping (G):** marks the spot you're looking at for everyone
   for 8 s: a beam of light, and a marker on screen with your name and how
@@ -204,8 +222,9 @@ Mission, power, health and spider numbers are constants at the top of
 `game/game.gd`. The day's length and the sun's path are in
 `world/sun.gd`. The map's size, wall, hills and caves are in
 `world/terrain.gd`. Rigs' drilling rate and hopper are in
-`world/fixture.gd`. Movement and the gun are in `player/player.gd`,
-rovers in `world/rover.gd`, and spiders in `world/spider.gd`.
+`world/fixture.gd`, with foundries, noise and what costs alloy; cables
+in `world/link.gd`. Movement, the gun and riding cables are in
+`player/player.gd`, and spiders in `world/spider.gd`.
 
 ## Debugging
 
@@ -215,10 +234,12 @@ User arguments after `--`, e.g.
 - `seed=N`: the map.
 - `time=S`: start S seconds in (`time=150` is dusk).
 - `view=overview` looks down on the whole area; `view=cave` stands
-  you in a cave; `view=screen` in front of the pod's screen; `view=rover`
-  behind the first rover.
+  you in a cave; `view=screen` in front of the pod's screen.
 - `rig` builds a rig on the deposit nearest the pod and stands you
   beside it.
+- `cables` builds a rig on the deposit nearest the pod and a foundry
+  halfway home, cables them rig to foundry to pod, and stands you by
+  the foundry.
 - `lamps=N` builds N lamps around you.
 - `spiders=N` brings N spiders up in front of you.
 - `plan=N` places N blueprints round the pod, part built.
@@ -234,14 +255,14 @@ User arguments after `--`, e.g.
 
 - `world/terrain.gd`: the ground, a signed distance field (hills,
   boulders, small craters, caves) meshed once by surface nets into chunks
-  with trimesh colliders, plus a navigation mesh baked from it for
-  rovers, a flat plain out to the horizon, and the hologram wall
-  (`world/boundary.gdshader`). No deformation.
+  with trimesh colliders, plus a navigation mesh baked from it (used to
+  place deposits you can walk to), a flat plain out to the horizon, and
+  the hologram wall (`world/boundary.gdshader`). No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
-- `world/fixture.gd`: the pod, ore, deposits, lamps, panels and rigs.
+- `world/fixture.gd`: the pod, ore, deposits, and everything built.
+- `world/link.gd`: cables.
 - `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and
-  the rovers.
-- `world/rover.gd`: the haulers.
+  labs.
 - `world/flare.gd`: flares.
 - `world/hole.gd`: bug holes.
 - `world/spider.gd`: the spiders.
@@ -255,5 +276,5 @@ User arguments after `--`, e.g.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,
   `Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn`. It plays
-  a minute and a half of a rig and a rover working by day, then half a
-  minute of night.
+  a minute and a half of a rig cabled through a foundry to the pod by
+  day, with a ride on a cable, then half a minute of night.

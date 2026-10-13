@@ -3,7 +3,7 @@ extends CanvasLayer
 ## Readouts. Top left, meters for health, the battery, suit warmth and
 ## the jetpack. Top right, the pod's launch clock and a strip of the next
 ## day and night where you're standing. Bottom, the ore banked in the pod
-## and in your pockets, and the rovers. In the middle, a
+## and alloy, what you carry, and research. In the middle, a
 ## crosshair that fills as you hold E, what E would do, a marker for the
 ## pod pinned to the screen's edge when it's out of view, and markers on
 ## drill rigs and blueprints, with how far along they are.
@@ -32,7 +32,7 @@ var _sky: Label
 var _strip: Control
 var _ore: Label
 var _carried: Label
-var _rovers: Label
+var _research: Label
 var _notice: Label
 var _hint: Label
 var _prompt: Label
@@ -279,8 +279,8 @@ func _build_bottom() -> void:
 	ore_column.add_child(_ore)
 	_carried = _label(14, DIM)
 	ore_column.add_child(_carried)
-	_rovers = _label(14, DIM)
-	ore_column.add_child(_rovers)
+	_research = _label(14, DIM)
+	ore_column.add_child(_research)
 	var ore_panel := _panel(ore_column)
 	ore_panel.custom_minimum_size = Vector2(210, 104)
 	row.add_child(ore_panel)
@@ -299,15 +299,11 @@ func _update_bottom() -> void:
 	_ore.text = "%d / %d in pod" % [game.stock, Game.QUOTA]
 	_ore.modulate = DAY_COLOR if game.stock >= Game.QUOTA else ORE_COLOR
 	_carried.text = "carrying %d    flares %d / %d" % [game.carried, game.flares_left, Game.FLARES]
-	var out := 0
-	for rover in game.rovers:
-		if rover.task != Rover.Task.PARKED:
-			out += 1
-	_rovers.text = "%d rovers, %d out" % [game.rovers.size(), out]
+	_research.text = "%d alloy in pod" % game.alloy
 	for lab in game.built:
 		if lab.kind == &"lab" and lab.researching != &"":
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
-			_rovers.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
+			_research.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
 	_hint.text = "%s    [1/2/wheel] gun/hammer    %s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[MMB] grapple    " if game.has(&"grapple") else ""]
 
@@ -334,6 +330,17 @@ static func draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tin
 		canvas.draw_line(centre + Vector2(20, 20), centre + Vector2(0, -16), white, 3.0)
 		canvas.draw_line(centre + Vector2(0, -12), centre + Vector2(0, 22), Color(0.5, 0.5, 0.52) * tint, 3.0)
 		canvas.draw_rect(Rect2(centre + Vector2(-9, -24), Vector2(18, 11)), gold)
+	elif kind == &"pylon":
+		canvas.draw_line(centre + Vector2(0, -20), centre + Vector2(0, 22), white, 3.0)
+		canvas.draw_line(centre + Vector2(-12, -18), centre + Vector2(12, -18), gold, 3.0)
+		canvas.draw_line(centre + Vector2(-26, -10), centre + Vector2(-12, -18), Color(0.5, 0.5, 0.52) * tint, 1.5)
+		canvas.draw_line(centre + Vector2(12, -18), centre + Vector2(26, -10), Color(0.5, 0.5, 0.52) * tint, 1.5)
+		canvas.draw_rect(Rect2(centre + Vector2(-6, 18), Vector2(12, 4)), Color(1.0, 0.45, 0.1) * tint)
+	elif kind == &"foundry":
+		canvas.draw_rect(Rect2(centre + Vector2(-24, -6), Vector2(48, 26)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-25, -9), Vector2(50, 4)), gold)
+		canvas.draw_rect(Rect2(centre + Vector2(-18, -24), Vector2(8, 16)), dark)
+		canvas.draw_rect(Rect2(centre + Vector2(-9, 6), Vector2(18, 10)), Color(1.0, 0.5, 0.15) * tint)
 	elif kind == &"lamp":
 		canvas.draw_circle(centre + Vector2(0, -12), 13, Color(1.0, 0.75, 0.4, 0.18) * tint)
 		canvas.draw_line(centre + Vector2(0, -8), centre + Vector2(0, 18), Color(0.7, 0.7, 0.72) * tint, 3.0)
@@ -379,7 +386,7 @@ func _draw_blueprint_markers() -> void:
 		if camera.is_position_behind(top) or camera.global_position.distance_to(top) > 70.0:
 			continue
 		var at := camera.unproject_position(top)
-		var text := "BUILD %s %d/%d%s" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed(), "  NO ORE" if game.stock < plan.blow_cost() else ""]
+		var text := "BUILD %s %d/%d%s" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed(), "" if game.can_pay(plan) else "  BANK SHORT"]
 		_overlay.draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), BLUEPRINT_COLOR, false, 2.0)
 		_overlay.draw_string_outline(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, 4, Color(0, 0, 0, 0.7))
 		_overlay.draw_string(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, BLUEPRINT_COLOR)

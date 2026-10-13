@@ -1,28 +1,51 @@
 class_name Fixture
 extends StaticBody3D
 ## Anything standing on the rock: the drop pod, ore, deposits, and what you
-## build. Stood upright along the surface normal it was placed on.
+## build. Rigs stand along their deposit's slope; buildings stand upright,
+## on a plinth sunk into the rock where it slopes.
 ##
 ## Ore is a small cluster, gone once mined. A deposit is a big outcrop
 ## that never runs out: you can chip at it by hand, or build a drill rig
 ## over it. A rig drills while it's lit, by the sun or a lamp, into a
-## hopper that rovers come and empty, or you can by hand.
+## hopper that cables carry away, or you can empty by hand.
 ##
 ## What the commander places starts as a blueprint: a hologram that does
 ## nothing till soldiers hammer it up, each blow paying its share of the
 ## cost from the bank.
+##
+## A foundry smelts ore into alloy while it has power. Pylons, rigs,
+## foundries and the pod can be strung together with cables (Link) that
+## carry ore and alloy along. Rigs, foundries, labs and lamps can be
+## switched off; working rigs, foundries and labs make noise that draws
+## spiders.
 
 const LAYER := 2
-const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"rover": 4}
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5}
+const ALLOY := {&"battery": 1}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
 const LAMP_RANGE := 13.0
+## Foundries: SMELT_ORE ore makes one alloy every SMELT_EVERY seconds,
+## with room for BIN of each.
+const SMELT_EVERY := 6.0
+const SMELT_ORE := 2
+const BIN := 10
+const PYLON_HOLDS := 4
 ## Hammer blows to put up a blueprint.
-const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6}
-const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab"}
+const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6}
+const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry"}
 ## How high a placement ghost sits over the ground.
-const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85}
+const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1}
+## Steepest ground each can go on, in degrees; the bigger ones sit level
+## on a plinth.
+const MAX_SLOPE := {&"lamp": 35.0, &"pylon": 35.0}
+const SLOPE := 20.0
+## How much further than they'd see that spiders hear it working.
+const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0}
+const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry"]
+## Where cables tie on, above the base.
+const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4}
 
 var kind: StringName
 var net_id := 0
@@ -49,6 +72,14 @@ var research_time := 0.0
 var unpowered := false
 var blueprint := false
 var hits := 0
+## Switched on by the commander.
+var enabled := true
+## Foundries: ore waiting, alloy made, progress towards the next; pylons:
+## what's passing through.
+var ore_in := 0
+var alloy_out := 0
+var smelted := 0.0
+var holding: Array[StringName] = []
 
 var light: OmniLight3D
 ## The pod's screen.
@@ -93,6 +124,16 @@ static func ghost_mesh(ghost_kind: StringName) -> Mesh:
 			rig.bottom_radius = 2.4
 			rig.height = 3.8
 			return rig
+		&"pylon":
+			var mast := CylinderMesh.new()
+			mast.top_radius = 0.15
+			mast.bottom_radius = 0.3
+			mast.height = 4.4
+			return mast
+		&"foundry":
+			var hall := BoxMesh.new()
+			hall.size = Vector3(2.6, 2.2, 2.2)
+			return hall
 	var lab := BoxMesh.new()
 	lab.size = Vector3(2.2, 1.7, 1.6)
 	return lab
@@ -117,9 +158,73 @@ func _ready() -> void:
 		&"drill": _build_drill()
 		&"battery": _build_battery()
 		&"lab": _build_lab()
+		&"pylon": _build_pylon()
+		&"foundry": _build_foundry()
 	if blueprint:
 		_hologram()
 	max_health = health
+
+
+## How much further than they'd see that spiders hear it, while it works.
+func noise() -> float:
+	match kind:
+		&"pod": return NOISE.pod
+		&"drill", &"foundry": return NOISE[kind] if enabled and stalled == "" else 0.0
+		&"lab": return NOISE.lab if enabled and researching != &"" and !unpowered else 0.0
+	return 0.0
+
+
+func cable_point() -> Vector3:
+	return global_position + normal * CABLE_HEIGHT.get(kind, 2.0)
+
+
+## What it'd send down a cable next, or &"" for nothing.
+func output() -> StringName:
+	match kind:
+		&"drill": return &"ore" if stored > 0 else &""
+		&"foundry": return &"alloy" if alloy_out > 0 else &""
+		&"pylon": return holding[0] if !holding.is_empty() else &""
+	return &""
+
+
+func take_output() -> void:
+	match kind:
+		&"drill": stored -= 1
+		&"foundry": alloy_out -= 1
+		&"pylon": holding.pop_front()
+
+
+## Whether it'll take this off a cable.
+func accepts(item: StringName) -> bool:
+	match kind:
+		&"foundry": return item == &"ore" and ore_in < BIN
+		&"pylon": return holding.size() < PYLON_HOLDS
+		&"pod": return true
+	return false
+
+
+## Foundries: smelts for delta seconds, given whether there's power. A
+## batch of ore goes in at the start.
+func smelt(delta: float, powered: bool) -> void:
+	unpowered = !powered
+	if !enabled:
+		stalled = "off"
+	elif smelted == 0.0 and ore_in < SMELT_ORE:
+		stalled = "no ore"
+	elif alloy_out >= BIN:
+		stalled = "full"
+	elif !powered:
+		stalled = "no power"
+	else:
+		stalled = ""
+	if stalled != "":
+		return
+	if smelted == 0.0:
+		ore_in -= SMELT_ORE
+	smelted += delta
+	if smelted >= SMELT_EVERY:
+		smelted = 0.0
+		alloy_out += 1
 
 
 func set_on(value: bool) -> void:
@@ -131,7 +236,7 @@ func set_on(value: bool) -> void:
 ## Rigs: drills for delta seconds if it's lit and has room, given whether
 ## it's lit.
 func drill(delta: float, lit: bool, every: float = DRILL_EVERY) -> void:
-	stalled = "full" if stored >= HOPPER else ("dark" if !lit else "")
+	stalled = "off" if !enabled else ("full" if stored >= HOPPER else ("dark" if !lit else ""))
 	if stalled != "":
 		return
 	drilled += delta
@@ -151,18 +256,18 @@ func hits_needed() -> int:
 	return BUILD_HITS[kind]
 
 
-## Ore paid into a blueprint after this many blows, rounded up so the
-## first blows pay first.
-func paid_after(blows: int) -> int:
-	return ceili(COST[kind] * blows / float(hits_needed()))
+## Ore (or alloy) paid into a blueprint after this many blows, rounded up
+## so the first blows pay first.
+func paid_after(blows: int, alloy := false) -> int:
+	return ceili((ALLOY.get(kind, 0) if alloy else COST[kind]) * blows / float(hits_needed()))
 
 
-func paid() -> int:
-	return paid_after(hits)
+func paid(alloy := false) -> int:
+	return paid_after(hits, alloy)
 
 
-func blow_cost() -> int:
-	return paid_after(hits + 1) - paid()
+func blow_cost(alloy := false) -> int:
+	return paid_after(hits + 1, alloy) - paid(alloy)
 
 
 ## Every part see-through and glowing, nothing lit or working.
@@ -203,10 +308,17 @@ func _process(delta: float) -> void:
 	if kind == &"battery":
 		_fill.scale.y = maxf(0.02, charge)
 		_fill.position.y = 0.12 + 0.24 * _fill.scale.y
+	if kind == &"foundry":
+		var working := stalled == ""
+		_status.emission = Color(1.0, 0.45, 0.1) if working else Color(0.2, 0.2, 0.25)
+		_status.emission_energy_multiplier = 3.0 + sin(Time.get_ticks_msec() / 120.0) if working else 0.3
+		_fill.scale.y = maxf(0.02, alloy_out / float(BIN))
+		_fill.position.y = 0.45 + 0.4 * _fill.scale.y
+		return
 	if _shaft:
 		if stalled == "":
 			_shaft.rotate_object_local(Vector3.UP, delta * 9.0)
-		var color := Color(0.3, 1.0, 0.4) if stalled == "" else (Color(0.4, 0.7, 1.0) if stalled == "dark" else Color(1.0, 0.7, 0.2))
+		var color := Color(0.3, 1.0, 0.4) if stalled == "" else (Color(0.4, 0.7, 1.0) if stalled == "dark" else (Color(0.3, 0.3, 0.3) if stalled == "off" else Color(1.0, 0.7, 0.2)))
 		_status.albedo_color = color
 		_status.emission = color
 		_fill.scale.y = maxf(0.02, stored / float(HOPPER))
@@ -242,7 +354,7 @@ func _build_pod() -> void:
 	var frame := BoxMesh.new()
 	screen = Screen.new()
 	screen.title = "PROSPECTOR POD  //  FAB-2"
-	screen.buttons = [&"rover", &"hand_in", &"command"]
+	screen.buttons = [&"hand_in", &"command"]
 	frame.size = Vector3(screen.size_m.x + 0.12, screen.size_m.y + 0.12, 0.06)
 	_add_mesh(frame, _material(Color(0.2, 0.21, 0.24), 0.6, 0.4), Vector3(1.34, 2.1, 0)).basis = screen_basis
 	screen.transform = Transform3D(screen_basis, Vector3(1.34, 2.1, 0) + out * 0.035)
@@ -301,6 +413,7 @@ func _build_lamp() -> void:
 
 
 func _build_panel() -> void:
+	_plinth(Vector2(0.5, 0.5))
 	var metal := _material(Color(0.5, 0.5, 0.52), 0.7, 0.4)
 	_add_mesh(_cylinder(0.04, 0.05, 0.6), metal, Vector3(0, 0.3, 0))
 	var cells := _material(Color(0.06, 0.1, 0.32), 0.6, 0.18)
@@ -425,6 +538,7 @@ func _build_drill() -> void:
 
 func _build_lab() -> void:
 	health = 50.0
+	_plinth(Vector2(2.2, 1.6))
 	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
 	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
 	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
@@ -459,6 +573,7 @@ func _build_lab() -> void:
 
 
 func _build_battery() -> void:
+	_plinth(Vector2(1.0, 0.7))
 	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
 	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
 	var dark := _material(Color(0.12, 0.12, 0.14), 0.4, 0.6)
@@ -483,6 +598,68 @@ func _build_battery() -> void:
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(1.0, 0.7, 0.7)
 	_add_collider(shape, Vector3(0, 0.35, 0))
+
+
+## A white mast with a gold cross-arm, where cables tie on.
+func _build_pylon() -> void:
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var foot := BoxMesh.new()
+	foot.size = Vector3(0.7, 0.2, 0.7)
+	_add_mesh(foot, orange, Vector3(0, 0.1, 0))
+	_add_mesh(_cylinder(0.08, 0.13, 4.3), white, Vector3(0, 2.25, 0))
+	var arm := BoxMesh.new()
+	arm.size = Vector3(1.1, 0.12, 0.12)
+	_add_mesh(arm, gold, Vector3(0, 4.3, 0))
+	_add_mesh(_cylinder(0.14, 0.14, 0.1), orange, Vector3(0, 4.45, 0)).rotation.x = PI * 0.5
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(0.4, 4.4, 0.4)
+	_add_collider(shape, Vector3(0, 2.2, 0))
+
+
+## A squat furnace hall with a stack, a glowing mouth, an alloy gauge, and
+## a mast on top for cables.
+func _build_foundry() -> void:
+	health = 60.0
+	_plinth(Vector2(2.6, 2.2))
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var dark := _material(Color(0.2, 0.21, 0.24), 0.6, 0.4)
+	var body := BoxMesh.new()
+	body.size = Vector3(2.6, 1.8, 2.2)
+	_add_mesh(body, white, Vector3(0, 0.9, 0))
+	var roof := BoxMesh.new()
+	roof.size = Vector3(2.7, 0.14, 2.3)
+	_add_mesh(roof, gold, Vector3(0, 1.85, 0))
+	_add_mesh(_cylinder(0.25, 0.32, 1.6), dark, Vector3(-0.8, 2.6, -0.5))
+	_add_mesh(_cylinder(0.06, 0.08, 1.6), white, Vector3(0, 2.6, 0))
+	_status = _material(Color(0.3, 0.1, 0.05), 0.0, 0.5)
+	_status.emission_enabled = true
+	var mouth := BoxMesh.new()
+	mouth.size = Vector3(0.9, 0.6, 0.05)
+	_add_mesh(mouth, _status, Vector3(0, 0.6, 1.11))
+	var gauge := BoxMesh.new()
+	gauge.size = Vector3(0.2, 0.84, 0.05)
+	_add_mesh(gauge, _material(Color(0.05, 0.05, 0.06), 0.0, 0.8), Vector3(0.95, 0.87, 1.11))
+	var fill_material := _material(Color(1.0, 0.6, 0.2), 0.0, 0.3)
+	fill_material.emission_enabled = true
+	fill_material.emission = Color(1.0, 0.55, 0.15)
+	fill_material.emission_energy_multiplier = 2.0
+	var fill := BoxMesh.new()
+	fill.size = Vector3(0.14, 0.8, 0.06)
+	_fill = _add_mesh(fill, fill_material, Vector3(0.95, 0.45, 1.12))
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(2.6, 1.9, 2.2)
+	_add_collider(shape, Vector3(0, 0.95, 0))
+
+
+## A block of concrete under it, down into the rock, so it sits level on
+## a slope.
+func _plinth(footprint: Vector2) -> void:
+	var block := BoxMesh.new()
+	block.size = Vector3(footprint.x + 0.3, 1.4, footprint.y + 0.3)
+	_add_mesh(block, _material(Color(0.4, 0.39, 0.37), 0.0, 0.9), Vector3(0, -0.66, 0))
 
 
 func _material(color: Color, metallic: float, roughness: float) -> StandardMaterial3D:

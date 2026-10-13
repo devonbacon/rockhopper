@@ -6,37 +6,38 @@ extends Node3D
 ## WASD, the screen edges or dragging with the middle button pan, the wheel
 ## zooms, Q and E turn it, and X climbs back out.
 ##
-## Rovers: click one or drag a box round some to select them (Shift adds),
-## Tab selects them all. Right-click sends them: on the ground, to drive
-## there and wait; on a rig, or the deposit under one, to haul from it
-## alone; on a blueprint, to hammer it up, slower than a soldier; on the
-## pod, home. The buttons set them hauling wherever's worth
-## it, holding still, or home. With no rovers selected, right-click pings
-## the spot for the soldiers.
-##
-## Building: 1-5 or the bar picks something, left-click places it as a
+## Building: 1-7 or the bar picks something, left-click places it as a
 ## blueprint for soldiers to hammer up, each blow paying its share from the
 ## bank (Shift keeps placing), and right-click or Esc puts it away. Delete
-## over a blueprint cancels it, refunding what's been paid. R opens the research panel.
+## over a blueprint cancels it, refunding what's been paid.
+##
+## Cables: L, then click where it runs from and where it runs to (Shift
+## carries on from there). Delete over a cable cuts it.
+##
+## Click something built to see how it's doing; P, or its button, switches
+## it off or on. Right-click pings the spot for the soldiers. R opens the
+## research panel.
 
 const PAN_SPEED := 40.0
 const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
 const MAX_HEIGHT := 140.0
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab"]
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry"]
+const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry"}
 const PICK := 26.0
-const DRAG := 8.0
 const SELECTED := Color(0.45, 1.0, 0.55)
-const ROVER := Color(1, 1, 1, 0.7)
 const SOLDIER := Color(0.45, 0.85, 1.0)
 const SPIDER := Color(1.0, 0.3, 0.25)
 const PLAN := Color(0.45, 0.8, 1.0)
+const OFF := Color(0.6, 0.6, 0.65)
 
 var game: Game
 var camera: Camera3D
-var selected: Array[Rover] = []
 var placing: StringName = &""
+## What's been clicked on, to watch and switch.
+var focus: Fixture
+var linking := false
 
 var _height := 70.0
 var _yaw := 0.0
@@ -46,18 +47,20 @@ var _status: Label
 var _toast: Label
 var _toast_time := 0.0
 var _build_buttons := {}
-var _rover_button: Button
-var _orders: Control
-var _orders_label: Label
+var _link_button: Button
+var _focus_panel: Control
+var _focus_label: Label
+var _power_button: Button
 var _research: Control
 var _research_rows: VBoxContainer
 var _research_buttons := {}
 var _ghost: MeshInstance3D
 var _ghost_material: StandardMaterial3D
-var _drag_from := Vector2.INF
-## Where orders were given lately: [point, age].
+var _link_from: Fixture
+## Where things were placed or linked lately: [point, age].
 var _marks: Array = []
-var _hover_plan: Fixture
+var _hover: Fixture
+var _hover_link: Link
 var _refresh := 0.0
 var _alarm := 0.0
 
@@ -99,8 +102,8 @@ func leave() -> void:
 	_layer.visible = false
 	_ghost.visible = false
 	placing = &""
-	selected.clear()
-	_drag_from = Vector2.INF
+	focus = null
+	_stop_linking()
 
 
 ## The pod's been bitten: a red flash round the edge, and word of it.
@@ -119,7 +122,10 @@ func _process(delta: float) -> void:
 	if !visible:
 		return
 	_pan(delta)
-	selected.assign(selected.filter(func(rover: Rover) -> bool: return is_instance_valid(rover)))
+	if !is_instance_valid(focus):
+		focus = null
+	if !is_instance_valid(_link_from):
+		_link_from = null
 	for mark: Array in _marks:
 		mark[1] += delta
 	_marks = _marks.filter(func(mark: Array) -> bool: return mark[1] < 0.8)
@@ -128,7 +134,15 @@ func _process(delta: float) -> void:
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	var hit := _mouse_hit()
 	_aim_ghost(hit)
-	_hover_plan = hit.collider if !hit.is_empty() and placing == &"" and hit.collider is Fixture and (hit.collider as Fixture).blueprint else null
+	_hover = hit.collider if !hit.is_empty() and placing == &"" and hit.collider is Fixture else null
+	if _hover and _hover.kind == &"deposit" and _hover.rig:
+		_hover = _hover.rig
+	var was := _hover_link
+	_hover_link = _link_under_mouse() if placing == &"" and !linking and (!_hover or _hover.kind == &"deposit") else null
+	if is_instance_valid(was) and was != _hover_link:
+		was.highlight = false
+	if _hover_link:
+		_hover_link.highlight = true
 	_refresh -= delta
 	if _refresh <= 0.0:
 		_refresh = 0.2
@@ -141,7 +155,7 @@ func _pan(delta: float) -> void:
 	var pan := Vector2(_axis(KEY_D, KEY_A), _axis(KEY_S, KEY_W))
 	var mouse := get_viewport().get_mouse_position()
 	var size := get_viewport().get_visible_rect().size
-	if DisplayServer.window_is_focused() and _drag_from == Vector2.INF and !Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+	if DisplayServer.window_is_focused() and !Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		if mouse.x < EDGE:
 			pan.x -= 1.0
 		elif mouse.x > size.x - EDGE:
@@ -171,7 +185,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if !visible:
 		return
 	if event is InputEventMouseButton:
-		var mouse: Vector2 = event.position
 		match event.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
 				if event.pressed:
@@ -180,20 +193,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				if event.pressed:
 					_height = minf(MAX_HEIGHT, _height / 0.88)
 			MOUSE_BUTTON_LEFT:
+				if !event.pressed:
+					return
 				if placing != &"":
-					if event.pressed:
-						_place(event.shift_pressed)
-				elif event.pressed:
-					_drag_from = mouse
-				elif _drag_from != Vector2.INF:
-					_select(Rect2(_drag_from, mouse - _drag_from).abs(), event.shift_pressed)
-					_drag_from = Vector2.INF
+					_place(event.shift_pressed)
+				elif linking:
+					_link_click(event.shift_pressed)
+				else:
+					focus = _hover if _hover and _hover.kind != &"deposit" and _hover.kind != &"ore" and !_hover.blueprint else null
+					_update_ui()
 			MOUSE_BUTTON_RIGHT:
 				if event.pressed:
 					if placing != &"":
 						_choose(&"")
-					elif !selected.is_empty():
-						_order_at(_mouse_hit())
+					elif linking:
+						_stop_linking()
 					else:
 						var hit := _mouse_hit()
 						if !hit.is_empty():
@@ -207,21 +221,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_X:
 				game.act(&"uncommand", [])
-			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7:
 				var kind := BUILD[event.physical_keycode - KEY_1]
 				_choose(&"" if placing == kind else kind)
-			KEY_TAB:
-				selected.assign(game.rovers)
+			KEY_L:
+				if linking:
+					_stop_linking()
+				else:
+					_start_linking()
+			KEY_P:
+				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
 			KEY_R:
 				_research.visible = !_research.visible
 			KEY_DELETE, KEY_BACKSPACE:
-				if _hover_plan:
-					game.act(&"cancel", [_hover_plan.net_id])
-					toast("%s blueprint cancelled, %d ore back." % [Fixture.NAMES[_hover_plan.kind], _hover_plan.paid()])
+				if _hover and _hover.blueprint:
+					game.act(&"cancel", [_hover.net_id])
+					toast("%s blueprint cancelled, %s back." % [Fixture.NAMES[_hover.kind], Game.price(_hover.paid(), _hover.paid(true))])
+				elif _hover_link:
+					game.act(&"unlink", [_hover_link.net_id])
+					toast("Cable cut, %d ore back." % Game.LINK_COST)
 			KEY_ESCAPE:
-				if placing != &"" or !selected.is_empty() or _research.visible:
+				if placing != &"" or linking or focus or _research.visible:
 					_choose(&"")
-					selected.clear()
+					_stop_linking()
+					focus = null
 					_research.visible = false
 				else:
 					return
@@ -239,9 +262,73 @@ func _mouse_hit() -> Dictionary:
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
 
+## The cable nearest the mouse on screen, if one's close enough.
+func _link_under_mouse() -> Link:
+	var mouse := get_viewport().get_mouse_position()
+	var best: Link = null
+	var best_distance := 8.0
+	for link in game.links:
+		var a := _screen(link.start())
+		var b := _screen(link.end())
+		if a == Vector2.INF or b == Vector2.INF:
+			continue
+		var distance := mouse.distance_to(Geometry2D.get_closest_point_to_segment(mouse, a, b))
+		if distance < best_distance:
+			best_distance = distance
+			best = link
+	return best
+
+
 func _choose(kind: StringName) -> void:
 	placing = kind
 	_ghost.visible = false
+	if kind != &"":
+		_stop_linking()
+
+
+func _start_linking() -> void:
+	_choose(&"")
+	linking = true
+	_link_from = null
+	toast("Click where the cable runs from, then where it runs to.")
+
+
+func _stop_linking() -> void:
+	linking = false
+	_link_from = null
+
+
+func _link_click(keep_going: bool) -> void:
+	if !_hover:
+		return
+	if !_link_from:
+		if _hover == game.pod:
+			toast("The pod only takes cables in.")
+		elif !Fixture.CABLE_HEIGHT.has(_hover.kind) or _hover.blueprint:
+			toast("Cables tie to pylons, rigs, foundries and the pod, once they're built.")
+		else:
+			_link_from = _hover
+		return
+	var why := game.can_link(_link_from, _hover)
+	if why != "":
+		toast(why)
+		return
+	if game.stock < Game.LINK_COST:
+		toast("A cable takes %d ore." % Game.LINK_COST)
+		return
+	game.act(&"link", [_link_from.net_id, _hover.net_id])
+	_marks.append([_hover.cable_point(), 0.0])
+	if keep_going and _hover != game.pod:
+		_link_from = _hover
+	else:
+		_stop_linking()
+
+
+func _switch(fixture: Fixture) -> void:
+	if !fixture or !Fixture.SWITCHED.has(fixture.kind):
+		return
+	game.act(&"switch", [fixture.net_id])
+	toast("%s switched %s." % [Fixture.NAMES[fixture.kind], "off" if fixture.enabled else "on"])
 
 
 ## Where what's being placed would go, from a mouse hit: a rig snaps to
@@ -271,68 +358,23 @@ func _aim_ghost(hit: Dictionary) -> void:
 		return
 	_ghost.mesh = Fixture.ghost_mesh(placing) if _ghost.get_meta("kind", &"") != placing else _ghost.mesh
 	_ghost.set_meta("kind", placing)
-	var ok := game.can_build(placing, spot.position)
+	var ok := game.can_build(placing, spot.position, spot.normal)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.4) if ok else Color(1.0, 0.3, 0.25, 0.4)
-	var normal: Vector3 = spot.normal
-	_ghost.global_transform = Transform3D(Fixture.upright(normal), spot.position + normal * Fixture.GHOST_LIFT[placing])
+	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
+	_ghost.global_transform = Transform3D(Fixture.upright(up), spot.position + up * Fixture.GHOST_LIFT[placing])
 
 
 func _place(keep_placing: bool) -> void:
 	var spot := _placement(_mouse_hit())
 	if spot.is_empty():
 		return
-	if !game.can_build(placing, spot.position):
-		toast("Too close to something.")
+	if !game.can_build(placing, spot.position, spot.normal):
+		toast("Too steep there, or too close to something.")
 		return
 	game.act(&"blueprint", [placing, spot.position, spot.normal, game.pod.global_position])
 	_marks.append([spot.position, 0.0])
 	if !keep_placing:
 		_choose(&"")
-
-
-## Click (a small box) or drag-box selection of rovers.
-func _select(box: Rect2, additive: bool) -> void:
-	if !additive:
-		selected.clear()
-	var click := box.size.length() < DRAG
-	var best: Rover = null
-	var best_distance := PICK
-	for rover in game.rovers:
-		var top := rover.global_position + Terrain.up_at(rover.global_position) * 0.9
-		if camera.is_position_behind(top):
-			continue
-		var at := camera.unproject_position(top)
-		if click:
-			if at.distance_to(box.position) < best_distance:
-				best_distance = at.distance_to(box.position)
-				best = rover
-		elif box.has_point(at) and !selected.has(rover):
-			selected.push_back(rover)
-	if best and !selected.has(best):
-		selected.push_back(best)
-
-
-func _order_at(hit: Dictionary) -> void:
-	if hit.is_empty():
-		return
-	var ids: Array = selected.map(func(rover: Rover) -> int: return rover.net_id)
-	var target: Fixture = hit.collider if hit.collider is Fixture else null
-	if target and target.kind == &"deposit" and target.rig:
-		target = target.rig
-	if target and target.blueprint:
-		game.act(&"order", [ids, &"build", Vector3.INF, target.net_id])
-		toast("Building the %s." % String(Fixture.NAMES[target.kind]).to_lower())
-	elif target == game.pod:
-		game.act(&"order", [ids, &"home", Vector3.INF, 0])
-		toast("Heading home.")
-	elif target and target.kind == &"drill":
-		game.act(&"order", [ids, &"fetch", Vector3.INF, target.net_id])
-		toast("Hauling from that rig.")
-	else:
-		var inside := Vector2(hit.position.x, hit.position.z).limit_length(Terrain.FLOOR_RADIUS - 2.0)
-		var point: Vector3 = game.terrain.surface_point(Vector3(inside.x, 0.0, inside.y))[0]
-		game.act(&"order", [ids, &"move", point, 0])
-	_marks.append([hit.position, 0.0])
 
 
 func _place_camera() -> void:
@@ -377,21 +419,18 @@ func _build_ui() -> void:
 	column.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_layer.add_child(column)
 
-	var orders := HBoxContainer.new()
-	orders.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	orders.alignment = BoxContainer.ALIGNMENT_CENTER
-	orders.add_theme_constant_override("separation", 8)
-	_orders_label = _label(16)
-	orders.add_child(_orders_label)
-	for entry: Array in [["Haul", &"haul"], ["Stay", &"stay"], ["Go home", &"home"]]:
-		var button := _button(entry[0], Vector2(100, 36))
-		var order: StringName = entry[1]
-		button.pressed.connect(func() -> void:
-			game.act(&"order", [selected.map(func(rover: Rover) -> int: return rover.net_id), order, Vector3.INF, 0]))
-		orders.add_child(button)
-	_orders = _panel(orders)
-	_orders.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	column.add_child(_orders)
+	var focus_row := HBoxContainer.new()
+	focus_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	focus_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	focus_row.add_theme_constant_override("separation", 12)
+	_focus_label = _label(16)
+	focus_row.add_child(_focus_label)
+	_power_button = _button("", Vector2(130, 36))
+	_power_button.pressed.connect(func() -> void: _switch(focus))
+	focus_row.add_child(_power_button)
+	_focus_panel = _panel(focus_row)
+	_focus_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	column.add_child(_focus_panel)
 
 	var bar := HBoxContainer.new()
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -401,16 +440,21 @@ func _build_ui() -> void:
 		var button := _button("", Vector2(96, 92))
 		button.draw.connect(func() -> void: _draw_build_button(button, kind, i))
 		button.pressed.connect(func() -> void: _choose(&"" if placing == kind else kind))
-		button.tooltip_text = "%s: %d ore, paid over %d hammer blows" % [Fixture.NAMES[kind], Fixture.COST[kind], Fixture.BUILD_HITS[kind]]
+		button.tooltip_text = "%s: %s, paid over %d hammer blows" % [Fixture.NAMES[kind], Game.price(Fixture.COST[kind], Fixture.ALLOY.get(kind, 0)), Fixture.BUILD_HITS[kind]]
 		bar.add_child(button)
 		_build_buttons[kind] = button
 	var spacer := Control.new()
 	spacer.custom_minimum_size.x = 14
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
-	_rover_button = _button("", Vector2(150, 92))
-	_rover_button.pressed.connect(func() -> void: game.act(&"press", [game.pod.net_id, &"rover"]))
-	bar.add_child(_rover_button)
+	_link_button = _button("", Vector2(110, 92))
+	_link_button.pressed.connect(func() -> void:
+		if linking:
+			_stop_linking()
+		else:
+			_start_linking())
+	_link_button.tooltip_text = "Cables carry ore and alloy one way, up to %d m, %d ore each. Soldiers can ride them." % [Link.RANGE, Game.LINK_COST]
+	bar.add_child(_link_button)
 	var research := _button("Research\n[R]", Vector2(110, 92))
 	research.pressed.connect(func() -> void: _research.visible = !_research.visible)
 	bar.add_child(research)
@@ -419,7 +463,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [click / drag] select rovers  [Tab] all  [right-click] send  [right-click, none selected] ping  |  [1-5] build  [Del] cancel blueprint  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-7] build  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -430,7 +474,7 @@ func _build_ui() -> void:
 	title.text = "RESEARCH"
 	_research_rows.add_child(title)
 	for upgrade: StringName in Game.UPGRADES:
-		var button := _button("", Vector2(380, 34))
+		var button := _button("", Vector2(440, 34))
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.pressed.connect(func() -> void:
 			var lab := _lab_for(upgrade)
@@ -464,22 +508,24 @@ func _lab_for(upgrade: StringName) -> Fixture:
 
 func _update_ui() -> void:
 	var left := maxf(0.0, Game.MISSION - game.time)
-	var out := game.rovers.filter(func(rover: Rover) -> bool: return rover.task != Rover.Task.PARKED).size()
 	var lines := ["ORE  %d / %d" % [game.stock, Game.QUOTA],
+		"ALLOY  %d" % game.alloy,
 		"BATTERY  %d / %d   %+.1f/s" % [game.battery, game.capacity(), game.power_in - game.power_out],
 		"LAUNCH IN  %d:%02d" % [int(left) / 60, int(left) % 60],
 		"POD HULL  %d%%" % roundi(game.pod.health / game.pod.max_health * 100.0),
-		"ROVERS  %d  (%d out)" % [game.rovers.size(), out],
 		"SOLDIERS  %d" % (game.bodies.size() - (1 if game.commander_peer != 0 else 0))]
 	for lab in game.built:
 		if lab.kind == &"lab" and lab.researching != &"":
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
-			lines.append("RESEARCHING  %s  %d%%%s" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0), "  NO POWER" if lab.unpowered else ""])
+			lines.append("RESEARCHING  %s  %d%%%s" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0), "  OFF" if !lab.enabled else ("  NO POWER" if lab.unpowered else "")])
 	_status.text = "\n".join(lines)
-	_orders.visible = !selected.is_empty()
-	_orders_label.text = "%d rover%s selected   " % [selected.size(), "" if selected.size() == 1 else "s"]
-	_rover_button.text = "Print rover\n%d ore" % Fixture.COST[&"rover"]
-	_rover_button.disabled = game.stock < Fixture.COST[&"rover"]
+	_focus_panel.visible = focus != null
+	if focus:
+		_focus_label.text = "%s   %s" % [_name(focus).to_upper(), _describe(focus)]
+		_power_button.visible = Fixture.SWITCHED.has(focus.kind)
+		_power_button.text = "Switch off [P]" if focus.enabled else "Switch on [P]"
+	_link_button.text = "Cable [L]\n%d ore" % Game.LINK_COST
+	_link_button.modulate = Hud.DAY_COLOR if linking else Color.WHITE
 	for kind in _build_buttons:
 		(_build_buttons[kind] as Button).queue_redraw()
 	if _research.visible:
@@ -496,8 +542,37 @@ func _update_ui() -> void:
 			button.tooltip_text = Game.UPGRADES[upgrade].text
 
 
+func _name(fixture: Fixture) -> String:
+	return "Drop pod" if fixture == game.pod else String(Fixture.NAMES.get(fixture.kind, fixture.kind))
+
+
+## A line on how something built is doing.
+func _describe(fixture: Fixture) -> String:
+	var parts: Array[String] = []
+	match fixture.kind:
+		&"drill":
+			parts.append("hopper %d/%d, %s" % [fixture.stored, Fixture.HOPPER, "drilling" if fixture.stalled == "" else fixture.stalled])
+		&"foundry":
+			parts.append("ore %d/%d, alloy %d/%d, %s (%.0f power/s)" % [fixture.ore_in, Fixture.BIN, fixture.alloy_out, Fixture.BIN, "smelting" if fixture.stalled == "" else fixture.stalled, Game.FOUNDRY_DRAW])
+		&"pylon":
+			parts.append("passing on %d" % fixture.holding.size())
+		&"lab":
+			parts.append("off" if !fixture.enabled else ("idle" if fixture.researching == &"" else String(Game.UPGRADES[fixture.researching].name).capitalize()))
+		&"lamp":
+			parts.append("off" if !fixture.enabled else ("lit" if fixture.on else "waiting for dark"))
+		&"panel":
+			parts.append("in sun" if fixture.sunlit else "shaded")
+		&"battery":
+			parts.append("%d%% charged" % roundi(fixture.charge * 100.0))
+	parts.append("hull %d/%d" % [fixture.health, fixture.max_health])
+	if fixture.noise() > 0.0:
+		parts.append("LOUD: draws spiders")
+	return "   ".join(parts)
+
+
 func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
-	var affordable: bool = game.stock >= Fixture.COST[kind]
+	var alloy_cost: int = Fixture.ALLOY.get(kind, 0)
+	var affordable: bool = game.stock >= Fixture.COST[kind] and game.alloy >= alloy_cost
 	var tint := Color.WHITE
 	var size := button.size
 	if placing == kind:
@@ -505,8 +580,9 @@ func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
 		button.draw_rect(Rect2(Vector2.ZERO, size), Hud.DAY_COLOR, false, 2.0)
 	Hud.draw_icon(button, kind, Vector2(size.x * 0.5, 32), tint)
 	var font := button.get_theme_default_font()
-	button.draw_string(font, Vector2(0, 66), "%d  %s" % [index + 1, {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab"}[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
-	button.draw_string(font, Vector2(0, 83), "%d ore" % Fixture.COST[kind], HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Hud.ORE_COLOR if affordable else Hud.ALERT)
+	button.draw_string(font, Vector2(0, 66), "%d  %s" % [index + 1, SHORT[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
+	var cost := "%d ore" % Fixture.COST[kind] + (" +%d al" % alloy_cost if alloy_cost > 0 else "")
+	button.draw_string(font, Vector2(0, 83), cost, HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Hud.ORE_COLOR if affordable else Hud.ALERT)
 
 
 func _draw_overlay() -> void:
@@ -535,40 +611,60 @@ func _draw_overlay() -> void:
 		var at := _screen(plan.global_position + plan.normal * 2.0)
 		if at == Vector2.INF:
 			continue
-		var color := Hud.DAY_COLOR if plan == _hover_plan else PLAN
+		var color := Hud.DAY_COLOR if plan == _hover else PLAN
 		var text := "%s %d/%d" % [String(Fixture.NAMES[plan.kind]).to_upper(), plan.hits, plan.hits_needed()]
-		if plan == _hover_plan:
+		if plan == _hover:
 			text += "   [Del] cancel"
 		_overlay.draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), color, false, 2.0)
 		_text(font, at + Vector2(0, -12), text, 13, color)
-	for rig in game.built:
-		if rig.kind != &"drill":
+	for fixture in game.built:
+		var text := ""
+		var color := Hud.ORE_COLOR
+		match fixture.kind:
+			&"drill":
+				text = "RIG %d/%d%s" % [fixture.stored, Fixture.HOPPER, "" if fixture.stalled == "" else "  " + fixture.stalled.to_upper()]
+				color = Hud.ORE_COLOR if fixture.stalled == "" else (Hud.COLD_COLOR if fixture.stalled == "dark" else (OFF if fixture.stalled == "off" else Hud.DAY_COLOR))
+			&"foundry":
+				text = "FOUNDRY %d>%d%s" % [fixture.ore_in, fixture.alloy_out, "" if fixture.stalled == "" else "  " + fixture.stalled.to_upper()]
+				color = Link.ALLOY if fixture.stalled == "" else (OFF if fixture.stalled == "off" else Hud.DAY_COLOR)
+			_:
+				if Fixture.SWITCHED.has(fixture.kind) and !fixture.enabled:
+					text = "OFF"
+					color = OFF
+		if fixture == focus or fixture == _hover:
+			var ring := _screen(fixture.global_position + fixture.normal * 0.5)
+			if ring != Vector2.INF:
+				_overlay.draw_arc(ring, 22.0, 0, TAU, 32, SELECTED if fixture == focus else Color(SELECTED, 0.5), 2.0)
+		if text == "":
 			continue
-		var at := _screen(rig.global_position + rig.normal * 4.6)
+		var at := _screen(fixture.global_position + fixture.normal * 4.6)
 		if at != Vector2.INF:
-			var color := Hud.ORE_COLOR if rig.stalled == "" else (Hud.COLD_COLOR if rig.stalled == "dark" else Hud.DAY_COLOR)
-			_text(font, at, "RIG %d/%d%s" % [rig.stored, Fixture.HOPPER, "" if rig.stalled == "" else "  " + rig.stalled.to_upper()], 13, color)
-	for rover in game.rovers:
-		var at := _screen(rover.global_position + Terrain.up_at(rover.global_position) * 0.9)
-		if at == Vector2.INF:
-			continue
-		var chosen := selected.has(rover)
-		var color := SELECTED if chosen else ROVER
-		_overlay.draw_arc(at, 14.0, 0, TAU, 24, color, 2.5 if chosen else 1.5)
-		if chosen:
-			var goal := Vector3.INF
-			if rover.task == Rover.Task.MOVING:
-				goal = rover.move_to
-			elif (rover.order == &"fetch" or rover.order == &"build") and is_instance_valid(rover.assigned):
-				goal = rover.assigned.global_position
-			var to := _screen(goal) if goal != Vector3.INF else Vector2.INF
-			if to != Vector2.INF:
-				_overlay.draw_dashed_line(at, to, Color(SELECTED, 0.6), 1.5, 8.0)
-				_overlay.draw_circle(to, 4.0, Color(SELECTED, 0.6))
-			var doing: String = {Rover.Task.PARKED: "parked", Rover.Task.OUTBOUND: "to rig", Rover.Task.LOADING: "loading", Rover.Task.HOMEBOUND: "home", Rover.Task.MOVING: "moving", Rover.Task.BUILDING: "building"}[rover.task]
-			if rover.order == &"stay":
-				doing = "holding"
-			_text(font, at + Vector2(0, 30), "R-%d  %s  %d/%d" % [rover.slot + 1, doing, rover.cargo, game.rover_capacity()], 12, color)
+			_text(font, at, text, 13, color)
+			if fixture.noise() > 0.0:
+				_text(font, at + Vector2(0, 14), "LOUD", 11, Color(SPIDER, 0.8))
+	if _hover_link:
+		var middle := _screen((_hover_link.start() + _hover_link.end()) * 0.5)
+		if middle != Vector2.INF:
+			_text(font, middle + Vector2(0, -10), "CABLE  [Del] cut", 13, PLAN)
+	if linking:
+		var mouse := get_viewport().get_mouse_position()
+		if _link_from:
+			var from := _screen(_link_from.cable_point())
+			var to := mouse
+			var color := Color(SELECTED, 0.5)
+			var why := ""
+			if _hover and _hover != _link_from:
+				to = _screen(_hover.cable_point())
+				why = game.can_link(_link_from, _hover)
+				color = SELECTED if why == "" else Hud.ALERT
+			if from != Vector2.INF and to != Vector2.INF:
+				_overlay.draw_dashed_line(from, to, color, 2.0, 8.0)
+			if why != "":
+				_text(font, mouse + Vector2(0, 28), why, 13, Hud.ALERT)
+			elif _hover and _hover != _link_from:
+				_text(font, mouse + Vector2(0, 28), "%.0f m" % _link_from.cable_point().distance_to(_hover.cable_point()), 13, color)
+		else:
+			_text(font, mouse + Vector2(0, 28), "CABLE FROM...", 13, SELECTED)
 	for mark: Array in _marks:
 		var at := _screen(mark[0])
 		if at != Vector2.INF:
@@ -583,22 +679,17 @@ func _draw_overlay() -> void:
 			_text(font, at + Vector2(0, -16), "PING" if ping.commander else String(ping.name).to_upper(), 13, color)
 	if _alarm > 0.0:
 		_overlay.draw_rect(Rect2(Vector2.ZERO, _overlay.size), Color(Hud.ALERT, 0.5 * _alarm), false, 10.0)
-	if _drag_from != Vector2.INF:
-		var box := Rect2(_drag_from, get_viewport().get_mouse_position() - _drag_from).abs()
-		if box.size.length() >= DRAG:
-			_overlay.draw_rect(box, Color(SELECTED, 0.08))
-			_overlay.draw_rect(box, Color(SELECTED, 0.7), false, 1.0)
 
 
 func _screen(point: Vector3) -> Vector2:
-	if camera.is_position_behind(point):
+	if point == Vector3.INF or camera.is_position_behind(point):
 		return Vector2.INF
 	return camera.unproject_position(point)
 
 
 func _text(font: Font, at: Vector2, text: String, size: int, color: Color) -> void:
-	_overlay.draw_string_outline(font, at + Vector2(-100, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 200, size, 4, Color(0, 0, 0, 0.75))
-	_overlay.draw_string(font, at + Vector2(-100, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 200, size, color)
+	_overlay.draw_string_outline(font, at + Vector2(-150, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 300, size, 4, Color(0, 0, 0, 0.75))
+	_overlay.draw_string(font, at + Vector2(-150, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 300, size, color)
 
 
 func _label(size: int, color := Color.WHITE) -> Label:
@@ -614,8 +705,8 @@ func _label(size: int, color := Color.WHITE) -> Label:
 func _button(text: String, size: Vector2) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = size
 	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = size
 	button.add_theme_font_size_override("font_size", 15)
 	return button
 
