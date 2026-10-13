@@ -63,16 +63,21 @@ everything, already built or not:
 - Rover tuning: rovers drive 40% faster and carry 4 more.
 - Efficient lamps: lamps draw half the power.
 
-Once the sun's set, spiders climb out of the ground wherever no light
-falls (never by day, however deep the shadow), more of them and more often as the mission goes on. They go for the
-nearest of you, a rover out on the road (their own headlights don't
-help them), anything you've built, or the pod. What they destroy is
+At nightfall, bug holes tear open in the crater floor, 28-46 m from the
+pod: one the first night, two the second, and one more with three or
+more players. They glow red, and close at sunrise. Spiders climb out of
+them all night (never by day, however deep the shadow), more of them and
+more often as the mission goes on, and with more players: at most 3 at
+once at first and 8 by the end, solo, with each player past the first
+adding half as many again. They go for the nearest thing within 40 m:
+one of you, a rover out on the road (their own headlights don't help
+them), anything you've built, or the pod; with nothing that near, they
+make for the pod. What they destroy is
 gone. Sunlight sends them back under. Your health comes back once
 nothing's hurt you for a few seconds.
 
 The pod has 500 hull. If the spiders tear it open, the mission's lost.
-With someone commanding from it, more spiders come up round it. It
-mends itself slowly while there's power and nothing's bitten it for 8 s,
+It mends itself slowly while there's power and nothing's bitten it for 8 s,
 and every hammer blow patches 25 (the hammer mends anything damaged that
 way).
 
@@ -232,6 +237,7 @@ User arguments after `--`, e.g.
   the rovers.
 - `world/rover.gd`: the haulers.
 - `world/flare.gd`: flares.
+- `world/hole.gd`: bug holes.
 - `world/spider.gd`: the spiders.
 - `player/player.gd`: you.
 - `game/game.gd`: the mission, power, warmth, building, the spiders'

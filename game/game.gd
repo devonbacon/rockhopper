@@ -18,8 +18,9 @@ extends Node3D
 ## for up front that soldiers hammer up; orders rovers about; and picks
 ## what the labs research.
 ##
-## Once the sun's set, spiders climb out of the ground wherever no light falls,
-## more of them as the mission goes on, and go for soldiers, rovers out on
+## At nightfall bug holes tear open out in the crater, more of them each
+## night, and spiders climb out of them, more as the mission goes on and
+## the more players there are, and go for soldiers, rovers out on
 ## the road, what's been built, and the pod. Sunlight sends them back
 ## under. If they tear the pod open, nobody's going home; hammering it
 ## patches it up. Soldiers carry flares, which recharge, to light the dark
@@ -72,12 +73,17 @@ const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
 const HEAL_RATE := 4.0
 const HEAL_DELAY := 4.0
-## Spiders: the most alive at once grows from the first to the second over
-## the mission, and they come up this many seconds apart.
-const SPIDERS_START := 5
-const SPIDERS_END := 16
-const SPAWN_GAP_START := 4.0
-const SPAWN_GAP_END := 1.5
+## Spiders, for one player: the most alive at once grows from the first to
+## the second over the mission, and they come up this many seconds apart.
+## Each player past the first adds half as much again.
+const SPIDERS_START := 3
+const SPIDERS_END := 8
+const SPAWN_GAP_START := 5.0
+const SPAWN_GAP_END := 2.5
+## Bug holes open this far from the pod, at least this far apart.
+const HOLE_NEAR := 28.0
+const HOLE_FAR := 46.0
+const HOLE_APART := 18.0
 const SNAPSHOT_EVERY := 0.05
 const SLOW_EVERY := 0.25
 const MOVE_EVERY := 1.0 / 30.0
@@ -151,6 +157,7 @@ var deposits: Array[Fixture] = []
 var rovers: Array[Rover] = []
 var spiders: Array[Spider] = []
 var flares: Array[Flare] = []
+var holes: Array[Hole] = []
 ## Lately pinged spots: {position, name, commander, age, peer}.
 var pings: Array[Dictionary] = []
 ## Net id -> node, for everything that has one.
@@ -162,6 +169,7 @@ var _nobody := _new_stats()
 var _rng := RandomNumberGenerator.new()
 var _light_check := 0.0
 var _spawn_in := 2.0
+var _night := false
 var _snap_in := 0.0
 var _slow_in := 0.0
 var _move_in := 0.0
@@ -675,7 +683,10 @@ func _slow_state() -> Array:
 	var plans: Array = []
 	for b in blueprints:
 		plans.append([b.net_id, b.kind, b.global_position, b.global_basis.get_rotation_quaternion(), b.normal, b.hits, b.deposit.net_id if b.deposit else 0])
-	return [rows, alive, researched.keys(), plans]
+	var hole_rows: Array = []
+	for hole in holes:
+		hole_rows.append([hole.net_id, hole.global_position, hole.normal])
+	return [rows, alive, researched.keys(), plans, hole_rows]
 
 
 ## Client: the server's latest of everything that moves.
@@ -840,6 +851,16 @@ func apply_slow(data: Array) -> void:
 	for plan in blueprints.duplicate():
 		if !seen.has(plan.net_id):
 			_remove_blueprint(plan)
+	seen.clear()
+	for row: Array in data[4]:
+		seen[row[0]] = true
+		if !entities.has(row[0]):
+			_add_hole(row[1], row[2], row[0])
+	for hole in holes.duplicate():
+		if !seen.has(hole.net_id):
+			holes.erase(hole)
+			entities.erase(hole.net_id)
+			hole.queue_free()
 	for upgrade: StringName in data[2]:
 		if !researched.has(upgrade):
 			researched[upgrade] = true
@@ -1164,7 +1185,7 @@ func spider_target(spider: Spider) -> Node3D:
 		if distance < best_distance:
 			best_distance = distance
 			best = candidate
-	return best
+	return best if best else pod
 
 
 ## How close a spider has to be to bite target.
@@ -1268,52 +1289,60 @@ func _add_rover() -> void:
 ## soldier, a rover, or something built.
 func _spawn_spiders(delta: float) -> void:
 	if Sun.dir_at(time).y > 0.0:
+		_night = false
+		for hole in holes:
+			entities.erase(hole.net_id)
+			hole.queue_free()
+		holes.clear()
 		return
+	if !_night:
+		_night = true
+		_open_holes()
 	_spawn_in -= delta
-	if _spawn_in > 0.0:
+	if _spawn_in > 0.0 or holes.is_empty():
 		return
 	var progress := time / MISSION
-	_spawn_in = lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress)
-	if spiders.size() >= roundi(lerpf(SPIDERS_START, SPIDERS_END, progress)):
+	var players := (1.0 + maxi(1, bodies.size())) * 0.5
+	_spawn_in = lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress) / players
+	if spiders.size() >= roundi(lerpf(SPIDERS_START, SPIDERS_END, progress) * players):
 		return
-	var near: Array[Node3D] = []
-	for peer in bodies:
-		if peer != commander_peer:
-			near.append_array([bodies[peer], bodies[peer], bodies[peer]])
-	near.append_array(rovers)
-	near.append_array(built)
-	if commander_peer != 0:
-		near.append_array([pod, pod])
-	if near.is_empty():
-		return
-	var focus: Node3D = near[_rng.randi() % near.size()]
-	for attempt in 4:
-		var spot := _spawn_spot(focus.global_position)
-		if spot != Vector3.INF:
-			spawn_spider(spot)
-			return
-
-
-## Somewhere dark on the ground 12-28 m from around, inside the crater and
-## not too near any soldier, or INF if this try didn't find one.
-func _spawn_spot(around: Vector3) -> Vector3:
-	var up := Terrain.up_at(around)
-	var frame := Fixture.upright(up)
+	var hole: Hole = holes[_rng.randi() % holes.size()]
+	var frame := Fixture.upright(hole.normal)
 	var angle := _rng.randf() * TAU
-	var start := around + up * 6.0 + (frame.x * cos(angle) + frame.z * sin(angle)) * _rng.randf_range(12.0, 28.0)
-	if Vector2(start.x, start.z).length() > Terrain.FLOOR_RADIUS or terrain.density(start) < 0.0:
-		return Vector3.INF
-	var query := PhysicsRayQueryParameters3D.create(start, start - up * 24.0, Terrain.ROCK_LAYER)
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty():
-		return Vector3.INF
-	var spot: Vector3 = hit.position
-	for peer in bodies:
-		if peer != commander_peer and spot.distance_to((bodies[peer] as Node3D).global_position) < 10.0:
-			return Vector3.INF
-	if lit_at(spot + up * 0.6) != "":
-		return Vector3.INF
-	return spot
+	var spot := hole.global_position + (frame.x * cos(angle) + frame.z * sin(angle)) * _rng.randf_range(0.0, Hole.RADIUS * 0.7)
+	spawn_spider(terrain.surface_point(spot)[0])
+
+
+## Nightfall: one bug hole the first night, one more each night after, and
+## one more with three players or more, out in the crater away from the pod.
+func _open_holes() -> void:
+	var first_sunset := (PI - Sun.START) / TAU * Sun.DAY
+	var night := floori((time - first_sunset) / Sun.DAY) + 1
+	var want := night + (1 if bodies.size() >= 3 else 0)
+	var spots: Array[Array] = terrain.surface_spots.duplicate()
+	_shuffle(spots)
+	for loose in [1.0, 0.5]:
+		for spot in spots:
+			if holes.size() >= want:
+				break
+			var at: Vector3 = spot[0]
+			var from_pod := at.distance_to(pod.global_position)
+			if from_pod < HOLE_NEAR * loose or from_pod > HOLE_FAR / loose or Vector2(at.x, at.z).length() > Terrain.FLOOR_RADIUS - 4.0 or (spot[1] as Vector3).y < 0.8 * loose:
+				continue
+			if holes.any(func(h: Hole) -> bool: return h.global_position.distance_to(at) < HOLE_APART * loose):
+				continue
+			_add_hole(at, spot[1])
+	_announce("Bug holes are tearing open in the dark." if holes.size() > 1 else "A bug hole's torn open in the dark.")
+
+
+func _add_hole(at: Vector3, normal: Vector3, id := 0) -> Hole:
+	var hole := Hole.new()
+	hole.normal = normal
+	hole.position = at
+	add_child(hole)
+	_track(hole, id)
+	holes.push_back(hole)
+	return hole
 
 
 func _end(new_state: State, text: String) -> void:

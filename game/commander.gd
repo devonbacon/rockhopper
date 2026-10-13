@@ -510,6 +510,12 @@ func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
 
 func _draw_overlay() -> void:
 	var font := _overlay.get_theme_default_font()
+	for hole in game.holes:
+		var at := _screen(hole.global_position)
+		if at != Vector2.INF:
+			_overlay.draw_arc(at, 12.0, 0, TAU, 24, SPIDER, 2.5)
+			_overlay.draw_circle(at, 5.0, Color(SPIDER, 0.5))
+			_text(font, at + Vector2(0, 26), "BUG HOLE", 12, SPIDER)
 	for spider in game.spiders:
 		var at := _screen(spider.global_position)
 		if at != Vector2.INF:
