@@ -6,13 +6,15 @@ extends Node3D
 ## WASD, the screen edges or dragging with the middle button pan, the wheel
 ## zooms, Q and E turn it, and X climbs back out.
 ##
-## Building: 1-9 or the bar picks something, left-click places it as a
-## blueprint for soldiers to hammer up, each blow paying its share from the
-## bank (Shift keeps placing), and right-click or Esc puts it away. Delete
-## over a blueprint cancels it, refunding what's been paid.
+## Building: 1-9 or the bar picks something, the wheel turns it (Ctrl and
+## the wheel still zooms), left-click places it as a blueprint for
+## soldiers to hammer up, each blow paying its share from the bank (Shift
+## keeps placing), and right-click or Esc puts it away. Delete over a
+## blueprint cancels it, refunding what's been paid.
 ##
 ## Cables: L, then click where it runs from and where it runs to (Shift
-## carries on from there). Delete over a cable cuts it.
+## carries on from there). They're free, laid as a blueprint a soldier puts
+## up with one hammer blow. Delete over a cable cuts it.
 ##
 ## Click something built to see how it's doing; P, or its button, switches
 ## it off or on. Right-click pings the spot for the soldiers. R opens the
@@ -31,6 +33,7 @@ const SOLDIER := Color(0.45, 0.85, 1.0)
 const SPIDER := Color(1.0, 0.3, 0.25)
 const PLAN := Color(0.45, 0.8, 1.0)
 const OFF := Color(0.6, 0.6, 0.65)
+const TURN_STEP := PI / 12.0
 
 var game: Game
 var camera: Camera3D
@@ -38,6 +41,8 @@ var placing: StringName = &""
 ## What's been clicked on, to watch and switch.
 var focus: Fixture
 var linking := false
+## How far what's being placed is turned from facing the pod.
+var turn := 0.0
 
 var _height := 70.0
 var _yaw := 0.0
@@ -188,10 +193,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.button_index:
 			MOUSE_BUTTON_WHEEL_UP:
 				if event.pressed:
-					_height = maxf(MIN_HEIGHT, _height * 0.88)
+					if placing != &"" and !event.ctrl_pressed:
+						turn = wrapf(turn + TURN_STEP, -PI, PI)
+					else:
+						_height = maxf(MIN_HEIGHT, _height * 0.88)
 			MOUSE_BUTTON_WHEEL_DOWN:
 				if event.pressed:
-					_height = minf(MAX_HEIGHT, _height / 0.88)
+					if placing != &"" and !event.ctrl_pressed:
+						turn = wrapf(turn - TURN_STEP, -PI, PI)
+					else:
+						_height = minf(MAX_HEIGHT, _height / 0.88)
 			MOUSE_BUTTON_LEFT:
 				if !event.pressed:
 					return
@@ -239,7 +250,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					toast("%s blueprint cancelled, %s back." % [Fixture.NAMES[_hover.kind], Game.price(_hover.paid(), _hover.paid(true))])
 				elif _hover_link:
 					game.act(&"unlink", [_hover_link.net_id])
-					toast("Cable cut, %d ore back." % Game.LINK_COST)
+					toast("Cable blueprint cancelled." if _hover_link.blueprint else "Cable cut.")
 			KEY_ESCAPE:
 				if placing != &"" or linking or focus or _research.visible:
 					_choose(&"")
@@ -313,9 +324,6 @@ func _link_click(keep_going: bool) -> void:
 	if why != "":
 		toast(why)
 		return
-	if game.stock < Game.LINK_COST:
-		toast("A cable takes %d ore." % Game.LINK_COST)
-		return
 	game.act(&"link", [_link_from.net_id, _hover.net_id])
 	_marks.append([_hover.cable_point(), 0.0])
 	if keep_going and _hover != game.pod:
@@ -361,12 +369,17 @@ func _aim_ghost(hit: Dictionary) -> void:
 	var ok := game.can_build(placing, spot.position, spot.normal)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.4) if ok else Color(1.0, 0.3, 0.25, 0.4)
 	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
-	var turn := Fixture.upright(up)
-	var towards: Vector3 = game.pod.global_position - spot.position
+	_ghost.global_transform = Transform3D(Basis.looking_at(-_facing(spot.position, up), up), spot.position + up * Fixture.GHOST_LIFT[placing])
+
+
+## Which way the front of something placed at pos faces: at the pod,
+## turned by the wheel.
+func _facing(pos: Vector3, up: Vector3) -> Vector3:
+	var towards: Vector3 = game.pod.global_position - pos
 	towards -= up * towards.dot(up)
-	if (placing == &"lab" or placing == &"foundry" or placing == &"barricade") and towards.length() > 0.1:
-		turn = Basis.looking_at(-towards.normalized(), up)
-	_ghost.global_transform = Transform3D(turn, spot.position + up * Fixture.GHOST_LIFT[placing])
+	if towards.length() < 0.1:
+		towards = Fixture.upright(up).z
+	return towards.normalized().rotated(up, turn)
 
 
 func _place(keep_placing: bool) -> void:
@@ -376,7 +389,8 @@ func _place(keep_placing: bool) -> void:
 	if !game.can_build(placing, spot.position, spot.normal):
 		toast("Too steep there, or too close to something.")
 		return
-	game.act(&"blueprint", [placing, spot.position, spot.normal, game.pod.global_position])
+	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
+	game.act(&"blueprint", [placing, spot.position, spot.normal, spot.position + _facing(spot.position, up) * 5.0])
 	_marks.append([spot.position, 0.0])
 	if !keep_placing:
 		_choose(&"")
@@ -458,7 +472,7 @@ func _build_ui() -> void:
 			_stop_linking()
 		else:
 			_start_linking())
-	_link_button.tooltip_text = "Cables carry ore and alloy one way, up to %d m, %d ore each. Soldiers can ride them." % [Link.RANGE, Game.LINK_COST]
+	_link_button.tooltip_text = "Cables carry ore and alloy one way, up to %d m. Free: a soldier strings each up with one hammer blow, then can ride it." % Link.RANGE
 	bar.add_child(_link_button)
 	var research := _button("Research\n[R]", Vector2(110, 92))
 	research.pressed.connect(func() -> void: _research.visible = !_research.visible)
@@ -468,7 +482,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -529,7 +543,7 @@ func _update_ui() -> void:
 		_focus_label.text = "%s   %s" % [_name(focus).to_upper(), _describe(focus)]
 		_power_button.visible = Fixture.SWITCHED.has(focus.kind)
 		_power_button.text = "Switch off [P]" if focus.enabled else "Switch on [P]"
-	_link_button.text = "Cable [L]\n%d ore" % Game.LINK_COST
+	_link_button.text = "Cable [L]\nfree"
 	_link_button.modulate = Hud.DAY_COLOR if linking else Color.WHITE
 	for kind in _build_buttons:
 		(_build_buttons[kind] as Button).queue_redraw()
@@ -655,7 +669,7 @@ func _draw_overlay() -> void:
 	if _hover_link:
 		var middle := _screen((_hover_link.start() + _hover_link.end()) * 0.5)
 		if middle != Vector2.INF:
-			_text(font, middle + Vector2(0, -10), "CABLE  [Del] cut", 13, PLAN)
+			_text(font, middle + Vector2(0, -10), "CABLE BLUEPRINT  [Del] cancel" if _hover_link.blueprint else "CABLE  [Del] cut", 13, PLAN)
 	if linking:
 		var mouse := get_viewport().get_mouse_position()
 		if _link_from:

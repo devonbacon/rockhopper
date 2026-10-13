@@ -49,7 +49,6 @@ const LAMP_DRAW := 0.4
 const BATTERY_BANK := 80.0
 const LAB_DRAW := 0.6
 const FOUNDRY_DRAW := 1.0
-const LINK_COST := 1
 ## Each costs ore, and some alloy too.
 const UPGRADES := {
 	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, text = "Walk and run as fast as you're built to"},
@@ -476,13 +475,15 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				target.enabled = !target.enabled
 		&"link":
 			var onto: Node = entities.get(args[1], null)
-			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "" and stock >= LINK_COST:
-				stock -= LINK_COST
-				add_link(target, onto)
+			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
+				add_link(target, onto, 0, true)
 		&"unlink":
 			if peer == commander_peer and target is Link:
-				stock += LINK_COST
 				remove_link(target)
+		&"string":
+			if target is Link and target.blueprint:
+				target.blueprint = false
+				_announce("Cable strung")
 		&"construct":
 			if target is Fixture and blueprints.has(target):
 				construct(target)
@@ -719,7 +720,7 @@ func _slow_state() -> Array:
 		hole_rows.append([hole.net_id, hole.global_position, hole.normal])
 	var link_rows: Array = []
 	for link in links:
-		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true)])
+		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true), link.blueprint])
 	return [rows, alive, researched.keys(), plans, hole_rows, link_rows]
 
 
@@ -888,6 +889,7 @@ func apply_slow(data: Array) -> void:
 				continue
 			link = add_link(entities[row[1]], entities[row[2]], row[0])
 		link.items = row[3]
+		link.blueprint = row[4]
 	for link in links.duplicate():
 		if !seen.has(link.net_id):
 			remove_link(link)
@@ -1013,7 +1015,7 @@ static func price(ore: int, alloy_cost: int) -> String:
 	return "%d ore" % ore + (" + %d alloy" % alloy_cost if alloy_cost > 0 else "")
 
 
-## Builds kind at pos; a lab or foundry turns its front towards facing_from.
+## Builds kind at pos, its front turned towards facing_from.
 func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vector3.INF) -> Fixture:
 	stock -= Fixture.COST[kind]
 	alloy -= Fixture.ALLOY.get(kind, 0)
@@ -1039,11 +1041,12 @@ func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from:
 	else:
 		normal = Terrain.up_at(pos)
 		fixture = Fixture.make(kind, pos, normal)
-	if (kind == &"lab" or kind == &"foundry" or kind == &"barricade") and facing_from != Vector3.INF:
-		var towards := facing_from - pos
-		towards -= normal * towards.dot(normal)
+	if facing_from != Vector3.INF:
+		var up := fixture.normal
+		var towards := facing_from - fixture.position
+		towards -= up * towards.dot(up)
 		if towards.length() > 0.1:
-			fixture.basis = Basis.looking_at(-towards.normalized(), normal)
+			fixture.basis = Basis.looking_at(-towards.normalized(), up)
 	return fixture
 
 
@@ -1147,8 +1150,11 @@ func can_link(a: Fixture, b: Fixture) -> String:
 	return ""
 
 
-func add_link(a: Fixture, b: Fixture, id := 0) -> Link:
+## A cable from a to b; as a blueprint, it carries nothing till a soldier's
+## hammered it up.
+func add_link(a: Fixture, b: Fixture, id := 0, plan := false) -> Link:
 	var link := Link.make(a, b)
+	link.blueprint = plan
 	add_child(link)
 	_track(link, id)
 	links.push_back(link)
@@ -1166,15 +1172,16 @@ func remove_link(link: Link) -> void:
 ## room, taking turns between a place's cables.
 func _move_goods(delta: float) -> void:
 	var speed := cable_speed()
-	for link in links:
+	var strung := links.filter(func(l: Link) -> bool: return !l.blueprint)
+	for link: Link in strung:
 		link.advance(delta, speed)
 		if !link.items.is_empty() and link.items[0][1] >= link.length() - 0.01 and link.to.accepts(link.items[0][0]):
 			_take_in(link.to, link.items.pop_front()[0])
-	if links.is_empty():
+	if strung.is_empty():
 		return
-	_link_turn = (_link_turn + 1) % links.size()
-	for i in links.size():
-		var link := links[(i + _link_turn) % links.size()]
+	_link_turn = (_link_turn + 1) % strung.size()
+	for i in strung.size():
+		var link: Link = strung[(i + _link_turn) % strung.size()]
 		var item := link.from.output()
 		if item != &"" and link.has_room():
 			link.from.take_output()
@@ -1827,6 +1834,9 @@ func _probe(kind: String) -> void:
 				await tree.create_timer(1.0).timeout
 				act(&"link", [pylons[0].net_id, pod.net_id])
 				await tree.create_timer(1.0).timeout
+				if !links.is_empty():
+					act(&"string", [links[-1].net_id])
+					await tree.create_timer(1.0).timeout
 				print("[commander] cabled the pylon to the pod: links %d" % links.size())
 		await tree.create_timer(2.0).timeout
 		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])

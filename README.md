@@ -47,9 +47,10 @@ when the pod launches, after twelve minutes, is the score (the quota is
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
-it away. The commander strings a cable from one pylon, rig, foundry,
-turret or the pod to another, up to 20 m, with clear air under it (1 ore each,
-refunded when cut). Ore and alloy travel along it one way at 3 m/s, 1.5
+it away. The commander lays a cable from one pylon, rig, foundry,
+turret or the pod to another, up to 20 m, with clear air under it, for
+free: it goes down as a hologram line, and a soldier strings it up with
+one hammer blow. Ore and alloy travel along it one way at 3 m/s, 1.5
 m apart. Rigs send ore, foundries send alloy, pylons pass on whatever
 reaches them (holding 4), turrets take ore as ammunition, and the pod
 takes everything into the bank. A
@@ -178,14 +179,15 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 - **Building:** 1-9 or the bar at the bottom picks a lamp, panel,
   battery, rig, lab, pylon, foundry, turret or barricade; left-click places it as a
   blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
-  snaps to the deposit nearest the mouse; labs and foundries face the
-  pod, and barricades stand across the way to it. Delete over a
+  snaps to the deposit nearest the mouse. Things face the pod to start
+  with (barricades standing across the way to it); the wheel turns what
+  you're placing, and Ctrl and the wheel zooms meanwhile. Delete over a
   blueprint cancels it, refunding what its blows have
   paid.
 - **Cables (L, or the bar):** click where it runs from, then where it
   runs to; a dashed line shows whether it can go, and why not. Shift
-  carries on from where it ended. Right-click or Esc stops. Delete over a
-  cable cuts it.
+  carries on from where it ended. Right-click or Esc stops. It's a
+  blueprint till a soldier hammers it. Delete over a cable cuts it.
 - **Inspect:** click something built to see how it's doing (a foundry's
   bins, a rig's hopper, its hull, whether it's loud). P, or the button
   beside it, switches it off or on; P over a building does the same.

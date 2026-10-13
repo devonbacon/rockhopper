@@ -269,13 +269,15 @@ func let_go(jump := false) -> void:
 		velocity += up_direction * JUMP * 0.6
 
 
-## The cable the crosshair's on, within reach: [link, metres along, how
-## far off], or [] for none.
-func _aim_cable(reach: float) -> Array:
+## The cable the crosshair's on, within reach, strung or still a
+## blueprint: [link, metres along, how far off], or [] for none.
+func _aim_cable(reach: float, plans := false) -> Array:
 	var from := camera.global_position
 	var dir := -camera.global_basis.z
 	var best: Array = []
 	for link in game.links:
+		if link.blueprint != plans:
+			continue
 		var near: Array = link.nearest_to_ray(from, dir)
 		if near[0] < ZIP_GRAB and near[2] < reach and (best.is_empty() or near[2] < best[2]):
 			best = [link, near[1], near[2]]
@@ -400,6 +402,10 @@ func _use(delta: float) -> void:
 		if pressed:
 			_grab(cable[0], cable[1])
 		return
+	var plan := _aim_cable(HAMMER_REACH + 1.0, true)
+	if !plan.is_empty() and (!target or plan[2] < camera.global_position.distance_to(hit.position)):
+		prompt = "Cable blueprint\n%s" % ("[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up")
+		return
 	if !target:
 		return
 	if target.blueprint:
@@ -496,6 +502,11 @@ func _smash() -> void:
 			game.act(&"hit", [spider.net_id, HAMMER_DAMAGE])
 			game.act(&"fling", [spider.net_id, (to.normalized() + up_direction * 0.6) * 9.0, 0.8])
 	var hit := _aim(HAMMER_REACH)
+	var plan := _aim_cable(HAMMER_REACH + 1.0, true)
+	if !plan.is_empty() and (hit.is_empty() or plan[2] < from.distance_to(hit.position)):
+		game.act(&"string", [plan[0].net_id])
+		_say("Cable strung")
+		return
 	if hit.is_empty() or !(hit.collider is Fixture):
 		return
 	var fixture: Fixture = hit.collider

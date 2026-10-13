@@ -3,7 +3,9 @@ extends Node3D
 ## A cable strung from one pylon, rig, foundry or the pod to another,
 ## carrying ore and alloy one way along it, spaced out, at walking pace.
 ## What reaches the far end waits there till it's taken in. Soldiers can
-## ride it either way, hanging underneath.
+## ride it either way, hanging underneath. The commander lays them as
+## blueprints, a line of hologram, that take a soldier's hammer blow to
+## string up.
 
 const RANGE := 20.0
 const SPEED := 3.0
@@ -12,15 +14,18 @@ const GAP := 1.5
 const HANG := 2.2
 const ORE := Color(0.3, 0.85, 0.92)
 const ALLOY := Color(1.0, 0.6, 0.2)
+const PLAN := Color(0.45, 0.8, 1.0)
 
 var net_id := 0
 var from: Fixture
 var to: Fixture
 ## On the way: [kind, metres along], furthest first.
 var items: Array = []
+var blueprint := false
 
 var _cable: MeshInstance3D
 var _material: StandardMaterial3D
+var _plan_material: StandardMaterial3D
 var _crates: Array[MeshInstance3D] = []
 var _ore_material: StandardMaterial3D
 var _alloy_material: StandardMaterial3D
@@ -43,6 +48,9 @@ func _ready() -> void:
 	_material.roughness = 0.4
 	_material.emission_enabled = true
 	_material.emission = Color.BLACK
+	_plan_material = StandardMaterial3D.new()
+	_plan_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_plan_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.035
 	mesh.bottom_radius = 0.035
@@ -112,7 +120,9 @@ func _process(_delta: float) -> void:
 	var along := (b - a) / span
 	var side := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.RIGHT).normalized()
 	_cable.global_transform = Transform3D(Basis(side, along * span, side.cross(along)), (a + b) * 0.5)
-	_material.emission = Color(0.45, 0.8, 1.0) * (1.5 if highlight else 0.0)
+	_material.emission = PLAN * (1.5 if highlight else 0.0)
+	_cable.material_override = _plan_material if blueprint else _material
+	_plan_material.albedo_color = Color(PLAN, 0.9 if highlight else 0.35 + 0.2 * sin(Time.get_ticks_msec() * 0.006))
 	while _crates.size() < items.size():
 		var crate := MeshInstance3D.new()
 		var box := BoxMesh.new()

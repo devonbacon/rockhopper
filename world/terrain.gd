@@ -29,6 +29,9 @@ const RANGE_NEAR := 110.0
 const RANGE_FAR := 1300.0
 const RANGE_HEIGHT := 150.0
 const GIANT_HEIGHT := 320.0
+## How wide the fillet is where a boulder meets the ground, so none sit on
+## a lip with a gap under them.
+const BLEND := 1.2
 ## Features are bucketed by where they sit on the ground, this wide.
 const BUCKET := 16.0
 
@@ -88,7 +91,7 @@ func density(p: Vector3) -> float:
 		return d
 	var bucket: Array = _buckets.get(_bucket_of(p), [[], []])
 	for b: Vector4 in bucket[0]:
-		d = minf(d, p.distance_to(Vector3(b.x, b.y, b.z)) - b.w)
+		d = _blend(d, p.distance_to(Vector3(b.x, b.y, b.z)) - b.w, BLEND)
 	for c: Vector4 in bucket[1]:
 		d = maxf(d, c.w - p.distance_to(Vector3(c.x, c.y, c.z)))
 	return maxf(d, -carve(p))
@@ -96,6 +99,12 @@ func density(p: Vector3) -> float:
 
 ## Distance to open space under the ground: chambers and the worms
 ## between them and up to the surface.
+## A smooth union of two distances, filleting the join over k metres.
+static func _blend(a: float, b: float, k: float) -> float:
+	var h := clampf(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
+	return lerpf(b, a, h) - k * h * (1.0 - h)
+
+
 func carve(p: Vector3) -> float:
 	var d := INF
 	for c in chambers:
@@ -139,9 +148,10 @@ func _bucket_of(p: Vector3) -> Vector2i:
 	return Vector2i(floori(p.x / BUCKET), floori(p.z / BUCKET))
 
 
-func _add_bucketed(feature: Vector4, which: int) -> void:
-	var lo := _bucket_of(Vector3(feature.x - feature.w, 0, feature.z - feature.w))
-	var hi := _bucket_of(Vector3(feature.x + feature.w, 0, feature.z + feature.w))
+func _add_bucketed(feature: Vector4, which: int, margin := 0.0) -> void:
+	var reach := feature.w + margin
+	var lo := _bucket_of(Vector3(feature.x - reach, 0, feature.z - reach))
+	var hi := _bucket_of(Vector3(feature.x + reach, 0, feature.z + reach))
 	for bx in range(lo.x, hi.x + 1):
 		for bz in range(lo.y, hi.y + 1):
 			var key := Vector2i(bx, bz)
@@ -162,8 +172,8 @@ func _add_features() -> void:
 	for i in 34:
 		var at := _floor_point(FLOOR_RADIUS - 2.0)
 		var r := _rng.randf_range(0.8, 3.0)
-		var y := ground_height(at.x, at.y) + r * _rng.randf_range(-0.2, 0.5)
-		_add_bucketed(Vector4(at.x, y, at.y, r), 0)
+		var y := ground_height(at.x, at.y) + r * _rng.randf_range(-0.5, 0.1)
+		_add_bucketed(Vector4(at.x, y, at.y, r), 0, BLEND)
 	var previous := Vector3.INF
 	for i in 4:
 		var at := _floor_point(FLOOR_RADIUS - 14.0)
