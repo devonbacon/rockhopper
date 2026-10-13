@@ -394,7 +394,9 @@ func _add_mountains(seed_value: int) -> void:
 	var points := PackedVector3Array()
 	for i in rings + 1:
 		var r := RANGE_NEAR * pow(RANGE_FAR / RANGE_NEAR, i / float(rings))
+		# Both edges come down to the plain, so there's no lip to see under.
 		var rise := smoothstep(RANGE_NEAR, RANGE_NEAR + 160.0, r) * (1.0 - smoothstep(RANGE_FAR * 0.75, RANGE_FAR, r) * 0.6)
+		var edges := smoothstep(RANGE_NEAR, RANGE_NEAR + 120.0, r) * (1.0 - smoothstep(RANGE_FAR * 0.9, RANGE_FAR, r))
 		for j in segments:
 			var angle := TAU * j / segments
 			var flat := Vector2(cos(angle), sin(angle)) * r
@@ -405,7 +407,7 @@ func _add_mountains(seed_value: int) -> void:
 			var h := RANGE_HEIGHT * tall * rise * ridge * ridge
 			var peak := exp(-flat.distance_squared_to(giant) / (giant_width * giant_width))
 			h += GIANT_HEIGHT * peak * (0.75 + 0.25 * ridge)
-			points.push_back(Vector3(flat.x, h - 0.5 * (1.0 - rise), flat.y))
+			points.push_back(Vector3(flat.x, h * edges - 0.5 * (1.0 - edges), flat.y))
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in rings:
