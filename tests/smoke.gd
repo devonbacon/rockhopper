@@ -14,6 +14,7 @@ var _phase := 0
 var _stock_before := 0
 var _rig: Fixture
 var _lab: Fixture
+var _plan: Fixture
 
 
 func _ready() -> void:
@@ -65,6 +66,12 @@ func _step(delta: float) -> bool:
 				print("lab: %s" % _lab.screen.pressed.call(&"armour"))
 			else:
 				push_error("couldn't place a lab by the pod")
+			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
+			_game.stock += Fixture.COST[&"lamp"]
+			_plan = _game.place_blueprint(&"lamp", plan_spot[0], plan_spot[1])
+			_game.commander_peer = Net.local_id()
+			_game.handle(Net.local_id(), &"order", [[_game.rovers[0].net_id], &"build", Vector3.INF, _plan.net_id])
+			_game.commander_peer = 0
 			_stock_before = _game.stock
 			var path := _game.terrain.find_path(_game.rovers[0].global_position, _rig.global_position)
 			print("built a rig %.0f m from the pod; path for the rover: %d points, ending %.1f m from it" % [nearest.global_position.distance_to(_game.pod.global_position), path.size(), path[-1].distance_to(_rig.global_position) if !path.is_empty() else INF])
@@ -76,6 +83,9 @@ func _step(delta: float) -> bool:
 			print("after 90 s: rig holds %d (%s), stock %d -> %d, rover %s carrying %d, %.0f m from the pod" % [_rig.stored if is_instance_valid(_rig) else -1, (_rig.stalled if _rig.stalled != "" else "drilling") if is_instance_valid(_rig) else "destroyed", _stock_before, _game.stock, Rover.Task.keys()[rover.task], rover.cargo, rover.global_position.distance_to(_game.pod.global_position)])
 			if _game.stock <= _stock_before:
 				push_error("the rover brought nothing home")
+			print("rover sent to build a lamp blueprint: built %s, lamps %d" % [!is_instance_valid(_plan), _game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lamp").size()])
+			if is_instance_valid(_plan):
+				push_error("the rover didn't build the blueprint")
 			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")

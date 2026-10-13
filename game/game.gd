@@ -18,7 +18,7 @@ extends Node3D
 ## for up front that soldiers hammer up; orders rovers about; and picks
 ## what the labs research.
 ##
-## In the dark, spiders climb out of the ground wherever no light falls,
+## Once the sun's set, spiders climb out of the ground wherever no light falls,
 ## more of them as the mission goes on, and go for soldiers, rovers out on
 ## the road, what's been built, and the pod. Sunlight sends them back
 ## under. If they tear the pod open, nobody's going home; hammering it
@@ -455,11 +455,11 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 					Net.event.rpc_id(id, &"ping", ping)
 		&"order":
 			if peer == commander_peer:
-				var rig: Fixture = entities.get(args[3], null) if args[3] != 0 else null
-				for id in args[0]:
+				var onto: Fixture = entities.get(args[3], null) if args[3] != 0 else null
+				for id in args[0] if args[1] != &"build" or blueprints.has(onto) else []:
 					var rover: Rover = entities.get(id, null) if entities.get(id, null) is Rover else null
 					if rover:
-						rover.command(args[1], args[2], rig)
+						rover.command(args[1], args[2], onto)
 		&"press":
 			if target and "screen" in target and target.screen:
 				var reply: String = target.screen.pressed.call(args[1])
@@ -1262,6 +1262,8 @@ func _add_rover() -> void:
 ## Brings spiders up out of the ground, somewhere unlit not far from a
 ## soldier, a rover, or something built.
 func _spawn_spiders(delta: float) -> void:
+	if Sun.dir_at(time).y > 0.0:
+		return
 	_spawn_in -= delta
 	if _spawn_in > 0.0:
 		return

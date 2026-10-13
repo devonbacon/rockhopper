@@ -3,13 +3,14 @@ extends Node3D
 ## The commander's view from the pod: overhead on the crater, lit up like
 ## a tactical display so night doesn't blind it.
 ##
-## WASD or the screen edges pan, the wheel zooms, holding the middle button
-## turns it, and X climbs back out.
+## WASD, the screen edges or dragging with the middle button pan, the wheel
+## zooms, Q and E turn it, and X climbs back out.
 ##
 ## Rovers: click one or drag a box round some to select them (Shift adds),
 ## Tab selects them all. Right-click sends them: on the ground, to drive
 ## there and wait; on a rig, or the deposit under one, to haul from it
-## alone; on the pod, home. The buttons set them hauling wherever's worth
+## alone; on a blueprint, to hammer it up, slower than a soldier; on the
+## pod, home. The buttons set them hauling wherever's worth
 ## it, holding still, or home. With no rovers selected, right-click pings
 ## the spot for the soldiers.
 ##
@@ -19,6 +20,7 @@ extends Node3D
 ## refunded. R opens the research panel.
 
 const PAN_SPEED := 40.0
+const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
 const MAX_HEIGHT := 140.0
@@ -135,10 +137,11 @@ func _process(delta: float) -> void:
 
 
 func _pan(delta: float) -> void:
+	_yaw += _axis(KEY_Q, KEY_E) * TURN_SPEED * delta
 	var pan := Vector2(_axis(KEY_D, KEY_A), _axis(KEY_S, KEY_W))
 	var mouse := get_viewport().get_mouse_position()
 	var size := get_viewport().get_visible_rect().size
-	if DisplayServer.window_is_focused() and _drag_from == Vector2.INF:
+	if DisplayServer.window_is_focused() and _drag_from == Vector2.INF and !Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		if mouse.x < EDGE:
 			pan.x -= 1.0
 		elif mouse.x > size.x - EDGE:
@@ -148,10 +151,20 @@ func _pan(delta: float) -> void:
 		elif mouse.y > size.y - EDGE:
 			pan.y += 1.0
 	var turn := Basis(Vector3.UP, _yaw)
-	global_position += turn * Vector3(pan.x, 0, pan.y).limit_length(1.0) * PAN_SPEED * (_height / 70.0) * delta
-	var flat := Vector2(global_position.x, global_position.z).limit_length(Terrain.FLOOR_RADIUS + 10.0)
+	_move_to(global_position + turn * Vector3(pan.x, 0, pan.y).limit_length(1.0) * PAN_SPEED * (_height / 70.0) * delta)
+
+
+func _move_to(point: Vector3) -> void:
+	var flat := Vector2(point.x, point.z).limit_length(Terrain.FLOOR_RADIUS + 10.0)
 	global_position = Vector3(flat.x, 0.0, flat.y)
 	_place_camera()
+
+
+## Where the mouse at this point on screen meets the plane the view's
+## centred on, so a middle-drag keeps the same spot under the mouse.
+func _ground_at(mouse: Vector2) -> Vector3:
+	var hit: Variant = Plane(Vector3.UP, global_position.y).intersects_ray(camera.project_ray_origin(mouse), camera.project_ray_normal(mouse))
+	return hit if hit != null else Vector3.INF
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -186,7 +199,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						if !hit.is_empty():
 							game.act(&"ping", [hit.position])
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
-		_yaw -= event.relative.x * 0.005
+		var was := _ground_at(event.position - event.relative)
+		var now := _ground_at(event.position)
+		if was != Vector3.INF and now != Vector3.INF:
+			_move_to(global_position + was - now)
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_X:
@@ -304,11 +320,12 @@ func _order_at(hit: Dictionary) -> void:
 		return
 	var ids: Array = selected.map(func(rover: Rover) -> int: return rover.net_id)
 	var target: Fixture = hit.collider if hit.collider is Fixture else null
-	if target and target.blueprint:
-		target = null
-	if target and target.kind == &"deposit" and target.rig and !target.rig.blueprint:
+	if target and target.kind == &"deposit" and target.rig:
 		target = target.rig
-	if target == game.pod:
+	if target and target.blueprint:
+		game.act(&"order", [ids, &"build", Vector3.INF, target.net_id])
+		toast("Building the %s." % String(Fixture.NAMES[target.kind]).to_lower())
+	elif target == game.pod:
 		game.act(&"order", [ids, &"home", Vector3.INF, 0])
 		toast("Heading home.")
 	elif target and target.kind == &"drill":
@@ -538,13 +555,13 @@ func _draw_overlay() -> void:
 			var goal := Vector3.INF
 			if rover.task == Rover.Task.MOVING:
 				goal = rover.move_to
-			elif rover.order == &"fetch" and is_instance_valid(rover.assigned):
+			elif (rover.order == &"fetch" or rover.order == &"build") and is_instance_valid(rover.assigned):
 				goal = rover.assigned.global_position
 			var to := _screen(goal) if goal != Vector3.INF else Vector2.INF
 			if to != Vector2.INF:
 				_overlay.draw_dashed_line(at, to, Color(SELECTED, 0.6), 1.5, 8.0)
 				_overlay.draw_circle(to, 4.0, Color(SELECTED, 0.6))
-			var doing: String = {Rover.Task.PARKED: "parked", Rover.Task.OUTBOUND: "to rig", Rover.Task.LOADING: "loading", Rover.Task.HOMEBOUND: "home", Rover.Task.MOVING: "moving"}[rover.task]
+			var doing: String = {Rover.Task.PARKED: "parked", Rover.Task.OUTBOUND: "to rig", Rover.Task.LOADING: "loading", Rover.Task.HOMEBOUND: "home", Rover.Task.MOVING: "moving", Rover.Task.BUILDING: "building"}[rover.task]
 			if rover.order == &"stay":
 				doing = "holding"
 			_text(font, at + Vector2(0, 30), "R-%d  %s  %d/%d" % [rover.slot + 1, doing, rover.cargo, game.rover_capacity()], 12, color)

@@ -61,8 +61,8 @@ everything, already built or not:
 - Rover tuning: rovers drive 40% faster and carry 4 more.
 - Efficient lamps: lamps draw half the power.
 
-In the dark, spiders climb out of the ground wherever no light falls,
-more of them and more often as the mission goes on. They go for the
+Once the sun's set, spiders climb out of the ground wherever no light
+falls (never by day, however deep the shadow), more of them and more often as the mission goes on. They go for the
 nearest of you, a rover out on the road (their own headlights don't
 help them), anything you've built, or the pod. What they destroy is
 gone. Sunlight sends them back under. Your health comes back once
@@ -84,8 +84,8 @@ keeps drilling, too).
 The menu offers solo, hosting, or joining a server. Everyone starts as a
 soldier. The commander's seat is in the pod: "Take command" on the pod's
 screen climbs in (one commander at a time), out of harm's way and the
-cold, counted aboard at launch, with an overhead view of the crater (WASD
-or the screen edges pan, the wheel zooms, the middle button turns it);
+cold, counted aboard at launch, with an overhead view of the crater (WASD,
+the screen edges or the middle button pan, the wheel zooms, Q and E turn it);
 X climbs back out beside the pod. In solo, the seat's yours too: climb
 in to plan, climb out to build. The server runs the
 world: spiders, rovers, building, power, research, the bank and the
@@ -120,12 +120,13 @@ The commander's view is overhead, lit up like a tactical display so the
 night doesn't blind it, with markers on rovers, soldiers (blue
 diamonds), spiders (red dots), rigs and blueprints.
 
-- **Camera:** WASD or the screen edges pan, the wheel zooms, holding the
-  middle button turns it.
+- **Camera:** WASD, the screen edges or dragging with the middle button
+  pan, the wheel zooms, Q and E turn it.
 - **Rovers:** click one, or drag a box round some, to select them (Shift
   adds; Tab selects all). Right-click sends them: on the ground, to drive
   there and wait; on a rig (or the deposit under it), to haul from that
-  rig alone; on the pod, home. The Haul button sets them back to hauling
+  rig alone; on a blueprint, to hammer it up (a blow every 2 s, slower
+  than a soldier), then back to hauling; on the pod, home. The Haul button sets them back to hauling
   wherever's worth it; Stay holds them still; Go home parks them.
 - **Building:** 1-5 or the bar at the bottom picks a lamp, panel,
   battery, rig or lab; left-click places it as a blueprint (Shift keeps

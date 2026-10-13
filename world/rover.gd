@@ -10,14 +10,17 @@ extends Node3D
 ## way to a rig, it comes home and leaves that rig alone for a while.
 ##
 ## The commander can also send it somewhere to wait (move), or to haul
-## from one rig only (fetch), going out for whatever's in it.
+## from one rig only (fetch), going out for whatever's in it, or to hammer
+## up a blueprint (build), a good deal slower than a soldier does.
 
-enum Task { PARKED, OUTBOUND, LOADING, HOMEBOUND, MOVING }
+enum Task { PARKED, OUTBOUND, LOADING, HOMEBOUND, MOVING, BUILDING }
 
 const SPEED := 4.0
 ## How fast it turns, in radians a second.
 const TURN := 2.2
 const LOAD_TIME := 2.0
+## Seconds between its blows on a blueprint (a soldier's hammer is 0.75).
+const BUILD_EVERY := 2.0
 const CAPACITY := 6
 const HEALTH := 40.0
 const WHEEL_RADIUS := 0.32
@@ -34,7 +37,7 @@ var target_position := Vector3.ZERO
 var target_basis := Basis.IDENTITY
 var task := Task.PARKED
 ## &"haul", &"stay" or &"home", from its screen; or from the commander,
-## &"move" (to move_to) or &"fetch" (from assigned).
+## &"move" (to move_to), &"fetch" (from assigned) or &"build" (assigned).
 var order := &"haul"
 var move_to := Vector3.INF
 var assigned: Fixture
@@ -81,8 +84,10 @@ func _physics_process(delta: float) -> void:
 		return
 	if order == &"stay":
 		return
-	if order == &"fetch" and !is_instance_valid(assigned):
+	if (order == &"fetch" or order == &"build") and !is_instance_valid(assigned):
 		order = &"haul"
+	if task == Task.BUILDING and order != &"build":
+		task = Task.HOMEBOUND if cargo > 0 else Task.PARKED
 	match task:
 		Task.MOVING:
 			if _drive_to(move_to, 1.5, delta) != 0:
@@ -115,6 +120,15 @@ func _physics_process(delta: float) -> void:
 				if _loading >= LOAD_TIME:
 					cargo += rig.take(game.rover_capacity() - cargo)
 					task = Task.HOMEBOUND
+		Task.BUILDING:
+			var arrived := _drive_to(assigned.global_position, 3.4, delta)
+			if arrived > 0:
+				_loading += delta
+				if _loading >= BUILD_EVERY:
+					_loading = 0.0
+					game.construct(assigned)
+			elif arrived < 0:
+				order = &"haul"
 		Task.HOMEBOUND:
 			if _drive_to(game.pod.global_position, 4.6, delta) != 0:
 				game.deliver(cargo)
@@ -125,19 +139,23 @@ func _physics_process(delta: float) -> void:
 ## A new order: from its screen, or the commander's.
 func command(new_order: StringName, point := Vector3.INF, target: Fixture = null) -> void:
 	order = new_order
-	assigned = target if new_order == &"fetch" else null
+	assigned = target if new_order == &"fetch" or new_order == &"build" else null
 	match new_order:
+		&"build":
+			task = Task.BUILDING
+			_loading = 0.0
 		&"move":
 			move_to = point
 			task = Task.MOVING
 		&"home":
 			task = Task.HOMEBOUND
 		&"haul", &"fetch":
-			if task == Task.MOVING or (task == Task.OUTBOUND and rig != assigned and new_order == &"fetch"):
+			if task == Task.MOVING or task == Task.BUILDING or (task == Task.OUTBOUND and rig != assigned and new_order == &"fetch"):
 				task = Task.HOMEBOUND if cargo > 0 else Task.PARKED
 		&"stay":
-			if task == Task.MOVING:
+			if task == Task.MOVING or task == Task.BUILDING:
 				move_to = global_position
+				task = Task.MOVING
 
 
 ## Whether it's somewhere a spider could get at it.
@@ -241,12 +259,13 @@ func _build_screen() -> void:
 			Task.OUTBOUND: "DRIVING TO A RIG",
 			Task.LOADING: "LOADING",
 			Task.HOMEBOUND: "DRIVING HOME",
+			Task.BUILDING: "BUILDING" if is_instance_valid(assigned) and _across(assigned.global_position - global_position, Terrain.up_at(global_position)).length() < 3.5 else "DRIVING OUT TO BUILD",
 			Task.MOVING: "HOLDING HERE" if _across(move_to - global_position, Terrain.up_at(global_position)).length() < 2.5 else "DRIVING OUT",
 		}[task]
 		return "%s\nCARGO %d / %d    HULL %d%%" % [doing, cargo, game.rover_capacity(), roundi(health / HEALTH * 100.0)]
 	screen.button = func(action: StringName) -> Array:
 		var names := {&"haul": "HAUL", &"stay": "STAY", &"home": "GO HOME"}
-		return [names[action], true, order == action or (action == &"haul" and order == &"fetch")]
+		return [names[action], true, order == action or (action == &"haul" and (order == &"fetch" or order == &"build"))]
 	screen.pressed = func(action: StringName) -> String:
 		command(action)
 		return {&"haul": "HAULING.", &"stay": "HOLDING POSITION.", &"home": "HEADING HOME."}[action]
