@@ -2,8 +2,10 @@ class_name Terrain
 extends Node3D
 ## The ground: a round playable area, marked by a blue hologram wall, of
 ## rolling hills, boulders, small craters, and a few caves under it. Past
-## it the hills flatten out into a plain to the horizon. Down is -y
-## everywhere.
+## it the hills flatten out into a plain, ringed further off by mountains
+## you can't reach, high in some directions and low in others, with one
+## giant somewhere. They're solid to the sun, so they cast real shadows:
+## dusk comes early under a range to the west. Down is -y everywhere.
 ##
 ## It's a signed distance field (negative inside rock), sampled on a grid
 ## and meshed once with surface nets into chunks, each with a trimesh
@@ -21,6 +23,12 @@ const WALL_HEIGHT := 12.0
 const HILLS := 4.0
 const CHUNK := 16
 const ROCK_LAYER := 1
+## The mountains: from the foothills to the far edge, in metres from the
+## middle, and how tall the ranges and the one giant get.
+const RANGE_NEAR := 110.0
+const RANGE_FAR := 1300.0
+const RANGE_HEIGHT := 150.0
+const GIANT_HEIGHT := 320.0
 ## Features are bucketed by where they sit on the ground, this wide.
 const BUCKET := 16.0
 
@@ -61,6 +69,7 @@ func generate(seed_value: int, _landing_dir := Vector3.ZERO) -> void:
 	var field := _sample(origin, cells)
 	_mesh(field, origin, cells)
 	_add_plain()
+	_add_mountains(seed_value)
 	_add_wall()
 	_bake_navigation()
 	generate_ms = Time.get_ticks_msec() - started
@@ -349,6 +358,70 @@ func _add_plain() -> void:
 	plain.mesh = tool.commit()
 	plain.material_override = _rock_material()
 	add_child(plain)
+
+
+## A ring of ridged mountains on the plain, on a grid of rings spaced out
+## further the further they are, with a collider so the sun's checks see
+## them.
+func _add_mountains(seed_value: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 7
+	var ridges := FastNoiseLite.new()
+	ridges.seed = seed_value + 1
+	ridges.noise_type = FastNoiseLite.TYPE_PERLIN
+	ridges.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	ridges.fractal_octaves = 5
+	ridges.frequency = 0.0035
+	var ranges := FastNoiseLite.new()
+	ranges.seed = seed_value + 2
+	ranges.frequency = 0.9
+	var giant_angle := rng.randf() * TAU
+	var giant := Vector2(cos(giant_angle), sin(giant_angle)) * rng.randf_range(320.0, 480.0)
+	var giant_width := rng.randf_range(110.0, 160.0)
+	var rings := 70
+	var segments := 240
+	var heights := PackedFloat32Array()
+	var points := PackedVector3Array()
+	for i in rings + 1:
+		var r := RANGE_NEAR * pow(RANGE_FAR / RANGE_NEAR, i / float(rings))
+		var rise := smoothstep(RANGE_NEAR, RANGE_NEAR + 160.0, r) * (1.0 - smoothstep(RANGE_FAR * 0.75, RANGE_FAR, r) * 0.6)
+		for j in segments:
+			var angle := TAU * j / segments
+			var flat := Vector2(cos(angle), sin(angle)) * r
+			# How high the range is this way round: some directions open,
+			# some walled in.
+			var tall := clampf(0.55 + 0.6 * ranges.get_noise_2d(cos(angle), sin(angle)), 0.1, 1.0)
+			var ridge := clampf(0.5 + 0.5 * ridges.get_noise_2d(flat.x, flat.y), 0.0, 1.0)
+			var h := RANGE_HEIGHT * tall * rise * ridge * ridge
+			var peak := exp(-flat.distance_squared_to(giant) / (giant_width * giant_width))
+			h += GIANT_HEIGHT * peak * (0.75 + 0.25 * ridge)
+			points.push_back(Vector3(flat.x, h - 0.5 * (1.0 - rise), flat.y))
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in rings:
+		for j in segments:
+			var a := i * segments + j
+			var b := i * segments + (j + 1) % segments
+			var c := a + segments
+			var d := b + segments
+			for k in [a, c, b, b, c, d]:
+				tool.add_vertex(points[k])
+	tool.generate_normals()
+	var mesh := tool.commit()
+	var mountains := MeshInstance3D.new()
+	mountains.mesh = mesh
+	var material := _rock_material()
+	material.uv1_scale = Vector3.ONE * 0.012
+	material.albedo_color = Color(0.5, 0.46, 0.42)
+	mountains.material_override = material
+	add_child(mountains)
+	var body := StaticBody3D.new()
+	body.collision_layer = ROCK_LAYER
+	body.collision_mask = 0
+	var shape := CollisionShape3D.new()
+	shape.shape = mesh.create_trimesh_shape()
+	body.add_child(shape)
+	add_child(body)
 
 
 ## The edge of the playable area: a hologram wall, brighter as you near it.

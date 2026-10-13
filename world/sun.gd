@@ -3,7 +3,8 @@ extends DirectionalLight3D
 ## The star, crossing the sky as the rock turns: up in the east, over at
 ## 65 degrees, down in the west, then a night as long as the day. Low in
 ## the sky the hills' shadows run long, so the hollows go dark first and
-## the high ground holds the light longest.
+## the high ground holds the light longest; the mountains round about cast
+## shadows a long way, too.
 
 const DAY := 300.0
 const TILT := deg_to_rad(25.0)
@@ -41,7 +42,7 @@ func lights(p: Vector3, space: PhysicsDirectSpaceState3D, t: float = NAN) -> boo
 	var dir := dir_at(time if is_nan(t) else t)
 	if dir.y <= 0.0:
 		return false
-	var query := PhysicsRayQueryParameters3D.create(p, p + dir * 250.0, Terrain.ROCK_LAYER)
+	var query := PhysicsRayQueryParameters3D.create(p, p + dir * (Terrain.RANGE_FAR + 200.0), Terrain.ROCK_LAYER)
 	return space.intersect_ray(query).is_empty()
 
 

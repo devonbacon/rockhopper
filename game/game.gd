@@ -1541,7 +1541,7 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 ## cabled to a foundry cabled to the pod), lamps=N (around
 ## you), spiders=N (in front of you), plan=N (blueprints round the pod),
 ## flares=N (thrown ahead), ping (25 m ahead),
-## command (in the commander's seat), aim, hammer, pause, pitch=degrees,
+## command (in the commander's seat), aim, hammer, pause, yaw= and pitch=degrees,
 ## and shot=path.png and shot_at=seconds to save a screenshot and quit.
 func _debug_setup() -> void:
 	match _args.get("view", ""):
@@ -1614,6 +1614,8 @@ func _debug_setup() -> void:
 		player._switch(&"hammer")
 	if _args.has("pause"):
 		hud.set_paused(true)
+	if _args.has("yaw"):
+		player.rotate_object_local(Vector3.UP, deg_to_rad(float(_args.yaw)))
 	if _args.has("pitch"):
 		player.look(deg_to_rad(float(_args.pitch)))
 	if _args.has("command"):

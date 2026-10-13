@@ -8,10 +8,14 @@ spiders that come with the dark sit alongside it.
 
 You drop onto a turning asteroid, into a round patch of hills 120 m
 across, marked out by a blue hologram wall you can't go past; beyond it
-the ground flattens out to the horizon. The pod lands mid-morning. The
+the ground flattens out into a plain, ringed by mountains you can't
+reach: walled in some ways, open others, different on every map, with
+one giant somewhere. The pod lands mid-morning. The
 sun crosses the sky every five minutes, then there's a night as long as
 the day. Low in the sky, it throws the hills' shadows long, so the
-hollows go dark first and the high ground holds the light longest. There's loose ore lying about, big
+hollows go dark first and the high ground holds the light longest. A
+range to the west brings dusk early, its shadow sweeping in across the
+floor; one to the east holds the dawn back. There's loose ore lying about, big
 deposits that never run out, and a few caves under the ground to shelter
 in.
 
@@ -244,7 +248,7 @@ User arguments after `--`, e.g.
 - `spiders=N` brings N spiders up in front of you.
 - `plan=N` places N blueprints round the pod, part built.
 - `flares=N` throws N flares ahead of you; `ping` pings 25 m ahead.
-- `pitch=D` tilts your view by D degrees.
+- `yaw=D` turns you and `pitch=D` tilts your view, by D degrees.
 - `aim` holds aim down the sights; `pause` starts paused.
 - `hammer` starts with the hammer out.
 - `lab` builds a research lab ahead of you and starts it researching.
@@ -256,7 +260,8 @@ User arguments after `--`, e.g.
 - `world/terrain.gd`: the ground, a signed distance field (hills,
   boulders, small craters, caves) meshed once by surface nets into chunks
   with trimesh colliders, plus a navigation mesh baked from it (used to
-  place deposits you can walk to), a flat plain out to the horizon, and
+  place deposits you can walk to), a flat plain out to the horizon, the
+  mountains (a ridged-noise ring with a collider, so the sun sees them), and
   the hologram wall (`world/boundary.gdshader`). No deformation.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, and everything built.
