@@ -173,7 +173,7 @@ diamonds), spiders (red dots), rigs and blueprints.
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
   5 s to be ready again after you let go or tug a spider.
 - **Fire:** left mouse, held, about 2.4 shots a second; a spider takes
-  four (40 health, 10 a shot). Shots land in a
+  three (30 health, 10 a shot; one hammer blow). Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
   tighter, but slow on your feet.
