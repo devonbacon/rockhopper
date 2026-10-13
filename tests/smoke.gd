@@ -97,6 +97,7 @@ func _step(delta: float) -> bool:
 				_game.time += Sun.DAY * middle / 120.0
 				_game.sun.set_time(_game.time)
 			print("skipped to t=%.0f, the middle of the night here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])
+			_game.handle(Net.local_id(), &"flare", [player.global_position + Vector3.UP * 1.6, Vector3.DOWN])
 			_phase = 2
 		2:
 			if _elapsed < 124.0:
@@ -106,5 +107,9 @@ func _step(delta: float) -> bool:
 			print("30 s into the night: %d spiders, health %.0f, state %s, rovers %d, built %d, rig %s" % [_game.spiders.size(), _game.health, Game.State.keys()[_game.state], _game.rovers.size(), _game.built.size(), _rig.stalled if is_instance_valid(_rig) else "destroyed"])
 			if _game.spiders.is_empty() and _game.state == Game.State.PLAYING:
 				push_error("no spiders came")
+			var flare_lit := _game.flares.any(func(f: Flare) -> bool: return f.global_position.distance_to(player.global_position) < 12.0)
+			print("flare thrown at our feet 30 s ago (we may have been shoved): still burning %s, flares left %d, pod hull %.0f" % [flare_lit, _game.flares_left, _game.pod.health])
+			if !flare_lit:
+				push_error("the flare didn't land and burn by us")
 			return true
 	return false

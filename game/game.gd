@@ -20,7 +20,10 @@ extends Node3D
 ##
 ## In the dark, spiders climb out of the ground wherever no light falls,
 ## more of them as the mission goes on, and go for soldiers, rovers out on
-## the road, and what's been built. Sunlight sends them back under.
+## the road, what's been built, and the pod. Sunlight sends them back
+## under. If they tear the pod open, nobody's going home; hammering it
+## patches it up. Soldiers carry flares, which recharge, to light the dark
+## for a while.
 ##
 ## Networked, the server (or solo) runs all of that; clients mirror it from
 ## snapshots, and send what their soldier does as requests (act()). Every
@@ -78,6 +81,15 @@ const SNAPSHOT_EVERY := 0.05
 const SLOW_EVERY := 0.25
 const MOVE_EVERY := 1.0 / 30.0
 const RESTART_AFTER := 15.0
+const FLARES := 4
+const FLARE_RECHARGE := 20.0
+const PING_TIME := 8.0
+const POD_ALERT_EVERY := 10.0
+const REPAIR := 25.0
+## The pod patches itself this fast, while there's power and nothing's
+## bitten it for a while.
+const POD_MEND := 1.5
+const POD_MEND_DELAY := 8.0
 ## Net ids below this are the world as generated, the same on every peer.
 const FIRST_SPAWNED_ID := 1000
 
@@ -121,6 +133,8 @@ var lit_by: String:
 var hurt: float:
 	get: return _me().hurt
 	set(value): _me().hurt = value
+var flares_left: int:
+	get: return _me().flares
 
 var terrain: Terrain
 var sun: Sun
@@ -135,6 +149,9 @@ var ores: Array[Fixture] = []
 var deposits: Array[Fixture] = []
 var rovers: Array[Rover] = []
 var spiders: Array[Spider] = []
+var flares: Array[Flare] = []
+## Lately pinged spots: {position, name, commander, age, peer}.
+var pings: Array[Dictionary] = []
 ## Net id -> node, for everything that has one.
 var entities := {}
 
@@ -148,6 +165,8 @@ var _snap_in := 0.0
 var _slow_in := 0.0
 var _move_in := 0.0
 var _end_in := INF
+var _pod_alert := 0.0
+var _pod_bitten := 99.0
 var _args := {}
 
 
@@ -197,6 +216,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	for ping in pings:
+		ping.age += delta
+	pings.assign(pings.filter(func(p: Dictionary) -> bool: return p.age < PING_TIME))
 	if Net.authority():
 		_simulate(delta)
 		if Net.networked():
@@ -267,6 +289,13 @@ func _simulate(delta: float) -> void:
 	for fixture in built.duplicate():
 		if fixture.health <= 0.0:
 			_remove_built(fixture)
+	_pod_alert = maxf(0.0, _pod_alert - delta)
+	_pod_bitten += delta
+	if _pod_bitten > POD_MEND_DELAY and battery > 0.0:
+		pod.health = minf(pod.max_health, pod.health + POD_MEND * delta)
+	if pod.health <= 0.0:
+		_end(State.LOST, "The spiders tore the pod open. Nobody's going home.")
+		return
 	for peer in bodies.keys():
 		if peer != commander_peer:
 			_look_after(peer, delta)
@@ -294,6 +323,11 @@ func _look_after(peer: int, delta: float) -> void:
 	s.warmth = clampf(s.warmth + (WARM_RATE if light != "" else -COLD_RATE * (0.5 if has(&"heated") else 1.0)) * delta, 0.0, 100.0)
 	s.since_hurt += delta
 	s.hurt = maxf(0.0, s.hurt - delta * 2.0)
+	if s.flares < FLARES:
+		s.flare_charge += delta
+		if s.flare_charge >= FLARE_RECHARGE:
+			s.flare_charge = 0.0
+			s.flares += 1
 	if s.since_hurt > HEAL_DELAY:
 		s.health = minf(max_health(), s.health + HEAL_RATE * delta)
 	if s.warmth <= 0.0:
@@ -330,7 +364,7 @@ func _me() -> Dictionary:
 
 
 func _new_stats() -> Dictionary:
-	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0}
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0}
 
 
 func _track(node: Node, id := 0) -> void:
@@ -402,6 +436,23 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"construct":
 			if target is Fixture and blueprints.has(target):
 				construct(target)
+		&"repair":
+			if target is Fixture and (target == pod or built.has(target)):
+				target.health = minf(target.max_health, target.health + REPAIR)
+		&"flare":
+			var s: Dictionary = stats[peer]
+			if s.flares > 0:
+				s.flares -= 1
+				_throw_flare(args[0], args[1])
+		&"ping":
+			var info: Dictionary = Net.peers.get(peer, {})
+			var who: String = info.get("name", Net.player_name if peer == Net.local_id() else "Soldier")
+			var ping := [args[0], who, peer == commander_peer, peer]
+			if Net.has_local_player():
+				on_event(&"ping", ping)
+			for id in Net.peers:
+				if id != Net.local_id():
+					Net.event.rpc_id(id, &"ping", ping)
 		&"order":
 			if peer == commander_peer:
 				var rig: Fixture = entities.get(args[3], null) if args[3] != 0 else null
@@ -456,6 +507,10 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"tracer":
 			if player:
 				player._tracer(args[0], args[1])
+		&"ping":
+			pings.assign(pings.filter(func(p: Dictionary) -> bool: return p.peer != args[3]))
+			pings.push_back({position = args[0], name = args[1], commander = args[2], age = 0.0, peer = args[3]})
+			_ping_beam(args[0], args[2])
 
 
 func _show_reply(owner: Node, text: String) -> void:
@@ -584,7 +639,7 @@ func _send_snapshots(delta: float) -> void:
 			continue
 		if !fast.is_empty():
 			var s: Dictionary = stats[id]
-			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt]])
+			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt, s.flares]])
 		if !slow.is_empty():
 			Net.slow_snapshot.rpc_id(id, slow)
 
@@ -603,7 +658,10 @@ func _fast_state() -> Array:
 	var rover_rows: Array = []
 	for rover in rovers:
 		rover_rows.append([rover.net_id, rover.global_position, rover.global_basis.get_rotation_quaternion(), rover.task, rover.order, rover.cargo, rover.health, rover.slot, rover.move_to, rover.assigned.net_id if is_instance_valid(rover.assigned) else 0])
-	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows, commander_peer]
+	var flare_rows: Array = []
+	for flare in flares:
+		flare_rows.append([flare.net_id, flare.global_position, flare.life])
+	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, rover_rows, commander_peer, flare_rows, pod.health]
 
 
 func _slow_state() -> Array:
@@ -632,6 +690,26 @@ func apply_snapshot(data: Array) -> void:
 	state = f[5]
 	outcome = f[6]
 	commander_peer = f[10]
+	if f[12] < pod.health and commander_view and commander_view.visible:
+		commander_view.pod_hit()
+	pod.health = f[12]
+	var lit := {}
+	for row: Array in f[11]:
+		lit[row[0]] = true
+		var flare: Flare = entities.get(row[0], null)
+		if !flare:
+			flare = Flare.new()
+			flare.game = self
+			flare.puppet = true
+			flare.position = row[1]
+			add_child(flare)
+			_track(flare, row[0])
+			flares.push_back(flare)
+		flare.target_position = row[1]
+		flare.life = row[2]
+	for flare in flares.duplicate():
+		if !lit.has(flare.net_id):
+			remove_flare(flare)
 	var seen := {}
 	for row: Array in f[7]:
 		var peer: int = row[0]
@@ -701,6 +779,7 @@ func apply_snapshot(data: Array) -> void:
 	s.carried = mine[2]
 	s.lit_by = mine[3]
 	s.hurt = mine[4]
+	s.flares = mine[5]
 
 
 ## Client: the server's latest of what's built, what ore's left, and what's
@@ -840,6 +919,13 @@ func lit_at(pos: Vector3) -> String:
 				var query := PhysicsRayQueryParameters3D.create(bulb, pos, Terrain.ROCK_LAYER)
 				if space.intersect_ray(query).is_empty():
 					return "lamp"
+	for flare in flares:
+		if flare.life > 0.0:
+			var glow := flare.light.global_position
+			if glow.distance_to(pos) < Flare.RANGE * 0.7:
+				var query := PhysicsRayQueryParameters3D.create(glow, pos, Terrain.ROCK_LAYER)
+				if space.intersect_ray(query).is_empty():
+					return "flare"
 	return ""
 
 
@@ -991,8 +1077,8 @@ func _wire_pod_screen() -> void:
 			if rover.task != Rover.Task.PARKED:
 				out += 1
 		var left := maxf(0.0, MISSION - time)
-		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%\nLAUNCH IN     %d:%02d" % [
-			stock, QUOTA, rovers.size(), out, roundi(battery / capacity() * 100.0), int(left) / 60, int(left) % 60]
+		return "ORE BANKED    %d / %d\nROVERS        %d  (%d OUT)\nBATTERY       %d%%   HULL %d%%\nLAUNCH IN     %d:%02d" % [
+			stock, QUOTA, rovers.size(), out, roundi(battery / capacity() * 100.0), roundi(pod.health / pod.max_health * 100.0), int(left) / 60, int(left) % 60]
 	screen.button = func(action: StringName) -> Array:
 		if action == &"command":
 			if commander_peer == 0:
@@ -1067,8 +1153,9 @@ func spider_target(spider: Spider) -> Node3D:
 		if rover.exposed():
 			candidates.push_back(rover)
 	candidates.append_array(built)
+	candidates.push_back(pod)
 	for candidate in candidates:
-		var distance := from.distance_to(candidate.global_position) * (0.75 if candidate.has_meta("peer") else 1.0)
+		var distance := from.distance_to(candidate.global_position) * (0.75 if candidate.has_meta("peer") else (1.4 if candidate == pod else 1.0))
 		if distance < best_distance:
 			best_distance = distance
 			best = candidate
@@ -1083,6 +1170,8 @@ func bite_reach(target: Node3D) -> float:
 		return 1.7
 	if target is Fixture and (target as Fixture).kind == &"drill":
 		return 2.8
+	if target == pod:
+		return 2.7
 	return 1.9
 
 
@@ -1098,6 +1187,13 @@ func damage(target: Node3D, amount: float) -> void:
 		(target as Rover).damage(amount)
 	elif target is Fixture:
 		(target as Fixture).health -= amount
+		if target == pod:
+			_pod_bitten = 0.0
+		if target == pod and _pod_alert <= 0.0:
+			_pod_alert = POD_ALERT_EVERY
+			_announce("The pod is under attack!")
+		if target == pod and commander_view and commander_view.visible:
+			commander_view.pod_hit()
 
 
 func remove_spider(spider: Spider) -> void:
@@ -1113,6 +1209,44 @@ func spawn_spider(spot: Vector3) -> void:
 	add_child(spider)
 	_track(spider)
 	spiders.push_back(spider)
+
+
+func _throw_flare(from: Vector3, dir: Vector3) -> void:
+	var flare := Flare.new()
+	flare.game = self
+	flare.position = from
+	flare.velocity = dir.normalized() * Flare.SPEED
+	add_child(flare)
+	_track(flare)
+	flares.push_back(flare)
+
+
+func remove_flare(flare: Flare) -> void:
+	flares.erase(flare)
+	entities.erase(flare.net_id)
+	flare.queue_free()
+
+
+## A column of light over a pinged spot, fading as the ping does.
+func _ping_beam(at: Vector3, from_commander: bool) -> void:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	material.albedo_color = Color(Hud.DAY_COLOR if from_commander else Hud.FUEL_COLOR, 0.5)
+	var column := CylinderMesh.new()
+	column.top_radius = 0.05
+	column.bottom_radius = 0.25
+	column.height = 40.0
+	var beam := MeshInstance3D.new()
+	beam.mesh = column
+	beam.material_override = material
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	beam.position = at + Vector3.UP * 20.0
+	add_child(beam)
+	var tween := beam.create_tween()
+	tween.tween_property(material, "albedo_color:a", 0.0, PING_TIME).set_ease(Tween.EASE_IN)
+	tween.tween_callback(beam.queue_free)
 
 
 func _add_rover() -> void:
@@ -1141,6 +1275,8 @@ func _spawn_spiders(delta: float) -> void:
 			near.append_array([bodies[peer], bodies[peer], bodies[peer]])
 	near.append_array(rovers)
 	near.append_array(built)
+	if commander_peer != 0:
+		near.append_array([pod, pod])
 	if near.is_empty():
 		return
 	var focus: Node3D = near[_rng.randi() % near.size()]
@@ -1314,6 +1450,7 @@ func place_player(pos: Vector3, target: Vector3) -> void:
 ## cave|screen|rover, lab (builds one ahead, researching), rig (builds one
 ## on the deposit nearest the pod and stands you by it), lamps=N (around
 ## you), spiders=N (in front of you), plan=N (blueprints round the pod),
+## flares=N (thrown ahead), ping (25 m ahead),
 ## command (in the commander's seat), aim, hammer, pause, pitch=degrees,
 ## and shot=path.png and shot_at=seconds to save a screenshot and quit.
 func _debug_setup() -> void:
@@ -1364,6 +1501,12 @@ func _debug_setup() -> void:
 		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(around, around - Terrain.up_at(around) * 12.0, Terrain.ROCK_LAYER))
 		if !hit.is_empty():
 			spawn_spider(hit.position)
+	for i in int(_args.get("flares", "0")):
+		var ahead := -player.global_basis.z
+		var side := player.global_basis.x
+		_throw_flare(player.global_position + Vector3.UP * 1.6, (ahead * (0.6 + i * 0.25) + side * (i - 1) * 0.35 + Vector3.UP * 0.3).normalized())
+	if _args.has("ping"):
+		handle(Net.local_id(), &"ping", [player.global_position - player.global_basis.z * 25.0])
 	if _args.has("plan"):
 		var frame := Fixture.upright(pod.normal)
 		for i in int(_args.plan):
@@ -1413,7 +1556,7 @@ func _probe(kind: String) -> void:
 		for peer in bodies:
 			if peer != Net.local_id():
 				others.append("%d@%s" % [peer, (bodies[peer] as Node3D).global_position.snapped(Vector3.ONE * 0.1)])
-		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d rovers %d spiders %d | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), rovers.size(), spiders.size(), others])
+		print("[%s %s] t=%.1f stock %d carried %d | ores %d built %d rovers %d spiders %d flares %d (mine %d left) pings %s pod %.0f | others %s" % [kind, tag, time, stock, carried, ores.size(), built.size(), rovers.size(), spiders.size(), flares.size(), flares_left, pings.map(func(p: Dictionary) -> String: return p.name), pod.health, others])
 	await tree.create_timer(3.0).timeout
 	report.call("joined")
 	if kind == "commander":
@@ -1446,6 +1589,10 @@ func _probe(kind: String) -> void:
 			player.global_position = terrain.surface_point(spot)[0] + Vector3.UP * 0.1
 			await tree.create_timer(0.25).timeout
 	elif kind == "walker":
+		act(&"flare", [player.global_position + Vector3.UP * 1.6, Vector3(0.3, 0.2, 0.9).normalized()])
+		act(&"ping", [pod.global_position + Vector3(10, 0, 0)])
+		await tree.create_timer(1.5).timeout
+		report.call("flared+pinged")
 		var centre := pod.global_position
 		for i in 60:
 			var angle := i * 0.2

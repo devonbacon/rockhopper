@@ -10,7 +10,8 @@ extends Node3D
 ## Tab selects them all. Right-click sends them: on the ground, to drive
 ## there and wait; on a rig, or the deposit under one, to haul from it
 ## alone; on the pod, home. The buttons set them hauling wherever's worth
-## it, holding still, or home.
+## it, holding still, or home. With no rovers selected, right-click pings
+## the spot for the soldiers.
 ##
 ## Building: 1-5 or the bar picks something, left-click places it as a
 ## blueprint, paid for now, for soldiers to hammer up (Shift keeps placing),
@@ -56,6 +57,7 @@ var _drag_from := Vector2.INF
 var _marks: Array = []
 var _hover_plan: Fixture
 var _refresh := 0.0
+var _alarm := 0.0
 
 
 func _ready() -> void:
@@ -99,6 +101,13 @@ func leave() -> void:
 	_drag_from = Vector2.INF
 
 
+## The pod's been bitten: a red flash round the edge, and word of it.
+func pod_hit() -> void:
+	if _alarm <= 0.0:
+		toast("The pod is under attack!")
+	_alarm = 1.0
+
+
 func toast(text: String) -> void:
 	_toast.text = text
 	_toast_time = 3.0
@@ -113,6 +122,7 @@ func _process(delta: float) -> void:
 		mark[1] += delta
 	_marks = _marks.filter(func(mark: Array) -> bool: return mark[1] < 0.8)
 	_toast_time = maxf(0.0, _toast_time - delta)
+	_alarm = maxf(0.0, _alarm - delta * 0.5)
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	var hit := _mouse_hit()
 	_aim_ghost(hit)
@@ -171,6 +181,10 @@ func _unhandled_input(event: InputEvent) -> void:
 						_choose(&"")
 					elif !selected.is_empty():
 						_order_at(_mouse_hit())
+					else:
+						var hit := _mouse_hit()
+						if !hit.is_empty():
+							game.act(&"ping", [hit.position])
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		_yaw -= event.relative.x * 0.005
 	elif event is InputEventKey and event.pressed and !event.echo:
@@ -390,7 +404,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] turn  |  [click / drag] select rovers  [Tab] all  [right-click] send  |  [1-5] build  [Del] cancel blueprint  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] turn  |  [click / drag] select rovers  [Tab] all  [right-click] send  [right-click, none selected] ping  |  [1-5] build  [Del] cancel blueprint  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -439,6 +453,7 @@ func _update_ui() -> void:
 	var lines := ["ORE  %d / %d" % [game.stock, Game.QUOTA],
 		"BATTERY  %d / %d   %+.1f/s" % [game.battery, game.capacity(), game.power_in - game.power_out],
 		"LAUNCH IN  %d:%02d" % [int(left) / 60, int(left) % 60],
+		"POD HULL  %d%%" % roundi(game.pod.health / game.pod.max_health * 100.0),
 		"ROVERS  %d  (%d out)" % [game.rovers.size(), out],
 		"SOLDIERS  %d" % (game.bodies.size() - (1 if game.commander_peer != 0 else 0))]
 	for lab in game.built:
@@ -538,6 +553,15 @@ func _draw_overlay() -> void:
 		if at != Vector2.INF:
 			var t: float = mark[1] / 0.8
 			_overlay.draw_arc(at, 6.0 + 18.0 * t, 0, TAU, 24, Color(SELECTED, 1.0 - t), 2.0)
+	for ping in game.pings:
+		var at := _screen(ping.position)
+		if at != Vector2.INF:
+			var fade := clampf((Game.PING_TIME - ping.age) / 1.5, 0.0, 1.0)
+			var color := Color(Hud.DAY_COLOR if ping.commander else Hud.FUEL_COLOR, fade)
+			_overlay.draw_arc(at, 10.0 + 4.0 * sin(ping.age * 6.0), 0, TAU, 24, color, 2.0)
+			_text(font, at + Vector2(0, -16), "PING" if ping.commander else String(ping.name).to_upper(), 13, color)
+	if _alarm > 0.0:
+		_overlay.draw_rect(Rect2(Vector2.ZERO, _overlay.size), Color(Hud.ALERT, 0.5 * _alarm), false, 10.0)
 	if _drag_from != Vector2.INF:
 		var box := Rect2(_drag_from, get_viewport().get_mouse_position() - _drag_from).abs()
 		if box.size.length() >= DRAG:

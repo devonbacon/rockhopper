@@ -200,7 +200,7 @@ func _update_meters() -> void:
 	_set_meter(&"battery", game.battery / game.capacity(), "%d / %d   %+.1f/s" % [game.battery, game.capacity(), net], ALERT if net < 0.0 else Color.WHITE)
 	var warmth := game.warmth / 100.0
 	_meters[&"warmth"].fill.bg_color = COLD_COLOR.lerp(WARM_COLOR, warmth)
-	var source := "in sunlight" if game.lit_by == "sun" else ("by a lamp" if game.lit_by == "lamp" else ("by the pod" if game.lit_by == "pod" else "IN THE DARK"))
+	var source: String = {"sun": "in sunlight", "lamp": "by a lamp", "pod": "by the pod", "flare": "by a flare"}.get(game.lit_by, "IN THE DARK")
 	_set_meter(&"warmth", warmth, "%d   %s" % [game.warmth, source], COLD_COLOR if game.lit_by == "" else Color.WHITE)
 	var player := game.player
 	_meters[&"fuel"].row.visible = game.has(&"jetpack")
@@ -298,7 +298,7 @@ func _build_bottom() -> void:
 func _update_bottom() -> void:
 	_ore.text = "%d / %d in pod" % [game.stock, Game.QUOTA]
 	_ore.modulate = DAY_COLOR if game.stock >= Game.QUOTA else ORE_COLOR
-	_carried.text = "carrying %d" % game.carried
+	_carried.text = "carrying %d    flares %d / %d" % [game.carried, game.flares_left, Game.FLARES]
 	var out := 0
 	for rover in game.rovers:
 		if rover.task != Rover.Task.PARKED:
@@ -309,7 +309,7 @@ func _update_bottom() -> void:
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
 			_rovers.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
-	_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [E] use    [F] headlamp    [Esc] pause" % attack
+	_hint.text = "%s    [1/2/wheel] gun/hammer    [G] grapple    [Q] flare    [MMB] ping    [E] use    [F] headlamp    [Esc] pause" % attack
 
 
 ## A buildable's icon, about 50 px across, centred on centre.
@@ -365,6 +365,8 @@ func _draw_overlay() -> void:
 	elif player.prompt != "":
 		_overlay.draw_arc(centre, 10, 0, TAU, 24, Color(1, 1, 1, 0.5), 1.5)
 	_draw_pod_marker(centre)
+	for ping in game.pings:
+		_draw_ping(centre, ping)
 	_draw_rig_markers()
 	_draw_blueprint_markers()
 
@@ -420,8 +422,38 @@ func _draw_pod_marker(centre: Vector2) -> void:
 	_overlay.draw_polyline(diamond + PackedVector2Array([diamond[0]]), POD_COLOR, 2.0)
 	var distance := camera.global_position.distance_to(game.pod.global_position)
 	var font := _overlay.get_theme_default_font()
-	_overlay.draw_string_outline(font, at + Vector2(-60, -16), "POD %dm" % distance, HORIZONTAL_ALIGNMENT_CENTER, 120, 14, 4, Color(0, 0, 0, 0.7))
-	_overlay.draw_string(font, at + Vector2(-60, -16), "POD %dm" % distance, HORIZONTAL_ALIGNMENT_CENTER, 120, 14, POD_COLOR)
+	var text := "POD %dm" % distance
+	var color := POD_COLOR
+	if game.pod.health < game.pod.max_health:
+		text += "  HULL %d%%" % roundi(game.pod.health / game.pod.max_health * 100.0)
+		color = ALERT
+	_overlay.draw_string_outline(font, at + Vector2(-80, -16), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 14, 4, Color(0, 0, 0, 0.7))
+	_overlay.draw_string(font, at + Vector2(-80, -16), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 14, color)
+
+
+## A ping, pinned to the screen's edge when it's out of view, fading out.
+func _draw_ping(centre: Vector2, ping: Dictionary) -> void:
+	var camera := game.player.camera
+	var spot: Vector3 = ping.position
+	var at := camera.unproject_position(spot)
+	var margin := 60.0
+	var bounds := Rect2(Vector2(margin, margin), _overlay.size - Vector2(margin, margin) * 2.0)
+	var behind := camera.is_position_behind(spot)
+	if behind or !bounds.has_point(at):
+		var dir := at - centre
+		if behind:
+			dir = -dir
+		dir = dir.normalized() if dir.length() > 0.01 else Vector2.DOWN
+		var scale := minf(absf((bounds.size.x * 0.5) / dir.x) if dir.x != 0.0 else INF, absf((bounds.size.y * 0.5) / dir.y) if dir.y != 0.0 else INF)
+		at = centre + dir * scale
+	var fade := clampf((Game.PING_TIME - ping.age) / 1.5, 0.0, 1.0)
+	var color := Color(DAY_COLOR if ping.commander else FUEL_COLOR, fade)
+	_overlay.draw_arc(at, 9.0, 0, TAU, 20, color, 2.0)
+	_overlay.draw_circle(at, 3.0, color)
+	var text := "%s  %dm" % ["COMMANDER" if ping.commander else String(ping.name).to_upper(), camera.global_position.distance_to(spot)]
+	var font := _overlay.get_theme_default_font()
+	_overlay.draw_string_outline(font, at + Vector2(-80, -16), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, 4, Color(0, 0, 0, 0.7 * fade))
+	_overlay.draw_string(font, at + Vector2(-80, -16), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, color)
 
 
 func _label(size: int, color: Color = Color.WHITE) -> Label:

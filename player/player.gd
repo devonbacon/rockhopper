@@ -4,7 +4,9 @@ extends CharacterBody3D
 ##
 ## WASD walks (Shift runs), Space jumps, and holding Space in the air burns
 ## the jetpack, which refills on the ground. Left mouse fires, or swings
-## the hammer, which also mines and puts up the commander's blueprints. E
+## the hammer, which also mines, puts up the commander's blueprints and
+## patches up the pod and anything damaged. Q throws a flare; middle mouse
+## pings what you're looking at for everyone. E
 ## is use: tap it at the pod to hand in ore, on a button on a screen to
 ## press it, or at a rig to empty its hopper; hold it on ore or a deposit
 ## to mine it, or on a lamp, panel or rig to pick it back up. F toggles the
@@ -59,6 +61,8 @@ const HAMMER_REACH := 3.2
 const GRAPPLE_RANGE := 35.0
 const GRAPPLE_PULL := 30.0
 const GRAPPLE_MAX := 20.0
+const FLARE_EVERY := 0.5
+const PING_RANGE := 300.0
 ## How far out from the middle you can go before the crater wall stops
 ## you, in case the jetpack or the grapple gets you up it.
 const BOUNDS := Terrain.FLOOR_RADIUS + 9.0
@@ -106,6 +110,7 @@ var _hook_cooldown := 0.0
 var _rope: MeshInstance3D
 var _rope_flash := 0.0
 var _yank_from := Vector3.ZERO
+var _flare_cooldown := 0.0
 
 
 func _ready() -> void:
@@ -170,12 +175,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_switch(&"hammer" if weapon == &"gun" else &"gun")
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
+			_ping()
 	elif event is InputEventKey and event.pressed and !event.echo:
 		match event.physical_keycode:
 			KEY_F: headlamp.visible = !headlamp.visible
 			KEY_1: _switch(&"gun")
 			KEY_2: _switch(&"hammer")
 			KEY_G: _throw_hook()
+			KEY_Q: _throw_flare()
 
 
 func _physics_process(delta: float) -> void:
@@ -253,6 +261,7 @@ func _physics_process(delta: float) -> void:
 		velocity -= out * velocity.dot(out)
 	move_and_slide()
 	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
+	_flare_cooldown = maxf(0.0, _flare_cooldown - delta)
 	_draw_rope(delta)
 	_swing = maxf(0.0, _swing - delta / HAMMER_EVERY)
 	_hammer.rotation.x = -1.3 * sin(_swing * PI) if _swing > 0.0 else 0.0
@@ -327,6 +336,8 @@ func _use(delta: float) -> void:
 				progress = 0.0
 		&"pod":
 			prompt = ("[E] Hand in %d ore" % game.carried) if game.carried > 0 else ("Drop pod: %d ore banked" % game.stock)
+			if target.health < target.max_health:
+				prompt += "\nHull %d%%: hammer it to patch it up" % roundi(target.health / target.max_health * 100.0)
 			if pressed:
 				game.act(&"hand_in", [])
 		&"ore":
@@ -397,6 +408,28 @@ func _smash() -> void:
 	elif fixture.kind == &"deposit" or fixture.kind == &"ore":
 		game.act(&"mine", [fixture.net_id])
 		_say("+ore")
+	elif fixture.health < fixture.max_health:
+		game.act(&"repair", [fixture.net_id])
+		_say("%s %d / %d" % ["Pod hull" if fixture.kind == &"pod" else Fixture.NAMES[fixture.kind], minf(fixture.max_health, fixture.health + Game.REPAIR), fixture.max_health])
+
+
+func _throw_flare() -> void:
+	if _flare_cooldown > 0.0:
+		return
+	if game.flares_left <= 0:
+		_say("Out of flares: one comes back every %ds" % Game.FLARE_RECHARGE)
+		return
+	_flare_cooldown = FLARE_EVERY
+	var ahead := -camera.global_basis.z
+	game.act(&"flare", [camera.global_position + ahead * 0.6, (ahead + up_direction * 0.3).normalized()])
+
+
+func _ping() -> void:
+	var from := camera.global_position
+	var query := PhysicsRayQueryParameters3D.create(from, from - camera.global_basis.z * PING_RANGE, Terrain.ROCK_LAYER | Fixture.LAYER, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if !hit.is_empty():
+		game.act(&"ping", [hit.position])
 
 
 ## Hooks what's under the crosshair. A spider gets yanked to you; anything

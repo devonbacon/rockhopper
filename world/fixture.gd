@@ -33,6 +33,7 @@ var on := false
 var amount := 3
 ## Lamps, panels and rigs: spiders wear this down.
 var health := HEALTH
+var max_health := HEALTH
 ## A deposit's rig, and a rig's deposit.
 var rig: Fixture
 var deposit: Fixture
@@ -117,6 +118,7 @@ func _ready() -> void:
 		&"lab": _build_lab()
 	if blueprint:
 		_hologram()
+	max_health = health
 
 
 func set_on(value: bool) -> void:
@@ -201,6 +203,7 @@ func _process(delta: float) -> void:
 
 
 func _build_pod() -> void:
+	health = 500.0
 	var hull := _material(Color(0.78, 0.76, 0.72), 0.45, 0.5)
 	_add_mesh(_cylinder(1.25, 1.65, 3.0), hull, Vector3(0, 1.3, 0))
 	_add_mesh(_cylinder(0.35, 1.25, 1.2), hull, Vector3(0, 3.4, 0))

@@ -64,9 +64,20 @@ everything, already built or not:
 In the dark, spiders climb out of the ground wherever no light falls,
 more of them and more often as the mission goes on. They go for the
 nearest of you, a rover out on the road (their own headlights don't
-help them), or anything you've built. What they destroy is gone.
-Sunlight sends them back under. Your health comes back once nothing's
-hurt you for a few seconds.
+help them), anything you've built, or the pod. What they destroy is
+gone. Sunlight sends them back under. Your health comes back once
+nothing's hurt you for a few seconds.
+
+The pod has 500 hull. If the spiders tear it open, the mission's lost.
+With someone commanding from it, more spiders come up round it. It
+mends itself slowly while there's power and nothing's bitten it for 8 s,
+and every hammer blow patches 25 (the hammer mends anything damaged that
+way).
+
+Each soldier carries 4 flares, and one comes back every 20 s. A flare
+burns for 35 s wherever it lands, lighting the ground round it, keeping
+you warm, and keeping spiders from climbing out near it (a rig by one
+keeps drilling, too).
 
 ## Playing together
 
@@ -120,6 +131,9 @@ diamonds), spiders (red dots), rigs and blueprints.
   battery, rig or lab; left-click places it as a blueprint (Shift keeps
   placing), right-click or Esc puts it away. A rig snaps to the deposit
   nearest the mouse. Delete over a blueprint cancels it, refunded.
+- **Ping:** right-click with no rovers selected.
+- **The pod's hull** is on the readout; when spiders bite it, the edges
+  flash red.
 - **Print rover:** on the bar, from the bank.
 - **Research (R):** every upgrade, started on an idle lab; press the one
   in progress to cancel it.
@@ -152,6 +166,10 @@ diamonds), spiders (red dots), rigs and blueprints.
   stops it where it is, GO HOME drives it back to park, unloading what
   it carries, until you tell it to haul again. It also shows what the
   rover's doing, its cargo and its hull.
+- **Flare (Q):** throws one where you're looking.
+- **Ping (middle mouse):** marks the spot you're looking at for everyone
+  for 8 s: a beam of light, and a marker on screen with your name and how
+  far it is. The commander's pings are gold.
 - **F** toggles the headlamp. **Esc** pauses (Resume, New map, Quit);
   Esc again resumes.
 - **R** after a mission: a new map. **Shift+R:** the same one.
@@ -183,6 +201,7 @@ User arguments after `--`, e.g.
 - `lamps=N` builds N lamps around you.
 - `spiders=N` brings N spiders up in front of you.
 - `plan=N` places N blueprints round the pod, part built.
+- `flares=N` throws N flares ahead of you; `ping` pings 25 m ahead.
 - `pitch=D` tilts your view by D degrees.
 - `aim` holds aim down the sights; `pause` starts paused.
 - `hammer` starts with the hammer out.
@@ -201,6 +220,7 @@ User arguments after `--`, e.g.
 - `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and
   the rovers.
 - `world/rover.gd`: the haulers.
+- `world/flare.gd`: flares.
 - `world/spider.gd`: the spiders.
 - `player/player.gd`: you.
 - `game/game.gd`: the mission, power, warmth, building, the spiders'
