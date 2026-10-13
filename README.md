@@ -162,6 +162,11 @@ systemd user service, restarting on failure. Run it again after pushing
 to update. Logs: `journalctl --user -u rockhopper -f` on the box. The
 port is UDP.
 
+To share a build: `tools/export_windows.sh` exports a Windows build and
+zips it as `build/rockhopper-<build>.zip`, named for the hash the server
+checks. It needs Godot's Windows export templates installed. Scripts go in
+as text so the exported game hashes the same as the source does.
+
 Debug: `command` starts in the commander's seat (with `research`, the
 research panel open);
 `probe=builder|walker|stander|commander` scripts a joined client, for

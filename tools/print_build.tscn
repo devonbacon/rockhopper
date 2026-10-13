@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tools/print_build.gd" id="1"]
+
+[node name="PrintBuild" type="Node"]
+script = ExtResource("1")
