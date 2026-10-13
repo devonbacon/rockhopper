@@ -5,7 +5,10 @@ extends Node
 ## - builds a drill rig on the deposit nearest the pod, cabled to a
 ##   foundry cabled to the pod, and lets them work for a minute and a half
 ##   in daylight, with a lab researching;
-## - rides a cable;
+## - rides a cable, and from the rig's cable on through the foundry onto
+##   the pod's, looking that way;
+## - drags a cable off a pylon to open ground for a new pylon, hammers
+##   both up, and turns the cable round;
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
@@ -85,6 +88,21 @@ func _step(delta: float) -> bool:
 			if player.global_position.distance_to(_ride_from) < 2.5:
 				push_error("the cable didn't carry us")
 			player.let_go()
+			var into := _game.links[0]
+			player._grab(into, into.length() - 2.5)
+			player._zip_dir = 1.0
+			var up := player.up_direction
+			var towards := _game.pod.global_position - player.global_position
+			towards -= up * towards.dot(up)
+			player.global_basis = Basis.looking_at(towards.normalized(), up)
+			_phase = 5
+		5:
+			if _elapsed < 4.8:
+				return false
+			print("rode the rig's cable into the foundry, looking at the pod: now on the pod's cable %s" % [player.zip == _game.links[1]])
+			if player.zip != _game.links[1]:
+				push_error("didn't carry on through the junction")
+			player.let_go()
 			_phase = 2
 		2:
 			if _elapsed < 94.0:
@@ -107,6 +125,37 @@ func _step(delta: float) -> bool:
 			print("hammered up a pylon blueprint: built %s" % built)
 			if !built:
 				push_error("hammering didn't put the blueprint up")
+			_game.commander_peer = Net.local_id()
+			var pylon: Fixture = _game.built[-1]
+			var reached := false
+			for i in 16:
+				var out := pylon.global_position + (Fixture.upright(pylon.normal).x * cos(i * 0.4) + Fixture.upright(pylon.normal).z * sin(i * 0.4)) * 10.0
+				var ground: Array = _game.terrain.surface_point(out)
+				if _game.can_link_pylon(pylon, ground[0], ground[1]) == "":
+					_game.handle(Net.local_id(), &"link_pylon", [pylon.net_id, ground[0], ground[1]])
+					reached = true
+					break
+			var cable: Link = _game.links[-1]
+			print("dragged a cable off the pylon to open ground: %s, to a pylon blueprint %s" % [reached, cable.to.blueprint])
+			if !reached or cable.from != pylon or !cable.to.blueprint:
+				push_error("couldn't drag a cable to a new pylon")
+			var far := cable.to
+			_game.handle(Net.local_id(), &"string", [cable.net_id])
+			var early := !cable.blueprint
+			for i in far.hits_needed():
+				_game.construct(far)
+			_game.handle(Net.local_id(), &"string", [cable.net_id])
+			print("strung before the far pylon was up %s; after, onto the built one %s, strung %s" % [early, !cable.to.blueprint and _game.built.has(cable.to), !cable.blueprint])
+			if early or cable.to.blueprint or cable.blueprint:
+				push_error("the cable didn't follow its blueprint end into the built pylon")
+			far = cable.to
+			_game.handle(Net.local_id(), &"flip", [cable.net_id])
+			var flipped := cable.from == far and cable.to == pylon
+			_game.handle(Net.local_id(), &"flip", [_game.links[1].net_id])
+			print("flipped it: %s; the pod's cable stays in: %s" % [flipped, _game.links[1].to == _game.pod])
+			if !flipped or _game.links[1].to != _game.pod:
+				push_error("flipping went wrong")
+			_game.commander_peer = 0
 			_game.commander_peer = Net.local_id()
 			_game.handle(Net.local_id(), &"switch", [_rig.net_id])
 			var off := !_rig.enabled

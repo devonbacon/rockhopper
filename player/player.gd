@@ -10,8 +10,10 @@ extends CharacterBody3D
 ## is use: tap it at the pod to hand in ore, on a button on a screen to
 ## press it, or at a rig to empty its hopper; hold it on ore or a deposit
 ## to mine it, or on something built to pick it back up. E on a cable
-## overhead grabs it and rides it the way you're facing; E again or Space
-## lets go, and you drop off at the end. F toggles the headlamp.
+## overhead grabs it and rides it the way you're facing, hanging off to
+## the right; at a junction you carry on down whichever cable's nearest
+## the way you're looking, and you drop off short of a dead end. E again
+## or Space lets go. F toggles the headlamp.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -67,6 +69,8 @@ const GRAPPLE_COOLDOWN := 5.0
 const ZIP_SPEED := 11.0
 ## How far a cable can be from the crosshair's line to grab it.
 const ZIP_GRAB := 0.7
+## How far short of a dead end you let go.
+const ZIP_DROP := 2.0
 const FLARE_EVERY := 0.5
 const PING_RANGE := 300.0
 ## How far out from the middle you can go: the hologram wall.
@@ -84,6 +88,8 @@ var hooked := false
 var zip: Link
 var _zip_at := 0.0
 var _zip_dir := 1.0
+## Which side of the cable you hang off, eased round at junctions.
+var _zip_side := Vector3.ZERO
 var _jump_was_down := false
 ## What E would do now, and how far through a hold it is, for the HUD.
 var prompt := ""
@@ -229,8 +235,8 @@ func _physics_process(delta: float) -> void:
 				_smash()
 
 
-## Hanging under a cable, sliding along it; off at either end, or on Space,
-## carrying the speed.
+## Hanging under a cable, sliding along it and on through junctions; off
+## short of a dead end, or on Space, carrying the speed.
 func _ride(delta: float, playing: bool) -> void:
 	aiming = false
 	sliding = false
@@ -243,11 +249,44 @@ func _ride(delta: float, playing: bool) -> void:
 	var along := (zip.end() - start) / span
 	_zip_at += _zip_dir * ZIP_SPEED * delta
 	velocity = along * _zip_dir * ZIP_SPEED
-	if !playing or _zip_at <= 0.6 or _zip_at >= span - 0.6 or (jump and !_jump_was_down):
+	var jumped := jump and !_jump_was_down
+	_jump_was_down = jump
+	var left := span - _zip_at if _zip_dir > 0.0 else _zip_at
+	var node := zip.to if _zip_dir > 0.0 else zip.from
+	var next: Link = _next_cable(node, along * _zip_dir) if left < ZIP_DROP else null
+	if !playing or jumped or (left < ZIP_DROP and !next):
 		let_go(jump)
 		return
-	_jump_was_down = jump
-	global_position = start + along * _zip_at - up_direction * Link.HANG
+	if left <= 0.0:
+		_zip_dir = 1.0 if next.from == node else -1.0
+		zip = next
+		start = zip.start()
+		span = start.distance_to(zip.end())
+		along = (zip.end() - start) / span
+		_zip_at = -left if _zip_dir > 0.0 else span + left
+	var right := (along * _zip_dir).cross(up_direction).normalized()
+	_zip_side = _zip_side.lerp(right, 1.0 - exp(-6.0 * delta))
+	global_position = start + along * _zip_at - up_direction * Link.HANG + _zip_side * Link.SIDE
+
+
+## The strung cable off node, other than the one you're on, that runs
+## closest to the way you're looking, if any runs within 80 degrees of it
+## and on ahead of you.
+func _next_cable(node: Fixture, heading: Vector3) -> Link:
+	var look := -camera.global_basis.z
+	look -= up_direction * look.dot(up_direction)
+	var best: Link = null
+	var best_dot := cos(deg_to_rad(80.0))
+	for link in game.links:
+		if link == zip or link.blueprint or (link.from != node and link.to != node):
+			continue
+		var out := ((link.end() - link.start()) * (1.0 if link.from == node else -1.0)).normalized()
+		var flat := out - up_direction * out.dot(up_direction)
+		var dot := flat.normalized().dot(look.normalized())
+		if dot > best_dot and out.dot(heading) > -0.5:
+			best_dot = dot
+			best = link
+	return best
 
 
 func _grab(link: Link, at: float) -> void:
@@ -258,6 +297,7 @@ func _grab(link: Link, at: float) -> void:
 	var along := (link.end() - link.start()) / span
 	var ahead := -global_basis.z
 	_zip_dir = 1.0 if along.dot(ahead) >= 0.0 else -1.0
+	_zip_side = (along * _zip_dir).cross(up_direction).normalized()
 	_jump_was_down = Input.is_physical_key_pressed(KEY_SPACE)
 	_say("Riding the cable: [E] or [Space] to let go")
 
@@ -404,7 +444,11 @@ func _use(delta: float) -> void:
 		return
 	var plan := _aim_cable(HAMMER_REACH + 1.0, true)
 	if !plan.is_empty() and (!target or plan[2] < camera.global_position.distance_to(hit.position)):
-		prompt = "Cable blueprint\n%s" % ("[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up")
+		var link: Link = plan[0]
+		if link.from.blueprint or link.to.blueprint:
+			prompt = "Cable blueprint\nBuild both ends first"
+		else:
+			prompt = "Cable blueprint\n%s" % ("[LMB] Hammer it up" if weapon == &"hammer" else "[2] Hammer it up")
 		return
 	if !target:
 		return
@@ -504,8 +548,12 @@ func _smash() -> void:
 	var hit := _aim(HAMMER_REACH)
 	var plan := _aim_cable(HAMMER_REACH + 1.0, true)
 	if !plan.is_empty() and (hit.is_empty() or plan[2] < from.distance_to(hit.position)):
-		game.act(&"string", [plan[0].net_id])
-		_say("Cable strung")
+		var link: Link = plan[0]
+		if link.from.blueprint or link.to.blueprint:
+			_say("Build both ends first")
+		else:
+			game.act(&"string", [link.net_id])
+			_say("Cable strung")
 		return
 	if hit.is_empty() or !(hit.collider is Fixture):
 		return

@@ -469,6 +469,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			if peer == commander_peer and target is Fixture and blueprints.has(target):
 				stock += target.paid()
 				alloy += target.paid(true)
+				_unlink_all(target)
 				_remove_blueprint(target)
 		&"switch":
 			if peer == commander_peer and target is Fixture and built.has(target) and Fixture.SWITCHED.has(target.kind):
@@ -477,11 +478,17 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			var onto: Node = entities.get(args[1], null)
 			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
 				add_link(target, onto, 0, true)
+		&"link_pylon":
+			if peer == commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
+				add_link(target, place_blueprint(&"pylon", args[1], args[2], target.global_position), 0, true)
+		&"flip":
+			if peer == commander_peer and target is Link and can_flip(target) == "":
+				flip(target)
 		&"unlink":
 			if peer == commander_peer and target is Link:
 				remove_link(target)
 		&"string":
-			if target is Link and target.blueprint:
+			if target is Link and target.blueprint and !target.from.blueprint and !target.to.blueprint:
 				target.blueprint = false
 				_announce("Cable strung")
 		&"construct":
@@ -888,6 +895,8 @@ func apply_slow(data: Array) -> void:
 			if !entities.has(row[1]) or !entities.has(row[2]):
 				continue
 			link = add_link(entities[row[1]], entities[row[2]], row[0])
+		link.from = entities.get(row[1], link.from)
+		link.to = entities.get(row[2], link.to)
 		link.items = row[3]
 		link.blueprint = row[4]
 	for link in links.duplicate():
@@ -1082,6 +1091,11 @@ func construct(plan: Fixture) -> bool:
 	alloy += Fixture.ALLOY.get(plan.kind, 0)
 	var fixture := build(plan.kind, at.origin, plan.normal)
 	fixture.basis = at.basis
+	for link in links:
+		if link.from == plan:
+			link.from = fixture
+		if link.to == plan:
+			link.to = fixture
 	_announce("%s built" % Fixture.NAMES[plan.kind])
 	return true
 
@@ -1117,20 +1131,25 @@ func pick_up(fixture: Fixture) -> void:
 func _remove_built(fixture: Fixture) -> void:
 	if fixture.deposit:
 		fixture.deposit.rig = null
-	for link in links.duplicate():
-		if link.from == fixture or link.to == fixture:
-			remove_link(link)
+	_unlink_all(fixture)
 	built.erase(fixture)
 	entities.erase(fixture.net_id)
 	fixture.queue_free()
 
 
-## Why a cable can't go from a to b, or "" if it can.
+func _unlink_all(fixture: Fixture) -> void:
+	for link in links.duplicate():
+		if link.from == fixture or link.to == fixture:
+			remove_link(link)
+
+
+## Why a cable can't go from a to b, or "" if it can. Either end can still
+## be a blueprint; the cable can't be strung till both are up.
 func can_link(a: Fixture, b: Fixture) -> String:
 	if a == b:
 		return "Pick somewhere else to run it to."
-	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind) or a.blueprint or b.blueprint:
-		return "Cables tie to pylons, rigs, foundries and the pod, once they're built."
+	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind):
+		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
 	if a == pod:
 		return "The pod only takes cables in."
 	if b.kind == &"drill":
@@ -1138,8 +1157,42 @@ func can_link(a: Fixture, b: Fixture) -> String:
 	for link in links:
 		if (link.from == a and link.to == b) or (link.from == b and link.to == a):
 			return "They're already linked."
-	var start := a.cable_point()
-	var end := b.cable_point()
+	return cable_clear(a.cable_point(), b.cable_point())
+
+
+## Why a cable can't run from a to a new pylon at pos, or "" if it can.
+func can_link_pylon(a: Fixture, pos: Vector3, normal: Vector3) -> String:
+	if !Fixture.CABLE_HEIGHT.has(a.kind):
+		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
+	if a == pod:
+		return "The pod only takes cables in."
+	if !can_build(&"pylon", pos, normal):
+		return "No room for a pylon there."
+	return cable_clear(a.cable_point(), pos + Terrain.up_at(pos) * Fixture.CABLE_HEIGHT.pylon)
+
+
+func can_flip(link: Link) -> String:
+	if link.to == pod:
+		return "The pod only takes cables in."
+	if link.from.kind == &"drill":
+		return "A rig only sends."
+	return ""
+
+
+## Turns a cable round; what's on it heads back the way it came.
+func flip(link: Link) -> void:
+	var span := link.length()
+	var turned: Array = []
+	for item: Array in link.items:
+		turned.push_front([item[0], span - item[1]])
+	var was := link.from
+	link.from = link.to
+	link.to = was
+	link.items = turned
+
+
+## Why a cable can't run straight from start to end, or "" if it can.
+func cable_clear(start: Vector3, end: Vector3) -> String:
 	if start.distance_to(end) > Link.RANGE:
 		return "Too far: a cable reaches %d m." % Link.RANGE
 	var space := get_world_3d().direct_space_state

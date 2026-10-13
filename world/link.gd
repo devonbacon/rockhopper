@@ -1,17 +1,21 @@
 class_name Link
 extends Node3D
 ## A cable strung from one pylon, rig, foundry or the pod to another,
-## carrying ore and alloy one way along it, spaced out, at walking pace.
-## What reaches the far end waits there till it's taken in. Soldiers can
-## ride it either way, hanging underneath. The commander lays them as
-## blueprints, a line of hologram, that take a soldier's hammer blow to
-## string up.
+## carrying ore and alloy one way along it, spaced out, at walking pace;
+## chevrons crawl along it the way it runs. What reaches the far end waits
+## there till it's taken in. Soldiers can ride it either way, hanging
+## underneath and off to one side. The commander lays them as blueprints,
+## a line of hologram, that take a soldier's hammer blow to string up once
+## both ends are built.
 
 const RANGE := 20.0
 const SPEED := 3.0
 const GAP := 1.5
 ## A rider's feet hang this far under the cable.
 const HANG := 2.2
+## And this far off to the side of it, clear of the masts.
+const SIDE := 1.0
+const CHEVRON_GAP := 2.5
 const ORE := Color(0.3, 0.85, 0.92)
 const ALLOY := Color(1.0, 0.6, 0.2)
 const PLAN := Color(0.45, 0.8, 1.0)
@@ -29,6 +33,9 @@ var _plan_material: StandardMaterial3D
 var _crates: Array[MeshInstance3D] = []
 var _ore_material: StandardMaterial3D
 var _alloy_material: StandardMaterial3D
+var _chevrons: Array[MeshInstance3D] = []
+var _chevron_material: StandardMaterial3D
+var _crawl := 0.0
 ## Lit up while the commander's mouse is on it.
 var highlight := false
 
@@ -63,6 +70,8 @@ func _ready() -> void:
 	add_child(_cable)
 	_ore_material = _glow(ORE)
 	_alloy_material = _glow(ALLOY)
+	_chevron_material = _glow(PLAN)
+	_chevron_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
 
 func start() -> Vector3:
@@ -109,7 +118,7 @@ func nearest_to_ray(origin: Vector3, dir: Vector3) -> Array:
 	return [gap, s, t]
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if !is_instance_valid(from) or !is_instance_valid(to):
 		return
 	var a := start()
@@ -123,6 +132,29 @@ func _process(_delta: float) -> void:
 	_material.emission = PLAN * (1.5 if highlight else 0.0)
 	_cable.material_override = _plan_material if blueprint else _material
 	_plan_material.albedo_color = Color(PLAN, 0.9 if highlight else 0.35 + 0.2 * sin(Time.get_ticks_msec() * 0.006))
+	_crawl = fmod(_crawl + delta * SPEED * 0.5, CHEVRON_GAP)
+	var count := int(span / CHEVRON_GAP)
+	while _chevrons.size() < count:
+		var chevron := MeshInstance3D.new()
+		var cone := CylinderMesh.new()
+		cone.top_radius = 0.0
+		cone.bottom_radius = 0.11
+		cone.height = 0.3
+		cone.radial_segments = 8
+		cone.rings = 1
+		chevron.mesh = cone
+		chevron.material_override = _chevron_material
+		chevron.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(chevron)
+		_chevrons.push_back(chevron)
+	_chevron_material.albedo_color = Color(PLAN, 0.9 if highlight else 0.6)
+	_chevron_material.emission_energy_multiplier = 3.0 if highlight else 1.2
+	for i in _chevrons.size():
+		var chevron := _chevrons[i]
+		chevron.visible = i < count
+		if chevron.visible:
+			var at := fmod(_crawl + i * CHEVRON_GAP, count * CHEVRON_GAP) + (span - count * CHEVRON_GAP) * 0.5
+			chevron.global_transform = Transform3D(Basis(side, along, side.cross(along)), a + along * at)
 	while _crates.size() < items.size():
 		var crate := MeshInstance3D.new()
 		var box := BoxMesh.new()

@@ -12,13 +12,17 @@ extends Node3D
 ## keeps placing), and right-click or Esc puts it away. Delete over a
 ## blueprint cancels it, refunding what's been paid.
 ##
-## Cables: L, then click where it runs from and where it runs to (Shift
-## carries on from there). They're free, laid as a blueprint a soldier puts
-## up with one hammer blow. Delete over a cable cuts it.
+## Cables: drag from a pylon, rig, foundry or turret, built or still a
+## blueprint, to where it runs; or L, then click where it runs from and
+## where it runs to (Shift carries on from there). Letting go or clicking
+## on open ground puts a pylon blueprint there for it. They're free, laid as
+## a blueprint a soldier puts up with one hammer blow once both ends are
+## built. They run one way, the way the arrows point; R over a cable turns
+## it round, and Delete cuts it.
 ##
 ## Click something built to see how it's doing; P, or its button, switches
-## it off or on. Right-click pings the spot for the soldiers. R opens the
-## research panel.
+## it off or on. Right-click pings the spot for the soldiers. R, when not
+## over a cable, opens the research panel.
 
 const PAN_SPEED := 40.0
 const TURN_SPEED := 1.8
@@ -34,6 +38,8 @@ const SPIDER := Color(1.0, 0.3, 0.25)
 const PLAN := Color(0.45, 0.8, 1.0)
 const OFF := Color(0.6, 0.6, 0.65)
 const TURN_STEP := PI / 12.0
+## How far the mouse goes with the button down before it's a drag.
+const DRAG := 12.0
 
 var game: Game
 var camera: Camera3D
@@ -62,6 +68,12 @@ var _research_buttons := {}
 var _ghost: MeshInstance3D
 var _ghost_material: StandardMaterial3D
 var _link_from: Fixture
+## Where a pylon's just been asked for, to carry on from once it shows up.
+var _link_next := Vector3.INF
+## A cable-end the left button went down on, and where, to drag a cable off.
+var _press_on: Fixture
+var _press_at := Vector2.ZERO
+var _dragging := false
 ## Where things were placed or linked lately: [point, age].
 var _marks: Array = []
 var _hover: Fixture
@@ -131,6 +143,13 @@ func _process(delta: float) -> void:
 		focus = null
 	if !is_instance_valid(_link_from):
 		_link_from = null
+	if !is_instance_valid(_press_on):
+		_press_on = null
+	if _link_next != Vector3.INF:
+		for plan in game.blueprints:
+			if plan.kind == &"pylon" and plan.global_position.distance_to(_link_next) < 0.3:
+				_link_from = plan
+				_link_next = Vector3.INF
 	for mark: Array in _marks:
 		mark[1] += delta
 	_marks = _marks.filter(func(mark: Array) -> bool: return mark[1] < 0.8)
@@ -138,10 +157,10 @@ func _process(delta: float) -> void:
 	_alarm = maxf(0.0, _alarm - delta * 0.5)
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	var hit := _mouse_hit()
-	_aim_ghost(hit)
 	_hover = hit.collider if !hit.is_empty() and placing == &"" and hit.collider is Fixture else null
 	if _hover and _hover.kind == &"deposit" and _hover.rig:
 		_hover = _hover.rig
+	_aim_ghost(hit)
 	var was := _hover_link
 	_hover_link = _link_under_mouse() if placing == &"" and !linking and (!_hover or _hover.kind == &"deposit") else null
 	if is_instance_valid(was) and was != _hover_link:
@@ -205,14 +224,25 @@ func _unhandled_input(event: InputEvent) -> void:
 						_height = minf(MAX_HEIGHT, _height / 0.88)
 			MOUSE_BUTTON_LEFT:
 				if !event.pressed:
+					if _dragging and linking and _link_from:
+						_link_click(event.shift_pressed)
+					_dragging = false
+					_press_on = null
 					return
 				if placing != &"":
 					_place(event.shift_pressed)
 				elif linking:
+					var had := _link_from
 					_link_click(event.shift_pressed)
+					if !had and _link_from:
+						_press_on = _link_from
+						_press_at = event.position
 				else:
 					focus = _hover if _hover and _hover.kind != &"deposit" and _hover.kind != &"ore" and !_hover.blueprint else null
 					_update_ui()
+					if _hover and _hover != game.pod and Fixture.CABLE_HEIGHT.has(_hover.kind):
+						_press_on = _hover
+						_press_at = event.position
 			MOUSE_BUTTON_RIGHT:
 				if event.pressed:
 					if placing != &"":
@@ -223,6 +253,11 @@ func _unhandled_input(event: InputEvent) -> void:
 						var hit := _mouse_hit()
 						if !hit.is_empty():
 							game.act(&"ping", [hit.position])
+	elif event is InputEventMouseMotion and _press_on and !_dragging and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and event.position.distance_to(_press_at) > DRAG:
+		_dragging = true
+		if !linking:
+			_start_linking(true)
+		_link_from = _press_on
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		var was := _ground_at(event.position - event.relative)
 		var now := _ground_at(event.position)
@@ -243,7 +278,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_P:
 				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
 			KEY_R:
-				_research.visible = !_research.visible
+				if _hover_link:
+					var why := game.can_flip(_hover_link)
+					if why != "":
+						toast(why)
+					else:
+						game.act(&"flip", [_hover_link.net_id])
+						toast("Cable turned round.")
+				else:
+					_research.visible = !_research.visible
 			KEY_DELETE, KEY_BACKSPACE:
 				if _hover and _hover.blueprint:
 					game.act(&"cancel", [_hover.net_id])
@@ -297,28 +340,49 @@ func _choose(kind: StringName) -> void:
 		_stop_linking()
 
 
-func _start_linking() -> void:
+func _start_linking(quiet := false) -> void:
 	_choose(&"")
 	linking = true
 	_link_from = null
-	toast("Click where the cable runs from, then where it runs to.")
+	if !quiet:
+		toast("Click where the cable runs from, then where it runs to: open ground puts a pylon there.")
 
 
 func _stop_linking() -> void:
 	linking = false
 	_link_from = null
+	_link_next = Vector3.INF
+	_dragging = false
 
 
 func _link_click(keep_going: bool) -> void:
-	if !_hover:
-		return
 	if !_link_from:
+		if !_hover:
+			return
 		if _hover == game.pod:
 			toast("The pod only takes cables in.")
-		elif !Fixture.CABLE_HEIGHT.has(_hover.kind) or _hover.blueprint:
-			toast("Cables tie to pylons, rigs, foundries and the pod, once they're built.")
+		elif !Fixture.CABLE_HEIGHT.has(_hover.kind):
+			toast("Cables tie to pylons, rigs, foundries, turrets and the pod.")
 		else:
 			_link_from = _hover
+		return
+	if _hover == _link_from:
+		return
+	if !_hover:
+		var spot := _placement(_mouse_hit(), &"pylon")
+		if spot.is_empty():
+			return
+		var why := game.can_link_pylon(_link_from, spot.position, spot.normal)
+		if why != "":
+			toast(why)
+			return
+		game.act(&"link_pylon", [_link_from.net_id, spot.position, spot.normal])
+		_marks.append([spot.position, 0.0])
+		_link_from = null
+		if keep_going:
+			_link_next = spot.position
+		else:
+			_stop_linking()
 		return
 	var why := game.can_link(_link_from, _hover)
 	if why != "":
@@ -339,12 +403,12 @@ func _switch(fixture: Fixture) -> void:
 	toast("%s switched %s." % [Fixture.NAMES[fixture.kind], "off" if fixture.enabled else "on"])
 
 
-## Where what's being placed would go, from a mouse hit: a rig snaps to
-## the deposit nearest the mouse. Empty if it can't go anywhere there.
-func _placement(hit: Dictionary) -> Dictionary:
-	if hit.is_empty() or placing == &"":
+## Where kind would go, from a mouse hit: a rig snaps to the deposit
+## nearest the mouse. Empty if it can't go anywhere there.
+func _placement(hit: Dictionary, kind: StringName) -> Dictionary:
+	if hit.is_empty() or kind == &"":
 		return {}
-	if placing == &"drill":
+	if kind == &"drill":
 		var best: Fixture = null
 		for deposit in game.deposits:
 			if deposit.global_position.distance_to(hit.position) < 4.0 and (best == null or deposit.global_position.distance_to(hit.position) < best.global_position.distance_to(hit.position)):
@@ -359,17 +423,22 @@ func _placement(hit: Dictionary) -> Dictionary:
 	return {position = hit.position, normal = hit.normal}
 
 
+## Shows what's being placed where it'd go; or, stringing a cable over open
+## ground, the pylon it'd put there.
 func _aim_ghost(hit: Dictionary) -> void:
-	var spot := _placement(hit)
+	var kind := placing
+	if linking and _link_from and !_hover:
+		kind = &"pylon"
+	var spot := _placement(hit, kind)
 	_ghost.visible = !spot.is_empty()
 	if spot.is_empty():
 		return
-	_ghost.mesh = Fixture.ghost_mesh(placing) if _ghost.get_meta("kind", &"") != placing else _ghost.mesh
-	_ghost.set_meta("kind", placing)
-	var ok := game.can_build(placing, spot.position, spot.normal)
+	_ghost.mesh = Fixture.ghost_mesh(kind) if _ghost.get_meta("kind", &"") != kind else _ghost.mesh
+	_ghost.set_meta("kind", kind)
+	var ok := game.can_build(kind, spot.position, spot.normal) if placing != &"" else game.can_link_pylon(_link_from, spot.position, spot.normal) == ""
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.4) if ok else Color(1.0, 0.3, 0.25, 0.4)
-	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
-	_ghost.global_transform = Transform3D(Basis.looking_at(-_facing(spot.position, up), up), spot.position + up * Fixture.GHOST_LIFT[placing])
+	var up: Vector3 = spot.normal if kind == &"drill" else Terrain.up_at(spot.position)
+	_ghost.global_transform = Transform3D(Basis.looking_at(-_facing(spot.position, up), up), spot.position + up * Fixture.GHOST_LIFT[kind])
 
 
 ## Which way the front of something placed at pos faces: at the pod,
@@ -383,7 +452,7 @@ func _facing(pos: Vector3, up: Vector3) -> Vector3:
 
 
 func _place(keep_placing: bool) -> void:
-	var spot := _placement(_mouse_hit())
+	var spot := _placement(_mouse_hit(), placing)
 	if spot.is_empty():
 		return
 	if !game.can_build(placing, spot.position, spot.normal):
@@ -472,7 +541,7 @@ func _build_ui() -> void:
 			_stop_linking()
 		else:
 			_start_linking())
-	_link_button.tooltip_text = "Cables carry ore and alloy one way, up to %d m. Free: a soldier strings each up with one hammer blow, then can ride it." % Link.RANGE
+	_link_button.tooltip_text = "Cables carry ore and alloy one way, the way the arrows point, up to %d m. Drag one off a pylon, rig, foundry or turret; let go on open ground for a new pylon. Free: a soldier strings each up with one hammer blow once both ends are built, then can ride it." % Link.RANGE
 	bar.add_child(_link_button)
 	var research := _button("Research\n[R]", Vector2(110, 92))
 	research.pressed.connect(func() -> void: _research.visible = !_research.visible)
@@ -482,7 +551,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [L] cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [drag] / [L] cable  [R] flip cable  [Del] cancel blueprint / cut cable  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -666,10 +735,15 @@ func _draw_overlay() -> void:
 			_text(font, at, text, 13, color)
 			if fixture.noise() > 0.0:
 				_text(font, at + Vector2(0, 14), "LOUD", 11, Color(SPIDER, 0.8))
+	for link in game.links:
+		var a := _screen(link.start())
+		var b := _screen(link.end())
+		if a != Vector2.INF and b != Vector2.INF:
+			_arrows(a, b, PLAN if link.blueprint or link == _hover_link else Color(Link.ORE, 0.8))
 	if _hover_link:
 		var middle := _screen((_hover_link.start() + _hover_link.end()) * 0.5)
 		if middle != Vector2.INF:
-			_text(font, middle + Vector2(0, -10), "CABLE BLUEPRINT  [Del] cancel" if _hover_link.blueprint else "CABLE  [Del] cut", 13, PLAN)
+			_text(font, middle + Vector2(0, -10), ("CABLE BLUEPRINT  [Del] cancel" if _hover_link.blueprint else "CABLE  [Del] cut") + "  [R] flip", 13, PLAN)
 	if linking:
 		var mouse := get_viewport().get_mouse_position()
 		if _link_from:
@@ -677,16 +751,27 @@ func _draw_overlay() -> void:
 			var to := mouse
 			var color := Color(SELECTED, 0.5)
 			var why := ""
+			var length := 0.0
 			if _hover and _hover != _link_from:
 				to = _screen(_hover.cable_point())
 				why = game.can_link(_link_from, _hover)
+				length = _link_from.cable_point().distance_to(_hover.cable_point())
+			elif !_hover:
+				var spot := _placement(_mouse_hit(), &"pylon")
+				if !spot.is_empty():
+					var top: Vector3 = spot.position + Terrain.up_at(spot.position) * Fixture.CABLE_HEIGHT.pylon
+					to = _screen(top)
+					why = game.can_link_pylon(_link_from, spot.position, spot.normal)
+					length = _link_from.cable_point().distance_to(top)
+			if length > 0.0:
 				color = SELECTED if why == "" else Hud.ALERT
 			if from != Vector2.INF and to != Vector2.INF:
 				_overlay.draw_dashed_line(from, to, color, 2.0, 8.0)
+				_arrows(from, to, color)
 			if why != "":
 				_text(font, mouse + Vector2(0, 28), why, 13, Hud.ALERT)
-			elif _hover and _hover != _link_from:
-				_text(font, mouse + Vector2(0, 28), "%.0f m" % _link_from.cable_point().distance_to(_hover.cable_point()), 13, color)
+			elif length > 0.0:
+				_text(font, mouse + Vector2(0, 28), "%.0f m%s" % [length, "  + pylon" if !_hover else ""], 13, color)
 		else:
 			_text(font, mouse + Vector2(0, 28), "CABLE FROM...", 13, SELECTED)
 	for mark: Array in _marks:
@@ -703,6 +788,19 @@ func _draw_overlay() -> void:
 			_text(font, at + Vector2(0, -16), "PING" if ping.commander else String(ping.name).to_upper(), 13, color)
 	if _alarm > 0.0:
 		_overlay.draw_rect(Rect2(Vector2.ZERO, _overlay.size), Color(Hud.ALERT, 0.5 * _alarm), false, 10.0)
+
+
+## Arrowheads along a line on screen, the way it runs.
+func _arrows(a: Vector2, b: Vector2, color: Color) -> void:
+	var span := a.distance_to(b)
+	if span < 24.0:
+		return
+	var along := (b - a) / span
+	var across := along.orthogonal()
+	var count := clampi(int(span / 70.0), 1, 6)
+	for i in count:
+		var tip := a + along * (span * (i + 1) / (count + 1) + 5.0)
+		_overlay.draw_colored_polygon(PackedVector2Array([tip, tip - along * 10.0 + across * 6.0, tip - along * 10.0 - across * 6.0]), color)
 
 
 func _screen(point: Vector3) -> Vector2:
