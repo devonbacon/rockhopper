@@ -152,6 +152,7 @@ var _cut_held := 0.0
 var _lit: Link
 ## What R would do, added to the prompt.
 var _cable_hint := ""
+var _space_was_down := false
 
 
 func _ready() -> void:
@@ -232,7 +233,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	align_up()
-	var playing := game.state == Game.State.PLAYING and !SoundEditor.open
+	var downed := game.down_left >= 0.0
+	var playing := game.state == Game.State.PLAYING and !SoundEditor.open and !downed
 	if is_instance_valid(zip):
 		_ride(delta, playing)
 	else:
@@ -257,6 +259,13 @@ func _physics_process(delta: float) -> void:
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
 	if !playing or !is_instance_valid(reel):
 		reel = null
+	var space := Input.is_physical_key_pressed(KEY_SPACE)
+	if downed:
+		prompt = "DOWN  %d s\nHold on: another soldier can hold E on you to get you up\n[Space] Give up and go back to the pod" % ceili(game.down_left)
+		progress = 0.0
+		if space and !_space_was_down and !SoundEditor.open:
+			game.act(&"give_up", [])
+	_space_was_down = space
 	_reel_line.visible = reel != null
 	if reel:
 		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
@@ -469,6 +478,11 @@ func _use(delta: float) -> void:
 		if pressed:
 			let_go()
 		return
+	var fallen := _fallen_ahead()
+	if fallen != 0:
+		prompt = "%s is down\n[Hold E] Get them up" % game.name_of(fallen)
+		_hold(down, delta, Game.REVIVE_TIME, func() -> void: game.act(&"revive", [fallen]))
+		return
 	if _lay_cable(delta):
 		return
 	if _aim_screen():
@@ -536,6 +550,21 @@ func _use(delta: float) -> void:
 		&"lamp", &"panel", &"battery", &"lab", &"pylon", &"barricade":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
+
+
+## The fallen soldier you're stood over and facing, if any.
+func _fallen_ahead() -> int:
+	var look := -camera.global_basis.z
+	look -= up_direction * look.dot(up_direction)
+	for peer: int in game.bodies:
+		var body: Node3D = game.bodies[peer]
+		if !(body is Avatar) or !(body as Avatar).down:
+			continue
+		var to := body.global_position - global_position
+		to -= up_direction * to.dot(up_direction)
+		if to.length() < Game.REVIVE_REACH and (to.length() < 0.6 or look.normalized().dot(to.normalized()) > 0.5):
+			return peer
+	return 0
 
 
 ## R: paying a cable out, tying it on, or putting a pylon down for it;

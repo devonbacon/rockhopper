@@ -13,6 +13,8 @@ extends Node
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
+## - falls with another soldier by, is revived, falls again and gives up,
+##   then falls alone and goes straight back to the pod;
 ## - skips to midnight and watches the spiders come;
 ## - calls the launch from the command chair and lifts off.
 ## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
@@ -125,6 +127,25 @@ func _step(delta: float) -> bool:
 			print("research queued by a soldier: %s; by the commander, stabiliser: %s; then the rifle taken off: %s" % [by_soldier, by_commander, _game.research_queue])
 			if !by_soldier.is_empty() or by_commander != [&"gun", &"stabiliser"] or !_game.research_queue.is_empty():
 				push_error("queueing research from the command chair went wrong")
+			var me := Net.local_id()
+			_game.add_soldier(999)
+			_game.bodies[999].global_position = player.global_position + Vector3(1, 0, 0)
+			_game.health = -10.0
+			_game._look_after(me, 0.01)
+			var fell := _game.down_left
+			_game.handle(me, &"mine", [0])
+			_game.handle(999, &"revive", [me])
+			var revived := [_game.down_left, _game.health]
+			_game.health = -10.0
+			_game._look_after(me, 0.01)
+			_game.handle(me, &"give_up", [])
+			var gave_up := [_game.down_left, _game.health]
+			_game.remove_soldier(999)
+			_game.health = -10.0
+			_game._look_after(me, 0.01)
+			print("fell with a second soldier by: down %.0f s; revived: down %s, health %.0f; fell and gave up: down %s, health %.0f; alone, fell: down %s" % [fell, revived[0], revived[1], gave_up[0], gave_up[1], _game.down_left])
+			if fell <= 0.0 or revived[0] >= 0.0 or revived[1] <= 0.0 or gave_up[0] >= 0.0 or gave_up[1] < Game.HEALTH or _game.down_left >= 0.0:
+				push_error("falling and reviving went wrong")
 			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
 			var plan := _game.place_blueprint(&"pylon", plan_spot[0], plan_spot[1])
 			for i in plan.hits_needed():

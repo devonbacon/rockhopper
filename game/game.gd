@@ -85,6 +85,13 @@ const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
 const HEAL_RATE := 4.0
 const HEAL_DELAY := 4.0
+## Seconds a fallen soldier lies down for, waiting to be revived, before
+## they're back at the pod; how long E's held on them to revive them, from
+## how near, and what they get back up with.
+const DOWN_TIME := 30.0
+const REVIVE_TIME := 2.5
+const REVIVE_REACH := 2.5
+const REVIVE_HEALTH := 0.5
 ## Spiders, for one player: the most alive at once grows from the first to
 ## the second over the mission, and they come up this many seconds apart.
 ## Each player past the first adds half as much again.
@@ -160,6 +167,9 @@ var hurt: float:
 	set(value): _me().hurt = value
 var flares_left: int:
 	get: return _me().flares
+## Seconds left lying down before you're back at the pod, or -1 standing.
+var down_left: float:
+	get: return _me().get("down", -1.0)
 
 var terrain: Terrain
 var sun: Sun
@@ -366,6 +376,11 @@ func _feed_music() -> void:
 func _look_after(peer: int, delta: float) -> void:
 	var s: Dictionary = stats[peer]
 	var body: Node3D = bodies[peer]
+	if s.down >= 0.0:
+		s.down -= delta
+		if s.down <= 0.0:
+			_respawn(peer, "Nobody got to you in time. Back at the pod, without what you carried.")
+		return
 	var head := body.global_position + Terrain.up_at(body.global_position) * 1.65
 	var light := lit_at(head)
 	if light == "" and battery > 0.0 and head.distance_to(pod.global_position) < POD_RANGE:
@@ -382,13 +397,45 @@ func _look_after(peer: int, delta: float) -> void:
 	if s.since_hurt > HEAL_DELAY:
 		s.health = minf(max_health(), s.health + HEAL_RATE * delta)
 	if s.warmth <= 0.0:
-		_respawn(peer, "You froze in the dark. Back at the pod, without what you carried.")
+		_fall(peer, "You froze in the dark.")
 	elif s.health <= 0.0:
-		_respawn(peer, "The spiders got you. Back at the pod, without what you carried.")
+		_fall(peer, "The spiders got you.")
+
+
+## A soldier's fallen: down where they are for DOWN_TIME, for another to
+## revive; or, with nobody else on their feet to, straight back to the pod.
+func _fall(peer: int, why: String) -> void:
+	var helpers := bodies.keys().filter(func(other: int) -> bool: return other != peer and other != commander_peer and !is_down(bodies[other]))
+	if helpers.is_empty():
+		_respawn(peer, why + " Back at the pod, without what you carried.")
+		return
+	var s: Dictionary = stats[peer]
+	s.down = DOWN_TIME
+	s.health = 0.0
+	_show_down(peer, true)
+	sound(&"bite", bodies[peer].global_position)
+	_announce("%s is down! Hold E on them to get them up." % name_of(peer), &"alarm")
+
+
+## Whether a soldier's body is lying down.
+func is_down(body: Node) -> bool:
+	return body != null and body.has_meta("peer") and stats.get(body.get_meta("peer"), _nobody).get("down", -1.0) >= 0.0
+
+
+func _show_down(peer: int, on: bool) -> void:
+	var body: Node3D = bodies.get(peer, null)
+	if body is Avatar:
+		(body as Avatar).set_down(on)
+
+
+func name_of(peer: int) -> String:
+	var info: Dictionary = Net.peers.get(peer, {})
+	return info.get("name", Net.player_name if peer == Net.local_id() else "Soldier")
 
 
 func _respawn(peer: int, why: String) -> void:
 	stats[peer] = _new_stats()
+	_show_down(peer, false)
 	var spot := _spawn_spot_by_pod(peer)
 	if peer == Net.local_id() and player:
 		place_player(spot, pod.global_position)
@@ -416,7 +463,7 @@ func _me() -> Dictionary:
 
 
 func _new_stats() -> Dictionary:
-	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0}
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0}
 
 
 func _track(node: Node, id := 0) -> void:
@@ -459,6 +506,11 @@ func act(action: StringName, args: Array) -> void:
 ## Server: does what peer asked, as peer.
 func handle(peer: int, action: StringName, args: Array) -> void:
 	if !stats.has(peer):
+		return
+	if stats[peer].get("down", -1.0) >= 0.0:
+		# Lying down, all you can do is give up.
+		if action == &"give_up":
+			_respawn(peer, "Back at the pod, without what you carried.")
 		return
 	_acting = peer
 	var target: Node = entities.get(args[0], null) if !args.is_empty() and args[0] is int else null
@@ -560,6 +612,18 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				else:
 					launch_at = INF
 					_announce("Launch called off.")
+		&"revive":
+			var fallen: Node3D = bodies.get(args[0], null)
+			var reviver: Node3D = bodies.get(peer, null)
+			if peer != commander_peer and fallen and reviver and is_down(fallen) and fallen.global_position.distance_to(reviver.global_position) < REVIVE_REACH + 1.5:
+				var s: Dictionary = stats[args[0]]
+				s.down = -1.0
+				s.health = max_health() * REVIVE_HEALTH
+				s.warmth = maxf(s.warmth, 50.0)
+				s.since_hurt = 0.0
+				_show_down(args[0], false)
+				sound(&"respawn", fallen.global_position)
+				_announce("%s got %s back up." % [name_of(peer), name_of(args[0])])
 		&"uncommand":
 			if commander_peer == peer:
 				_leave_command(peer)
@@ -755,7 +819,7 @@ func _send_snapshots(delta: float) -> void:
 			continue
 		if !fast.is_empty():
 			var s: Dictionary = stats[id]
-			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt, s.flares]])
+			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt, s.flares, s.down]])
 		if !slow.is_empty():
 			Net.slow_snapshot.rpc_id(id, slow)
 
@@ -767,7 +831,7 @@ func _fast_state() -> Array:
 			continue
 		var body: Node3D = bodies[peer]
 		var pitch: float = body.pitch if "pitch" in body else 0.0
-		soldiers.append([peer, body.global_position, body.global_rotation.y, pitch])
+		soldiers.append([peer, body.global_position, body.global_rotation.y, pitch, is_down(body)])
 	var spider_rows: Array = []
 	for spider in spiders:
 		spider_rows.append([spider.net_id, spider.global_position, spider.global_basis.get_rotation_quaternion(), spider.health])
@@ -844,6 +908,8 @@ func apply_snapshot(data: Array) -> void:
 			avatar.global_position = row[1]
 			stats[peer] = _new_stats()
 		remote_move(peer, row[1], row[2], row[3])
+		stats[peer].down = 1.0 if row[4] else -1.0
+		avatar.set_down(row[4])
 	for peer in bodies.keys():
 		if !seen.has(peer) and peer != Net.local_id():
 			remove_soldier(peer)
@@ -875,6 +941,7 @@ func apply_snapshot(data: Array) -> void:
 	s.lit_by = mine[3]
 	s.hurt = mine[4]
 	s.flares = mine[5]
+	s.down = mine[6]
 
 
 ## Client: the server's latest of what's built, what ore's left, and what's
@@ -1443,14 +1510,14 @@ func _wire_pod_screen() -> void:
 ## Soldiers count as a little nearer than they are, and the pod further;
 ## whoever's hurt it lately, it goes for regardless.
 func spider_target(spider: Spider) -> Node3D:
-	if spider.grudge and is_instance_valid(spider.grudge) and spider.grudge_time > 0.0 and spider.grudge.visible:
+	if spider.grudge and is_instance_valid(spider.grudge) and spider.grudge_time > 0.0 and spider.grudge.visible and !is_down(spider.grudge):
 		return spider.grudge
 	var from := spider.global_position
 	var best: Node3D = null
 	var best_distance := Spider.SIGHT
 	var candidates: Array[Node3D] = []
 	for peer in bodies:
-		if peer != commander_peer:
+		if peer != commander_peer and !is_down(bodies[peer]):
 			candidates.push_back(bodies[peer])
 	candidates.append_array(built)
 	candidates.push_back(pod)
@@ -1488,6 +1555,8 @@ func damage(target: Node3D, amount: float) -> void:
 		return
 	sound(&"bite", target.global_position)
 	if target.has_meta("peer"):
+		if is_down(target):
+			return
 		var s: Dictionary = stats.get(target.get_meta("peer"), _nobody)
 		s.health -= amount
 		s.hurt = 1.0
@@ -1952,14 +2021,9 @@ func _probe(kind: String) -> void:
 			var pylons := built.filter(func(f: Fixture) -> bool: return f.kind == &"pylon")
 			print("[commander] hammered it: blueprints %d, pylons %d" % [blueprints.size(), pylons.size()])
 			if !pylons.is_empty():
-				act(&"press", [pod.net_id, &"command"])
-				await tree.create_timer(1.0).timeout
 				act(&"link", [pylons[0].net_id, pod.net_id])
 				await tree.create_timer(1.0).timeout
-				if !links.is_empty():
-					act(&"string", [links[-1].net_id])
-					await tree.create_timer(1.0).timeout
-				print("[commander] cabled the pylon to the pod: links %d" % links.size())
+				print("[commander] out of the pod, cabled the pylon to it: links %d, strung %s" % [links.size(), !links.is_empty() and !links[-1].blueprint])
 		await tree.create_timer(2.0).timeout
 		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])
 	elif kind == "stander":

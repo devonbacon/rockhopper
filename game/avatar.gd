@@ -10,6 +10,9 @@ var target_yaw := 0.0
 
 var _label: Label3D
 var _head: Node3D
+var _name := ""
+## Lying where they fell, waiting for someone to revive them.
+var down := false
 
 
 func _ready() -> void:
@@ -60,7 +63,17 @@ func _ready() -> void:
 
 
 func set_label(text: String) -> void:
+	_name = text
 	_label.text = text
+
+
+func set_down(on: bool) -> void:
+	if on == down:
+		return
+	down = on
+	rotation.z = PI * 0.5 if on else 0.0
+	_label.text = "%s\nDOWN: hold E" % _name if on else _name
+	_label.modulate = Color(1.0, 0.45, 0.35) if on else Color.WHITE
 
 
 func _process(delta: float) -> void:

@@ -159,7 +159,8 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	print("peer %d left" % id)
-	if !peers.has(id):
+	# Clients hear of each other leaving too; the server's the one to tell.
+	if !multiplayer.is_server() or !peers.has(id):
 		return
 	peers.erase(id)
 	roster.rpc(peers)

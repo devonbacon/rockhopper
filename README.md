@@ -150,9 +150,12 @@ in to plan, climb out to build. The server runs the
 world: spiders, building, cables, power, research, the bank and the
 clock. Each client moves its own soldier and asks the server for
 everything else. Every client generates the same map from the server's
-seed. Online, freezing or being killed sends you back to the pod without
-what you carried, rather than ending the mission, and a new mission
-starts 15 s after one ends.
+seed. Freezing or being killed doesn't end the mission: you go down
+where you fell for 30 s, and spiders leave you be. Another soldier
+holding E on you for 2.5 s gets you back up with half your health and
+what you carried. If nobody does, or you press Space to give up, or
+there's nobody else on their feet to, you're back at the pod without
+what you carried. A new mission starts 15 s after one ends.
 
 The server turns away a client on a different build. The build is a hash
 of the game's scripts and shaders (everything but `addons`, `tests` and
