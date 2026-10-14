@@ -1,0 +1,97 @@
+{
+	"music": {
+		"bpm": 116.0,
+		"day_chords": "Dm Bb F C",
+		"night_chords": "Dm Bb Gm A",
+		"theme": "D4:3 F4:1 A4:4 Bb4:3 A4:1 F4:4 G4:3 Bb4:1 D5:4 C#5:2 E5:2 A4:4",
+		"arp_order": "0123454321012345",
+		"levels": {
+			"pad": 0.3,
+			"bass": 0.2,
+			"arp": 0.1,
+			"brass": 0.1,
+			"low_brass": 0.08,
+			"braam": 0.13,
+			"guitar": 0.17,
+			"kick": 0.32,
+			"snare": 0.5,
+			"hat": 0.08,
+			"tom": 0.12,
+			"crash": 0.18,
+			"riser": 0.15
+		},
+		"patterns": {
+			"day": {
+				"bass": "8.6.8.6.8.6.8.6.",
+				"arp": "X.7.X.7.X.7.X.7.",
+				"hat": "5.5.5.5.5.5.5.5."
+			},
+			"night": {
+				"bass": "X888X888X888X888",
+				"octave": "..+...+...+...+.",
+				"arp": "X777X777X777X777",
+				"hat": "4646464646464646"
+			},
+			"swarm": {
+				"bass": "X888X888X888X888",
+				"octave": "..+...+...+...+.",
+				"arp": "X777X777X777X777",
+				"hat": "X.X.X.X.X.X.X.X.",
+				"kick": "X.......X.X.....",
+				"snare": "....X.......X...",
+				"guitar": "..7.7...7.7...7.",
+				"guitar_open": "X.....X.....X..."
+			},
+			"siege": {
+				"bass": "X888X888X888X888",
+				"octave": "..+...+...+...+.",
+				"arp": "X777X777X777X777",
+				"hat": "X.X.X.X.X.X.X.X.",
+				"open_hat": "..9...9...9...9.",
+				"kick": "X...X...X.X.X...",
+				"snare": "....X.......X...",
+				"guitar": "..7.7...7.7...7.",
+				"guitar_open": "X.....X.....X..."
+			}
+		},
+		"instruments": {
+			"pad": { "model": "analog", "analog": { "loop": 4.0, "detune": 12.0, "cutoff": 800.0, "sweep": 600.0, "resonance": 0.4 } },
+			"bass": { "analog": { "length": 0.14, "detune": 0.004, "sub": 0.9, "floor": 110.0, "bright": 2800.0, "dark": 850.0, "env": 0.04, "decay": 0.09, "resonance": 1.0, "drive": 1.7 } },
+			"arp": { "analog": { "length": 0.22, "saw": 0.7, "pulse": 0.3, "width": 0.3, "cutoff": 900.0, "env": 3500.0, "env_decay": 0.05, "decay": 0.09, "resonance": 1.2 } },
+			"brass": { "model": "fm", "fm": { "ratio": 1.0, "index": 0.6, "sustain": 2.4, "index_decay": 0.35, "attack": 0.07, "vibrato": 0.06, "vibrato_rate": 5.0, "drive": 1.6, "detune": 1.2 } },
+			"guitar_mute": { "model": "pluck", "pluck": { "length": 0.2, "decay": 0.3, "damping": 0.7, "pick": 1800.0, "position": 0.2, "drive": 4.5, "strum": 0.005 } },
+			"guitar_open": { "model": "pluck", "pluck": { "length": 1.4, "decay": 2.5, "damping": 0.4, "pick": 3000.0, "position": 0.15, "drive": 5.0, "strum": 0.012 } },
+			"kick": { "analog": { "length": 0.4, "low": 46.0, "high": 140.0, "drive": 2.0, "click": 0.5 } },
+			"snare": { "analog": { "tone": 180.0, "noise": 2200.0, "decay": 0.12 } },
+			"tom": { "model": "tuned", "tuned": { "length": 1.4, "pitch": 62.0, "bend": 0.9, "bend_time": 0.06, "decay": 0.55, "noise": 0.25, "band": 700.0, "noise_decay": 0.03 } },
+			"hat": { "analog": { "cutoff": 8000.0 } }
+		}
+	},
+	"sfx": {
+		"shot": { "instrument": "snare", "level": 0.5, "vary": 0.6, "range": 40.0, "settings": { "model": "tuned", "tuned": { "length": 0.25, "pitch": 260.0, "bend": 2.0, "bend_time": 0.012, "decay": 0.07, "noise": 0.9, "band": 2600.0, "noise_decay": 0.03 } } },
+		"turret": { "instrument": "snare", "level": 0.45, "vary": 0.6, "range": 40.0, "settings": { "model": "tuned", "tuned": { "length": 0.2, "pitch": 420.0, "bend": 1.5, "bend_time": 0.01, "decay": 0.05, "noise": 0.7, "band": 4000.0, "noise_decay": 0.02 } } },
+		"swing": { "instrument": "noise", "level": 0.15, "vary": 1.0, "range": 10.0, "settings": { "noise": { "length": 0.22, "cutoff": 600.0, "sweep": 2500.0, "resonance": 1.0, "attack": 0.08, "decay": 0.06 } } },
+		"smash": { "instrument": "kick", "level": 0.5, "vary": 1.0, "range": 20.0, "settings": { "analog": { "length": 0.3, "low": 60.0, "high": 120.0, "sweep": 0.02, "decay": 0.12, "drive": 2.5, "click": 1.0 } } },
+		"clank": { "instrument": "hat", "decay": 0.09, "level": 0.45, "vary": 1.0, "range": 25.0, "settings": { "model": "metal", "metal": { "pitch": 620.0, "cutoff": 5000.0, "ring": 1.0 } } },
+		"mine": { "instrument": "hat", "decay": 0.05, "level": 0.4, "vary": 2.0, "range": 20.0, "settings": { "model": "metal", "metal": { "pitch": 1100.0, "cutoff": 8000.0, "ring": 1.0 } } },
+		"pick_up": { "instrument": "lead", "note": 60.0, "notes": [0, 7], "gap": 0.06, "level": 0.3, "vary": 0.0, "range": 15.0, "settings": { "model": "pluck", "pluck": { "length": 0.4, "decay": 0.3 } } },
+		"hand_in": { "instrument": "lead", "note": 79.0, "notes": [0, 4, 7], "gap": 0.06, "level": 0.25, "vary": 0.0, "range": 20.0, "settings": { "model": "fm", "fm": { "length": 0.6, "ratio": 3.5, "index": 2.5, "sustain": 0.3, "index_decay": 0.1, "decay": 0.4 } } },
+		"spider_hurt": { "instrument": "snare", "level": 0.5, "vary": 2.0, "range": 30.0, "settings": { "model": "tuned", "tuned": { "length": 0.25, "pitch": 180.0, "bend": 1.2, "bend_time": 0.04, "decay": 0.06, "noise": 1.2, "band": 1400.0, "noise_decay": 0.05 } } },
+		"spider_die": { "instrument": "snare", "level": 0.6, "vary": 1.5, "range": 40.0, "settings": { "model": "tuned", "tuned": { "length": 0.6, "pitch": 140.0, "bend": 2.5, "bend_time": 0.12, "decay": 0.3, "noise": 0.8, "band": 900.0, "noise_decay": 0.1 } } },
+		"bite": { "instrument": "snare", "level": 0.6, "vary": 2.0, "range": 25.0, "settings": { "analog": { "length": 0.2, "tone": 110.0, "noise": 1200.0, "decay": 0.05 } } },
+		"flare": { "instrument": "noise", "level": 0.2, "vary": 1.0, "range": 25.0, "settings": { "noise": { "length": 1.2, "cutoff": 3000.0, "sweep": 1500.0, "resonance": 0.3, "attack": 0.005, "decay": 0.5 } } },
+		"grapple": { "instrument": "snare", "level": 0.4, "vary": 1.0, "range": 20.0, "settings": { "model": "tuned", "tuned": { "length": 0.3, "pitch": 900.0, "bend": -1.5, "bend_time": 0.05, "decay": 0.12, "noise": 0.4, "band": 3000.0, "noise_decay": 0.02 } } },
+		"latch": { "instrument": "hat", "decay": 0.03, "level": 0.4, "vary": 1.0, "range": 15.0, "settings": { "model": "metal", "metal": { "pitch": 900.0, "cutoff": 6000.0, "ring": 1.0 } } },
+		"announce": { "instrument": "lead", "note": 84.0, "notes": [0, 7], "gap": 0.1, "level": 0.18, "vary": 0.0, "range": 0.0, "settings": { "model": "fm", "fm": { "ratio": 2.0, "index": 1.2 } } },
+		"built": { "instrument": "lead", "note": 67.0, "notes": [0, 4, 7, 12], "gap": 0.09, "level": 0.3, "vary": 0.0, "range": 0.0, "settings": { "model": "fm", "fm": { "length": 0.8, "ratio": 1.0, "index": 1.5, "tine": 0.6, "decay": 0.5 } } },
+		"researched": { "instrument": "lead", "note": 72.0, "notes": [0, 7, 12, 19], "gap": 0.07, "level": 0.2, "vary": 0.0, "range": 0.0, "settings": { "analog": { "length": 0.25 } } },
+		"alarm": { "instrument": "lead", "note": 76.0, "notes": [0, -5, 0, -5], "gap": 0.18, "level": 0.18, "vary": 0.0, "range": 0.0, "settings": { "analog": { "length": 0.22, "saw": 0.0, "pulse": 1.0, "width": 0.5, "cutoff": 2500.0, "env": 2000.0, "decay": 0.25 } } },
+		"ping": { "instrument": "lead", "note": 88.0, "level": 0.22, "vary": 0.0, "range": 0.0, "settings": { "model": "fm", "fm": { "length": 1.0, "ratio": 4.0, "index": 1.5, "decay": 0.8 } } },
+		"press": { "instrument": "lead", "note": 84.0, "level": 0.15, "vary": 0.0, "range": 0.0, "settings": { "analog": { "length": 0.06, "saw": 0.0, "pulse": 1.0, "cutoff": 3000.0, "decay": 0.04 } } },
+		"place": { "instrument": "lead", "note": 67.0, "level": 0.3, "vary": 0.0, "range": 0.0, "settings": { "model": "pluck", "pluck": { "length": 0.4, "decay": 0.3 } } },
+		"cancel": { "instrument": "lead", "note": 55.0, "notes": [0, -5], "gap": 0.06, "level": 0.3, "vary": 0.0, "range": 0.0, "settings": { "model": "pluck", "pluck": { "length": 0.4, "decay": 0.3 } } },
+		"respawn": { "instrument": "lead", "note": 62.0, "notes": [0, 7, 12], "gap": 0.12, "level": 0.25, "vary": 0.0, "range": 0.0, "settings": { "model": "fm", "fm": { "length": 1.0, "decay": 0.6 } } },
+		"jet": { "instrument": "noise", "loop": true, "level": 0.15, "vary": 0.0, "range": 0.0, "settings": { "noise": { "length": 2.0, "cutoff": 700.0, "sweep": 700.0, "resonance": 0.4 } } },
+		"zip": { "instrument": "noise", "loop": true, "level": 0.12, "vary": 0.0, "range": 0.0, "settings": { "noise": { "length": 2.0, "cutoff": 2200.0, "sweep": 2200.0, "resonance": 1.6 } } }
+	}
+}

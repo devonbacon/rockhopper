@@ -175,6 +175,8 @@ func _process(delta: float) -> void:
 
 
 func _pan(delta: float) -> void:
+	if SoundEditor.open:
+		return
 	_yaw += _axis(KEY_Q, KEY_E) * TURN_SPEED * delta
 	var pan := Vector2(_axis(KEY_D, KEY_A), _axis(KEY_S, KEY_W))
 	var mouse := get_viewport().get_mouse_position()
@@ -283,15 +285,18 @@ func _unhandled_input(event: InputEvent) -> void:
 					if why != "":
 						toast(why)
 					else:
+						Sfx.play(&"press")
 						game.act(&"flip", [_hover_link.net_id])
 						toast("Cable turned round.")
 				else:
 					_research.visible = !_research.visible
 			KEY_DELETE, KEY_BACKSPACE:
 				if _hover and _hover.blueprint:
+					Sfx.play(&"cancel")
 					game.act(&"cancel", [_hover.net_id])
 					toast("%s blueprint cancelled, %s back." % [Fixture.NAMES[_hover.kind], Game.price(_hover.paid(), _hover.paid(true))])
 				elif _hover_link:
+					Sfx.play(&"cancel")
 					game.act(&"unlink", [_hover_link.net_id])
 					toast("Cable blueprint cancelled." if _hover_link.blueprint else "Cable cut.")
 			KEY_ESCAPE:
@@ -376,6 +381,7 @@ func _link_click(keep_going: bool) -> void:
 		if why != "":
 			toast(why)
 			return
+		Sfx.play(&"place")
 		game.act(&"link_pylon", [_link_from.net_id, spot.position, spot.normal])
 		_marks.append([spot.position, 0.0])
 		_link_from = null
@@ -388,6 +394,7 @@ func _link_click(keep_going: bool) -> void:
 	if why != "":
 		toast(why)
 		return
+	Sfx.play(&"place")
 	game.act(&"link", [_link_from.net_id, _hover.net_id])
 	_marks.append([_hover.cable_point(), 0.0])
 	if keep_going and _hover != game.pod:
@@ -399,6 +406,7 @@ func _link_click(keep_going: bool) -> void:
 func _switch(fixture: Fixture) -> void:
 	if !fixture or !Fixture.SWITCHED.has(fixture.kind):
 		return
+	Sfx.play(&"press")
 	game.act(&"switch", [fixture.net_id])
 	toast("%s switched %s." % [Fixture.NAMES[fixture.kind], "off" if fixture.enabled else "on"])
 
@@ -459,6 +467,7 @@ func _place(keep_placing: bool) -> void:
 		toast("Too steep there, or too close to something.")
 		return
 	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
+	Sfx.play(&"place")
 	game.act(&"blueprint", [placing, spot.position, spot.normal, spot.position + _facing(spot.position, up) * 5.0])
 	_marks.append([spot.position, 0.0])
 	if !keep_placing:
@@ -567,7 +576,8 @@ func _build_ui() -> void:
 		button.pressed.connect(func() -> void:
 			var lab := _lab_for(upgrade)
 			if lab:
-				game.act(&"press", [lab.net_id, upgrade]))
+				game.act(&"press", [lab.net_id, upgrade])
+				Sfx.play(&"press"))
 		_research_rows.add_child(button)
 		_research_buttons[upgrade] = button
 	_research = _panel(_research_rows)

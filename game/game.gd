@@ -289,7 +289,7 @@ func _simulate(delta: float) -> void:
 				lab.research_time += delta
 				if lab.research_time >= UPGRADES[lab.researching].time:
 					researched[lab.researching] = true
-					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize())
+					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize(), &"researched")
 					lab.researching = &""
 	var full := capacity()
 	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
@@ -379,6 +379,7 @@ func _respawn(peer: int, why: String) -> void:
 	if peer == Net.local_id() and player:
 		place_player(spot, pod.global_position)
 		player._say(why)
+		Sfx.play(&"respawn")
 	else:
 		var body: Node3D = bodies[peer]
 		body.global_position = spot
@@ -450,17 +451,22 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 	match action:
 		&"mine":
 			if target is Fixture and (ores.has(target) or deposits.has(target)):
+				sound(&"mine", target.global_position)
 				mine(target)
 		&"pick_up":
 			if target is Fixture and built.has(target):
+				sound(&"pick_up", target.global_position)
 				pick_up(target)
 		&"empty_rig":
 			if target is Fixture and built.has(target):
+				sound(&"pick_up", target.global_position)
 				empty_rig(target)
 		&"load":
 			if target is Fixture and built.has(target) and target.kind == &"turret":
+				sound(&"pick_up", target.global_position)
 				load_turret(target)
 		&"hand_in":
+			sound(&"hand_in", pod.global_position)
 			hand_in()
 		&"blueprint":
 			if peer == commander_peer and can_build(args[0], args[1], args[2]):
@@ -490,17 +496,21 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"string":
 			if target is Link and target.blueprint and !target.from.blueprint and !target.to.blueprint:
 				target.blueprint = false
+				sound(&"clank", (target.start() + target.end()) * 0.5)
 				_announce("Cable strung")
 		&"construct":
 			if target is Fixture and blueprints.has(target):
+				sound(&"clank", target.global_position)
 				construct(target)
 		&"repair":
 			if target is Fixture and (target == pod or built.has(target)):
+				sound(&"clank", target.global_position)
 				target.health = minf(target.max_health, target.health + REPAIR)
 		&"flare":
 			var s: Dictionary = stats[peer]
 			if s.flares > 0:
 				s.flares -= 1
+				sound(&"flare", args[0])
 				_throw_flare(args[0], args[1])
 		&"ping":
 			var info: Dictionary = Net.peers.get(peer, {})
@@ -523,6 +533,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				_leave_command(peer)
 		&"hit":
 			if target is Spider:
+				sound(&"spider_hurt", target.global_position)
 				(target as Spider).hit(args[1], bodies.get(peer, null))
 		&"fling":
 			if target is Spider:
@@ -530,9 +541,10 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"shot":
 			for id in Net.peers:
 				if id != peer and id != Net.local_id():
-					Net.effect.rpc_id(id, &"tracer", args)
+					Net.effect.rpc_id(id, &"tracer", [args[0], args[1], &"shot"])
 			if peer != Net.local_id() and player:
 				player._tracer(args[0], args[1])
+				Sfx.play(&"shot", args[0])
 	_acting = 0
 
 
@@ -547,9 +559,11 @@ func on_event(kind: StringName, args: Array) -> void:
 			if player:
 				place_player(args[0], pod.global_position)
 				player._say(args[1])
+				Sfx.play(&"respawn")
 		&"announce":
 			if hud:
 				hud.announce(args[0])
+			Sfx.play(args[1])
 		&"command":
 			if args[0]:
 				_enter_view()
@@ -558,10 +572,14 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"tracer":
 			if player:
 				player._tracer(args[0], args[1])
+			Sfx.play(args[2], args[0])
+		&"sound":
+			Sfx.play(args[0], args[1])
 		&"ping":
 			pings.assign(pings.filter(func(p: Dictionary) -> bool: return p.peer != args[3]))
 			pings.push_back({position = args[0], name = args[1], commander = args[2], age = 0.0, peer = args[3]})
 			_ping_beam(args[0], args[2])
+			Sfx.play(&"ping")
 
 
 func _show_reply(owner: Node, text: String) -> void:
@@ -570,13 +588,25 @@ func _show_reply(owner: Node, text: String) -> void:
 		commander_view.toast(text)
 
 
-func _announce(text: String) -> void:
+func _announce(text: String, sound_name := &"announce") -> void:
 	if hud:
 		hud.announce(text)
+	if Net.has_local_player():
+		Sfx.play(sound_name)
 	if Net.networked():
 		for id in Net.peers:
 			if id != Net.local_id():
-				Net.event.rpc_id(id, &"announce", [text])
+				Net.event.rpc_id(id, &"announce", [text, sound_name])
+
+
+## Server: a sound for everyone in earshot, at `at` (or flat, if INF).
+func sound(sound_name: StringName, at := Vector3.INF) -> void:
+	if Net.has_local_player():
+		Sfx.play(sound_name, at)
+	if Net.networked():
+		for id in Net.peers:
+			if id != Net.local_id():
+				Net.effect.rpc_id(id, &"sound", [sound_name, at])
 
 
 func add_soldier(peer: int) -> void:
@@ -1096,7 +1126,7 @@ func construct(plan: Fixture) -> bool:
 			link.from = fixture
 		if link.to == plan:
 			link.to = fixture
-	_announce("%s built" % Fixture.NAMES[plan.kind])
+	_announce("%s built" % Fixture.NAMES[plan.kind], &"built")
 	return true
 
 
@@ -1303,9 +1333,10 @@ func _run_turret(turret: Fixture, delta: float) -> void:
 func _tracer_for_all(from: Vector3, to: Vector3) -> void:
 	if player:
 		player._tracer(from, to)
+		Sfx.play(&"turret", from)
 	for id in Net.peers:
 		if id != Net.local_id():
-			Net.effect.rpc_id(id, &"tracer", [from, to])
+			Net.effect.rpc_id(id, &"tracer", [from, to, &"turret"])
 
 
 ## Loads a turret from your pockets, as much as it'll take.
@@ -1422,6 +1453,7 @@ func bite_reach(target: Node3D) -> float:
 func damage(target: Node3D, amount: float) -> void:
 	if state != State.PLAYING:
 		return
+	sound(&"bite", target.global_position)
 	if target.has_meta("peer"):
 		var s: Dictionary = stats.get(target.get_meta("peer"), _nobody)
 		s.health -= amount
@@ -1434,7 +1466,7 @@ func damage(target: Node3D, amount: float) -> void:
 			_pod_hurt_at = time
 		if target == pod and _pod_alert <= 0.0:
 			_pod_alert = POD_ALERT_EVERY
-			_announce("The pod is under attack!")
+			_announce("The pod is under attack!", &"alarm")
 		if target == pod and commander_view and commander_view.visible:
 			commander_view.pod_hit()
 

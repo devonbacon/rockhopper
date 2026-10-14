@@ -130,6 +130,22 @@ func _build_pause() -> void:
 	slider.drag_ended.connect(func(_changed: bool) -> void: Music.save_volume())
 	music.add_child(slider)
 	column.add_child(music)
+	var effects := HBoxContainer.new()
+	effects.add_theme_constant_override("separation", 12)
+	var effects_label := _label(18)
+	effects_label.text = "Effects"
+	effects.add_child(effects_label)
+	var effects_slider := HSlider.new()
+	effects_slider.min_value = 0.0
+	effects_slider.max_value = 1.0
+	effects_slider.step = 0.05
+	effects_slider.value = Sfx.volume
+	effects_slider.custom_minimum_size = Vector2(190, 32)
+	effects_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	effects_slider.value_changed.connect(func(value: float) -> void: Sfx.volume = value)
+	effects_slider.drag_ended.connect(func(_changed: bool) -> void: Sfx.save_volume())
+	effects.add_child(effects_slider)
+	column.add_child(effects)
 	for entry: Array in [["Resume", func() -> void: set_paused(false)],
 			["Leave" if Net.networked() else "New map", func() -> void:
 				get_tree().paused = false
@@ -138,6 +154,9 @@ func _build_pause() -> void:
 					get_tree().change_scene_to_file("res://menu/menu.tscn")
 				else:
 					get_tree().reload_current_scene()],
+			["Sound editor (F2)", func() -> void:
+				set_paused(false)
+				SoundEditor.toggle()],
 			["Quit", func() -> void: get_tree().quit()]]:
 		var button := Button.new()
 		button.text = entry[0]

@@ -256,6 +256,27 @@ and comes back down only after four calmer bars. The pause menu has its
 volume, kept between runs. The score is `audio/music.gd`; the synth,
 `audio/instruments.gd`, comes from Real-Time Logistics.
 
+## Sound effects and the sound editor
+
+Actions have synth sound effects: guns and turrets, the hammer, mining,
+handing in, flares, the grapple, cables, spiders hurt, dying and biting,
+pings, announcements (building, research and the pod alarm have their
+own), and the commander's clicks. The jetpack and cable riding loop.
+Things in the world sound from where they happen, and the server sends
+them to everyone in earshot (`Game.sound`); your own gun, swing, grapple
+and clicks sound at once on your machine.
+
+Everything the music and effects are made from is in
+`audio/sounds.json`: the tempo, chords, theme, each mood's step
+patterns, levels and instruments, and each effect's instrument and
+settings. F2 (or the pause menu) opens the sound editor, adapted from
+Real-Time Logistics' music editor, which changes it all as it plays: it
+holds a mood, mutes parts, and plays an effect each time you change it.
+Save writes `audio/sounds.json` when run from the Godot editor, and
+`user://sounds.json` anywhere else, where it then wins over the
+project's. Copy and Paste move the whole file as JSON. The pause menu
+has the effects' volume too.
+
 ## Tuning
 
 Mission, power, health and spider numbers are constants at the top of
@@ -298,6 +319,7 @@ User arguments after `--`, e.g.
   30) once it's ready, then quits; `solo=name` plays only the sounds
   whose names start with it (bass, arp, brass, braam, guitar, kick,
   snare, hat, tom, pad).
+- `sound_editor=N` opens the sound editor on tab N.
 ## Layout
 
 - `world/terrain.gd`: the ground, a signed distance field (hills,
@@ -322,6 +344,10 @@ User arguments after `--`, e.g.
 - `menu/menu.gd`: the front door.
 - `audio/music.gd` (autoload `Music`), `audio/instruments.gd`: the
   soundtrack and its synth.
+- `audio/sfx.gd` (autoload `Sfx`): sound effects.
+- `audio/sounds.gd`, `audio/sounds.json`: what the music and effects
+  are made from.
+- `ui/sound_editor/` (autoload `SoundEditor`): the sound editor.
 - `game/commander.gd`: the commander's view.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,

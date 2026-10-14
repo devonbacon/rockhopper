@@ -179,7 +179,7 @@ func look(pitch: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if !game or game.state != Game.State.PLAYING:
+	if !game or game.state != Game.State.PLAYING or SoundEditor.open:
 		return
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	if event is InputEventMouseMotion and captured:
@@ -204,7 +204,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	align_up()
-	var playing := game.state == Game.State.PLAYING
+	var playing := game.state == Game.State.PLAYING and !SoundEditor.open
 	if is_instance_valid(zip):
 		_ride(delta, playing)
 	else:
@@ -213,6 +213,8 @@ func _physics_process(delta: float) -> void:
 	_hook_cooldown = maxf(0.0, _hook_cooldown - delta)
 	_flare_cooldown = maxf(0.0, _flare_cooldown - delta)
 	_draw_rope(delta)
+	Sfx.hold(&"jet", jetting)
+	Sfx.hold(&"zip", zip != null)
 	_swing = maxf(0.0, _swing - delta / HAMMER_EVERY)
 	_hammer.rotation.x = -1.3 * sin(_swing * PI) if _swing > 0.0 else 0.0
 	notice_time = maxf(0.0, notice_time - delta)
@@ -299,6 +301,7 @@ func _grab(link: Link, at: float) -> void:
 	_zip_dir = 1.0 if along.dot(ahead) >= 0.0 else -1.0
 	_zip_side = (along * _zip_dir).cross(up_direction).normalized()
 	_jump_was_down = Input.is_physical_key_pressed(KEY_SPACE)
+	Sfx.play(&"latch")
 	_say("Riding the cable: [E] or [Space] to let go")
 
 
@@ -434,6 +437,7 @@ func _use(delta: float) -> void:
 			var described: String = _screen.describe.call(_screen.hover)
 			prompt = described if described != "" else "[E] " + String(_screen.button.call(_screen.hover)[0]).capitalize()
 			if pressed:
+				Sfx.play(&"press")
 				_screen.press()
 		return
 	var cable := _aim_cable(REACH + 2.0)
@@ -538,11 +542,13 @@ func _switch(to: StringName) -> void:
 func _smash() -> void:
 	_cooldown = HAMMER_EVERY
 	_swing = 1.0
+	Sfx.play(&"swing")
 	var from := camera.global_position
 	var ahead := -camera.global_basis.z
 	for spider: Spider in game.spiders.duplicate():
 		var to := spider.global_position + Terrain.up_at(spider.global_position) * 0.4 - from
 		if to.length() < HAMMER_REACH and to.normalized().dot(ahead) > 0.55:
+			Sfx.play(&"smash")
 			game.act(&"hit", [spider.net_id, HAMMER_DAMAGE])
 			game.act(&"fling", [spider.net_id, (to.normalized() + up_direction * 0.6) * 9.0, 0.8])
 	var hit := _aim(HAMMER_REACH)
@@ -612,8 +618,10 @@ func _throw_hook() -> void:
 		game.act(&"fling", [spider.net_id, home.normalized() * minf(9.0, home.length()) + up_direction * 2.0, 0.6])
 		_yank_from = spider.global_position
 		_rope_flash = 0.2
+		Sfx.play(&"grapple")
 		return
 	hooked = true
+	Sfx.play(&"grapple")
 	_hook_point = hit.position
 
 
@@ -701,6 +709,7 @@ func _say(text: String) -> void:
 func _fire() -> void:
 	_cooldown = FIRE_EVERY
 	_recoil = 1.0
+	Sfx.play(&"shot")
 	var from := camera.global_position
 	var angle := deg_to_rad(spread) * sqrt(randf())
 	var around := randf() * TAU

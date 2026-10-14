@@ -18,6 +18,8 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 Net="*res://net/net.gd"
 Music="*res://audio/music.gd"
+Sfx="*res://audio/sfx.gd"
+SoundEditor="*res://ui/sound_editor/sound_editor.gd"
 _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 
 [display]
