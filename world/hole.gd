@@ -7,6 +7,9 @@ const RADIUS := 1.6
 
 var net_id := 0
 var normal := Vector3.UP
+## Torn open by the pod's engines spooling up, not by nightfall: it stays
+## open, sun or not, till the pod's gone or the launch is called off.
+var extraction := false
 
 var _glow: OmniLight3D
 var _age := 0.0

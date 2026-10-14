@@ -289,7 +289,7 @@ func _launch() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if game.launch_at == INF and now > _launch_armed:
 		_launch_armed = now + 3.0
-		toast("Press Launch again to lift off in %d s. Anyone not aboard is left behind." % Game.LAUNCH_COUNTDOWN)
+		toast("Press Launch again to lift off in %d s. The engines will bring the bugs; anyone not aboard is left behind." % Game.LAUNCH_COUNTDOWN)
 		return
 	_launch_armed = 0.0
 	Sfx.play(&"press")
@@ -446,7 +446,8 @@ func _build_ui() -> void:
 	bar.add_child(gear)
 	_launch_button = _button("", Vector2(110, 92))
 	_launch_button.pressed.connect(_launch)
-	_launch_button.tooltip_text = "Lift off in %d s, with whoever's aboard. Whatever's banked then is the score; staying on gets you more, but every night's worse." % Game.LAUNCH_COUNTDOWN
+	_launch_button.tooltip_text = "Lift off in %d s, with whoever's aboard. Whatever's banked then is the score; staying on gets you more, but every night's worse.
+The engines spooling up tear bug holes open near the pod, and frenzied spiders come for it till lift-off." % Game.LAUNCH_COUNTDOWN
 	bar.add_child(_launch_button)
 	var bar_panel := _panel(bar)
 	bar_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER

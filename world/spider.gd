@@ -4,7 +4,8 @@ extends CharacterBody3D
 ## that it can bite, you or anything built, or for anything working loud
 ## enough to hear; and for a while, for whoever last hurt it. Sunlight
 ## drives it back underground. You can outrun one, but not by walking. A
-## barricade in its way, it chews through.
+## barricade in its way, it chews through. Frenzied, out of the holes the
+## pod's engines tear open, it goes for the pod, sun or no sun.
 
 const LAYER := 16
 const SPEED := 4.6
@@ -30,6 +31,7 @@ var health := HEALTH
 var target: Node3D
 var grudge: Node3D
 var grudge_time := 0.0
+var frenzied := false
 
 ## Counting down while it climbs out of the rock, or sinks back in.
 var _rising := RISE_TIME
@@ -100,7 +102,7 @@ func _physics_process(delta: float) -> void:
 	_sun_check -= delta
 	if _sun_check <= 0.0:
 		_sun_check = 0.5
-		if game.sun.lights(global_position + up * 0.6, get_world_3d().direct_space_state):
+		if !frenzied and game.sun.lights(global_position + up * 0.6, get_world_3d().direct_space_state):
 			burrow()
 			return
 	if _flung > 0.0:

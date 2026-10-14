@@ -44,6 +44,15 @@ enum State { PLAYING, WON, LOST }
 const RAMP := 720.0
 ## Seconds from the commander calling the launch to lift-off.
 const LAUNCH_COUNTDOWN := 45.0
+## Calling it spools the engines up, and the noise tears this many bug
+## holes open nearer the pod (one more with three players or more), whose
+## frenzied spiders come for the pod, day or night, this often, up to
+## this many at once (both for one player, scaled like the night's).
+const EXTRACTION_HOLES := 2
+const EXTRACTION_NEAR := 16.0
+const EXTRACTION_FAR := 30.0
+const EXTRACTION_GAP := 1.4
+const EXTRACTION_SPIDERS := 6
 const QUOTA := 100
 const BATTERY := 100.0
 const START_BATTERY := 60.0
@@ -213,6 +222,7 @@ var _nobody := _new_stats()
 var _rng := RandomNumberGenerator.new()
 var _light_check := 0.0
 var _spawn_in := 2.0
+var _frenzy_in := 0.0
 var _night := false
 var _snap_in := 0.0
 var _slow_in := 0.0
@@ -663,10 +673,12 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			if peer == commander_peer:
 				if launch_at == INF:
 					launch_at = time + LAUNCH_COUNTDOWN
-					_announce("The pod launches in %d s: get back aboard!" % LAUNCH_COUNTDOWN, &"alarm")
+					_announce("The pod launches in %d s: get back aboard! The engines are waking the bugs: hold the pod!" % LAUNCH_COUNTDOWN, &"alarm")
+					_open_extraction_holes()
 				else:
 					launch_at = INF
-					_announce("Launch called off.")
+					_close_holes(true)
+					_announce("Launch called off. The engines spool down.")
 		&"revive":
 			var fallen: Node3D = bodies.get(args[0], null)
 			var reviver: Node3D = bodies.get(peer, null)
@@ -1649,6 +1661,8 @@ func _wire_pod_screen() -> void:
 func spider_target(spider: Spider) -> Node3D:
 	if spider.grudge and is_instance_valid(spider.grudge) and spider.grudge_time > 0.0 and spider.grudge.visible and !is_down(spider.grudge):
 		return spider.grudge
+	if spider.frenzied:
+		return pod
 	var from := spider.global_position
 	var best: Node3D = null
 	var best_distance := Spider.SIGHT
@@ -1716,9 +1730,10 @@ func remove_spider(spider: Spider) -> void:
 	spider.queue_free()
 
 
-func spawn_spider(spot: Vector3) -> void:
+func spawn_spider(spot: Vector3, frenzied := false) -> void:
 	var spider := Spider.new()
 	spider.game = self
+	spider.frenzied = frenzied
 	spider.position = spot
 	add_child(spider)
 	_track(spider)
@@ -1768,29 +1783,74 @@ func _ping_beam(at: Vector3, from_commander: bool) -> void:
 ## Brings spiders up out of the ground, somewhere unlit not far from a
 ## soldier or something built.
 func _spawn_spiders(delta: float) -> void:
+	var players := (1.0 + maxi(1, bodies.size())) * 0.5
+	_spawn_frenzied(delta, players)
 	if Sun.dir_at(time).y > 0.0:
 		_night = false
-		for hole in holes:
-			entities.erase(hole.net_id)
-			hole.queue_free()
-		holes.clear()
+		_close_holes(false)
 		return
 	if !_night:
 		_night = true
 		_open_holes()
 	_spawn_in -= delta
-	if _spawn_in > 0.0 or holes.is_empty():
+	var night_holes := holes.filter(func(h: Hole) -> bool: return !h.extraction)
+	if _spawn_in > 0.0 or night_holes.is_empty():
 		return
 	var progress := time / RAMP
-	var players := (1.0 + maxi(1, bodies.size())) * 0.5
 	_spawn_in = maxf(lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress), SPAWN_GAP_END * 0.5) / players
-	if spiders.size() >= roundi(minf(lerpf(SPIDERS_START, SPIDERS_END, progress), SPIDERS_END * 2.0) * players):
+	var calm := spiders.filter(func(s: Spider) -> bool: return !s.frenzied).size()
+	if calm >= roundi(minf(lerpf(SPIDERS_START, SPIDERS_END, progress), SPIDERS_END * 2.0) * players):
 		return
-	var hole: Hole = holes[_rng.randi() % holes.size()]
+	spawn_spider(_spot_by(night_holes[_rng.randi() % night_holes.size()]))
+
+
+## While the engines spool up: frenzied spiders out of the holes they tore.
+func _spawn_frenzied(delta: float, players: float) -> void:
+	_frenzy_in -= delta
+	var torn := holes.filter(func(h: Hole) -> bool: return h.extraction)
+	if _frenzy_in > 0.0 or torn.is_empty():
+		return
+	_frenzy_in = EXTRACTION_GAP / players
+	if spiders.filter(func(s: Spider) -> bool: return s.frenzied).size() >= roundi(EXTRACTION_SPIDERS * players):
+		return
+	spawn_spider(_spot_by(torn[_rng.randi() % torn.size()]), true)
+
+
+## Somewhere in a bug hole's mouth.
+func _spot_by(hole: Hole) -> Vector3:
 	var frame := Fixture.upright(hole.normal)
 	var angle := _rng.randf() * TAU
 	var spot := hole.global_position + (frame.x * cos(angle) + frame.z * sin(angle)) * _rng.randf_range(0.0, Hole.RADIUS * 0.7)
-	spawn_spider(terrain.surface_point(spot)[0])
+	return terrain.surface_point(spot)[0]
+
+
+## Closes the night's holes, or the ones the engines tore.
+func _close_holes(extraction: bool) -> void:
+	for hole in holes.duplicate():
+		if hole.extraction == extraction:
+			holes.erase(hole)
+			entities.erase(hole.net_id)
+			hole.queue_free()
+
+
+func _open_extraction_holes() -> void:
+	var want := EXTRACTION_HOLES + (1 if bodies.size() >= 3 else 0)
+	var spots: Array[Array] = terrain.surface_spots.duplicate()
+	_shuffle(spots)
+	var opened := 0
+	for loose in [1.0, 0.6]:
+		for spot in spots:
+			if opened >= want:
+				break
+			var at: Vector3 = spot[0]
+			var from_pod := at.distance_to(pod.global_position)
+			if from_pod < EXTRACTION_NEAR * loose or from_pod > EXTRACTION_FAR / loose or Vector2(at.x, at.z).length() > Terrain.FLOOR_RADIUS - 4.0 or (spot[1] as Vector3).y < 0.8 * loose:
+				continue
+			if holes.any(func(h: Hole) -> bool: return h.global_position.distance_to(at) < HOLE_APART * 0.6 * loose):
+				continue
+			_add_hole(at, spot[1]).extraction = true
+			opened += 1
+	_frenzy_in = 3.0
 
 
 ## Nightfall: one bug hole the first night, one more each night after, and
@@ -1803,7 +1863,7 @@ func _open_holes() -> void:
 	_shuffle(spots)
 	for loose in [1.0, 0.5]:
 		for spot in spots:
-			if holes.size() >= want:
+			if holes.filter(func(h: Hole) -> bool: return !h.extraction).size() >= want:
 				break
 			var at: Vector3 = spot[0]
 			var from_pod := at.distance_to(pod.global_position)

@@ -18,7 +18,8 @@ extends Node
 ##   (losing the armour), then falls alone and goes straight back to the
 ##   pod;
 ## - skips to midnight and watches the spiders come;
-## - calls the launch from the command chair and lifts off.
+## - calls the launch from the command chair, which tears bug holes open
+##   by the pod, whose frenzied spiders go for it, and lifts off.
 ## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
 ## Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn
 
@@ -31,6 +32,8 @@ var _foundry: Fixture
 var _lab: Fixture
 var _armory: Fixture
 var _ride_from := Vector3.ZERO
+var _frenzied_seen := 0
+var _at_pod_seen := 0
 
 
 func _ready() -> void:
@@ -261,8 +264,13 @@ func _step(delta: float) -> bool:
 			var by_soldier := _game.launch_at
 			_game.commander_peer = Net.local_id()
 			_game.handle(Net.local_id(), &"launch", [])
+			var torn := _game.holes.filter(func(h: Hole) -> bool: return h.extraction).size()
 			_game.handle(Net.local_id(), &"launch", [])
 			var called_off := _game.launch_at
+			var left_open := _game.holes.filter(func(h: Hole) -> bool: return h.extraction).size()
+			print("calling the launch tore %d holes open by the pod; calling it off left %d" % [torn, left_open])
+			if torn == 0 or left_open != 0:
+				push_error("the engines didn't tear holes open, or they stayed open")
 			_game.handle(Net.local_id(), &"launch", [])
 			print("launch called by a soldier: %s; by the commander, then called off: %s; called again for %.0f s on" % [by_soldier < INF, called_off < INF, _game.launch_at - _game.time])
 			if by_soldier < INF or called_off < INF or _game.launch_at == INF:
@@ -272,7 +280,13 @@ func _step(delta: float) -> bool:
 			if _game.state == Game.State.PLAYING:
 				# Nobody's defending it: keep the spiders from ending it first.
 				_game.pod.health = _game.pod.max_health
+				var frenzied := _game.spiders.filter(func(s: Spider) -> bool: return s.frenzied)
+				_frenzied_seen = maxi(_frenzied_seen, frenzied.size())
+				_at_pod_seen = maxi(_at_pod_seen, frenzied.filter(func(s: Spider) -> bool: return s.global_position.distance_to(_game.pod.global_position) < 5.0).size())
 				return false
+			print("while the engines spooled up: up to %d frenzied spiders, up to %d of them at the pod" % [_frenzied_seen, _at_pod_seen])
+			if _frenzied_seen == 0 or _at_pod_seen == 0:
+				push_error("no frenzied spiders came for the pod")
 			print("after the launch: %s" % _game.outcome)
 			if _game.state != Game.State.WON:
 				push_error("the commander's launch didn't extract")

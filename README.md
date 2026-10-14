@@ -45,7 +45,13 @@ ground up to 20° steep (35° for lamps and pylons). What's in the bank
 when the pod launches is the score (the quota is 100 ore; alloy doesn't
 count). The commander calls the launch, whenever they like: it lifts off
 45 s later, and anyone not beside the pod then is left behind. Staying
-on banks more, but every night is worse than the last.
+on banks more, but every night is worse than the last. Calling it spools
+the engines up, and the noise tears two bug holes open 16-30 m from the
+pod (three with three players or more), day or night. Frenzied spiders
+pour out of them, one every 1.4 s up to 6 at once (scaled up with more
+players, like the night's), and go straight for the pod, sun or no sun,
+unless you hurt them. Hold the pod till lift-off. Calling the launch off
+closes those holes, but the spiders already out stay.
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
@@ -222,7 +228,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   beside it, switches it off or on; P over a building does the same.
 - **Ping:** right-click.
 - **Launch (L, twice, or the bar):** the pod lifts off 45 s later with
-  whoever's beside it; L again calls it off.
+  whoever's beside it, and the engines tear bug holes open near it; L
+  again calls it off.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
 - **Research (R):** the tech tree; click to queue (see above).
