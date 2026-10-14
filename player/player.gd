@@ -15,11 +15,12 @@ extends CharacterBody3D
 ## the way you're looking, and you drop off short of a dead end. E again
 ## or Space lets go. F toggles the headlamp.
 ##
-## Soldiers lay the cables: R on a pylon, rig, foundry or turret (built or
-## a blueprint) pays one out behind you; R on another, or the pod, ties it
-## on, and R on open ground puts a pylon blueprint there for it. A cable
-## to a blueprint goes up once both ends are built. Tap R on a cable to
-## turn it round; hold R to cut it.
+## Soldiers lay the cables, with the hammer out: right mouse on a pylon,
+## rig, foundry, turret or the pod (built or a blueprint) pays one out
+## behind you; on another, it ties it on, and on open ground it puts a
+## pylon blueprint there for it. A cable to a blueprint goes up once both
+## ends are built. Right mouse on a cable turns it round; held, it cuts
+## it.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -31,13 +32,16 @@ const ACCEL := 30.0
 const AIR_ACCEL := 10.0
 const SLIDE_BOOST := 3.0
 ## Top speed sliding, and slide-jumping off it: low until you've
-## researched blade runners.
-const SLIDE_MAX := 9.0
+## got blade runners.
+const SLIDE_MAX := 8.0
 const RUNNER_SLIDE_MAX := 16.0
 const SLIDE_FRICTION := 2.0
 const SLIDE_SLOPE := 1.6
 const SLIDE_STEER := 4.0
+## Jumping out of a slide speeds you up, in blade runners.
 const SLIDE_JUMP_BOOST := 1.1
+## Without them, in the air you slow towards running speed this fast.
+const AIR_DRAG := 2.0
 const SLIDE_COOLDOWN := 0.8
 const STRAFE_TILT := 2.5
 const JUMP := 4.5
@@ -420,13 +424,15 @@ func _walk(delta: float, playing: bool) -> void:
 		fuel = minf(100.0, fuel + JET_REFILL * delta)
 		if jump_held:
 			vertical = up * JUMP
-			if sliding:
+			if sliding and game.equipped(&"runners"):
 				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(slide_max)
 	else:
 		sliding = false
 		jetting = jump_held and fuel > 0.0 and game.equipped(&"jetpack")
 		var control := AIR_ACCEL + (JET * 0.6 if jetting else 0.0)
 		var target := speed * (1.2 if jetting else 1.0)
+		if !game.equipped(&"runners") and !jetting and !hooked and horizontal.length() > RUN:
+			horizontal = horizontal.limit_length(maxf(RUN, horizontal.length() - AIR_DRAG * delta))
 		if input != Vector2.ZERO:
 			var along := horizontal.dot(wish_dir.normalized())
 			if along < target:

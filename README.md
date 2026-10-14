@@ -108,7 +108,8 @@ researched, has to be made at an armory for each soldier (see below).
     three.
   - Stabiliser: half the bloom from firing, and tighter at rest.
 - Blade runners*: walk 5 and run 8.5, from 3.5 and 6, and slide up to 16
-  m/s, from 9.
+  m/s, from 8; jumping out of a slide speeds you up, where without them
+  you slow back towards running speed in the air.
   - Jetpack*: hold Space in the air to fly.
     - Bigger tanks: the jetpack burns fuel 40% slower.
   - Grapple*: middle mouse hooks what you're looking at (see Controls).
@@ -243,7 +244,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   got blade runners). Space jumps; once you've a jetpack, hold it in the
   air to fly; it refills on the ground. C or Ctrl
   while running slides: a burst of speed, faster downhill, and a jump
-  out of it keeps the momentum (up to 9 m/s until blade runners). Land
+  out of it keeps the momentum (up to 8 m/s, easing back to running speed
+  in the air, until blade runners). Land
   with it held to slide on. You can steer well in the air.
 - **Weapons:** you start with the hammer; once an armory's made you a
   rifle, 1, 2 or the wheel switch between them.
