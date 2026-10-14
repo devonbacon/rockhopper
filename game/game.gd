@@ -133,6 +133,13 @@ const HOLE_APART := 18.0
 ## from sunrise closing them.
 const SWEEP := 30.0
 const SNAPSHOT_EVERY := 0.05
+## What soldiers and the commander ask for that goes in the playtest log
+## as it happens; the rest is only counted.
+const NOTED_ACTIONS: Array[StringName] = [&"blueprint", &"cancel", &"switch", &"link", &"link_pylon", &"flip", &"unlink", &"pick_up", &"research", &"order", &"gear_up", &"launch", &"uncommand", &"ping"]
+## Bytes per soldier, spider and flare in a fast snapshot.
+const SOLDIER_ROW := 23
+const SPIDER_ROW := 26
+const FLARE_ROW := 18
 const SLOW_EVERY := 0.25
 const MOVE_EVERY := 1.0 / 30.0
 const RESTART_AFTER := 15.0
@@ -244,6 +251,8 @@ var _link_turn := 0
 ## When the pod was last bitten, for the music.
 var _pod_hurt_at := -INF
 var _args := {}
+## Server: the playtest log, if it's keeping one.
+var metrics: Metrics
 
 
 func _ready() -> void:
@@ -270,6 +279,8 @@ func _ready() -> void:
 	_place_deposits()
 	_place_ore()
 	_next_id = FIRST_SPAWNED_ID
+	if Net.authority() and (Net.networked() or _args.has("metrics")):
+		metrics = Metrics.new(self)
 	if Net.has_local_player():
 		var me := Net.local_id()
 		player = Player.new()
@@ -313,6 +324,8 @@ func _physics_process(delta: float) -> void:
 func _simulate(delta: float) -> void:
 	if state == State.PLAYING:
 		time += delta
+		if metrics:
+			metrics.tick(delta)
 	sun.set_time(time)
 	var space := get_world_3d().direct_space_state
 	_light_check -= delta
@@ -347,6 +360,7 @@ func _simulate(delta: float) -> void:
 				lab.research_time += delta
 				if lab.research_time >= UPGRADES[lab.researching].time:
 					researched[lab.researching] = true
+					_note(&"researched", {upgrade = lab.researching})
 					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize(), &"researched")
 					lab.researching = &""
 		for armory in built:
@@ -357,6 +371,7 @@ func _simulate(delta: float) -> void:
 					armory.research_time += delta
 					if armory.research_time >= GEAR[armory.researching].time:
 						racked.append([armory.researching, armory.made_for])
+						_note(&"gear_made", {item = armory.researching, soldier = name_of(armory.made_for)})
 						_announce("%s made for %s: collect it at the armory" % [String(UPGRADES[armory.researching].name).capitalize(), name_of(armory.made_for)], &"built")
 						armory.researching = &""
 	if state == State.PLAYING:
@@ -380,6 +395,7 @@ func _simulate(delta: float) -> void:
 	_spawn_spiders(delta)
 	for fixture in built.duplicate():
 		if fixture.health <= 0.0:
+			_note(&"destroyed", {thing = fixture, position = fixture.global_position})
 			_remove_built(fixture)
 	_pod_alert = maxf(0.0, _pod_alert - delta)
 	_pod_bitten += delta
@@ -452,6 +468,8 @@ func _look_after(peer: int, delta: float) -> void:
 ## A soldier's fallen: down where they are for DOWN_TIME, for another to
 ## revive; or, with nobody else on their feet to, straight back to the pod.
 func _fall(peer: int, why: String) -> void:
+	_tally(peer, &"falls")
+	_note(&"fell", {soldier = name_of(peer), why = why, position = bodies[peer].global_position, gear = stats[peer].gear})
 	var helpers := bodies.keys().filter(func(other: int) -> bool: return other != peer and other != commander_peer and !is_down(bodies[other]))
 	if helpers.is_empty():
 		_respawn(peer, why + " Back at the pod, without what you carried or wore.")
@@ -481,6 +499,8 @@ func name_of(peer: int) -> String:
 
 
 func _respawn(peer: int, why: String) -> void:
+	_tally(peer, &"respawns")
+	_note(&"respawned", {soldier = name_of(peer), why = why, carried = stats[peer].carried, gear = stats[peer].gear})
 	stats[peer] = _new_stats()
 	_show_down(peer, false)
 	var spot := _spawn_spot_by_pod(peer)
@@ -519,6 +539,27 @@ func _track(node: Node, id := 0) -> void:
 		_next_id += 1
 	node.net_id = id
 	entities[id] = node
+
+
+## Server: something for the playtest log, if it's keeping one.
+func _note(kind: StringName, data := {}) -> void:
+	if metrics:
+		metrics.note(kind, data)
+
+
+func _tally(peer: int, key: StringName, amount := 1.0) -> void:
+	if metrics:
+		metrics.add(peer, key, amount)
+
+
+## Server: a spider's dead; by whom, for the log.
+func spider_killed(by: Node) -> void:
+	if by and by.has_meta("peer"):
+		_tally(by.get_meta("peer"), &"kills")
+	elif by is Fixture:
+		_tally(0, &"turret_kills")
+	else:
+		_tally(0, &"other_kills")
 
 
 func has(upgrade: StringName) -> bool:
@@ -564,15 +605,20 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 	if stats[peer].get("down", -1.0) >= 0.0:
 		# Lying down, all you can do is give up.
 		if action == &"give_up":
+			_note(&"give_up", {by = name_of(peer)})
 			_respawn(peer, "Back at the pod, without what you carried or wore.")
 		return
 	_acting = peer
 	var target: Node = entities.get(args[0], null) if !args.is_empty() and args[0] is int else null
+	if metrics and NOTED_ACTIONS.has(action):
+		_note(action, {by = name_of(peer), thing = target, args = args.slice(1) if target else args})
 	match action:
 		&"mine":
 			if target is Fixture and (ores.has(target) or deposits.has(target)):
 				sound(&"mine", target.global_position)
+				var before: int = stats[peer].carried
 				mine(target)
+				_tally(peer, &"ore_mined", stats[peer].carried - before)
 		&"pick_up":
 			if target is Fixture and built.has(target):
 				sound(&"pick_up", target.global_position)
@@ -587,6 +633,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				load_turret(target)
 		&"hand_in":
 			sound(&"hand_in", pod.global_position)
+			_tally(peer, &"ore_handed_in", stats[peer].carried)
 			hand_in()
 		&"blueprint":
 			if peer == commander_peer and can_build(args[0], args[1], args[2]):
@@ -626,15 +673,18 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"construct":
 			if target is Fixture and blueprints.has(target):
 				sound(&"clank", target.global_position)
-				construct(target)
+				if construct(target):
+					_tally(peer, &"build_blows")
 		&"repair":
 			if target is Fixture and (target == pod or built.has(target)):
 				sound(&"clank", target.global_position)
+				_tally(peer, &"repaired", minf(REPAIR, target.max_health - target.health))
 				target.health = minf(target.max_health, target.health + REPAIR)
 		&"flare":
 			var s: Dictionary = stats[peer]
 			if s.flares > 0:
 				s.flares -= 1
+				_tally(peer, &"flares")
 				sound(&"flare", args[0])
 				_throw_flare(args[0], args[1])
 		&"ping":
@@ -702,6 +752,8 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				s.warmth = maxf(s.warmth, 50.0)
 				s.since_hurt = 0.0
 				_show_down(args[0], false)
+				_tally(peer, &"revives")
+				_note(&"revived", {by = name_of(peer), soldier = name_of(args[0])})
 				sound(&"respawn", fallen.global_position)
 				_announce("%s got %s back up." % [name_of(peer), name_of(args[0])])
 		&"uncommand":
@@ -710,6 +762,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 		&"hit":
 			if target is Spider:
 				sound(&"spider_hurt", target.global_position)
+				_tally(peer, &"damage_dealt", args[1])
 				(target as Spider).hit(args[1], bodies.get(peer, null))
 		&"fling":
 			if target is Spider:
@@ -804,6 +857,9 @@ func add_soldier(peer: int) -> void:
 	if bodies.has(peer):
 		return
 	stats[peer] = _new_stats()
+	if metrics:
+		metrics.names[peer] = name_of(peer)
+		_note(&"joined", {soldier = name_of(peer), role = Net.peers.get(peer, {}).get("role", &"soldier"), players = bodies.size() + 1})
 	var avatar := _make_avatar(peer)
 	var spot := _spawn_spot_by_pod(peer)
 	avatar.global_position = spot
@@ -812,6 +868,7 @@ func add_soldier(peer: int) -> void:
 
 func _take_command(peer: int) -> void:
 	commander_peer = peer
+	_note(&"took_command", {by = name_of(peer)})
 	var body: Node3D = bodies.get(peer, null)
 	if body is Avatar:
 		body.visible = false
@@ -823,6 +880,7 @@ func _take_command(peer: int) -> void:
 
 func _leave_command(peer: int) -> void:
 	commander_peer = 0
+	_note(&"left_command", {by = name_of(peer)})
 	var body: Node3D = bodies.get(peer, null)
 	if body is Avatar:
 		body.visible = true
@@ -865,6 +923,8 @@ func _exit_view() -> void:
 
 
 func remove_soldier(peer: int) -> void:
+	if metrics and stats.has(peer):
+		_note(&"left", {soldier = metrics.names.get(peer, name_of(peer)), players = bodies.size() - 1})
 	if commander_peer == peer:
 		commander_peer = 0
 	if bodies.has(peer) and bodies[peer] != player:
@@ -919,20 +979,52 @@ func _send_snapshots(delta: float) -> void:
 
 
 func _fast_state() -> Array:
-	var soldiers: Array = []
+	# Packed as bytes: as Variants, a few soldiers and a swarm of spiders
+	# go over a packet.
+	var soldiers := PackedByteArray()
 	for peer in bodies:
 		if peer == commander_peer:
 			continue
 		var body: Node3D = bodies[peer]
 		var pitch: float = body.pitch if "pitch" in body else 0.0
-		soldiers.append([peer, body.global_position, body.global_rotation.y, pitch, is_down(body)])
-	var spider_rows: Array = []
-	for spider in spiders:
-		spider_rows.append([spider.net_id, spider.global_position, spider.global_basis.get_rotation_quaternion(), spider.health])
-	var flare_rows: Array = []
-	for flare in flares:
-		flare_rows.append([flare.net_id, flare.global_position, flare.life])
+		var at := soldiers.size()
+		soldiers.resize(at + SOLDIER_ROW)
+		soldiers.encode_u32(at, peer)
+		_put_vector(soldiers, at + 4, body.global_position)
+		soldiers.encode_float(at + 16, body.global_rotation.y)
+		soldiers.encode_half(at + 20, pitch)
+		soldiers.encode_u8(at + 22, 1 if is_down(body) else 0)
+	var spider_rows := PackedByteArray()
+	spider_rows.resize(spiders.size() * SPIDER_ROW)
+	for i in spiders.size():
+		var spider := spiders[i]
+		var at := i * SPIDER_ROW
+		spider_rows.encode_u32(at, spider.net_id)
+		_put_vector(spider_rows, at + 4, spider.global_position)
+		var q := spider.global_basis.get_rotation_quaternion()
+		spider_rows.encode_s16(at + 16, roundi(q.x * 32767.0))
+		spider_rows.encode_s16(at + 18, roundi(q.y * 32767.0))
+		spider_rows.encode_s16(at + 20, roundi(q.z * 32767.0))
+		spider_rows.encode_s16(at + 22, roundi(q.w * 32767.0))
+		spider_rows.encode_half(at + 24, spider.health)
+	var flare_rows := PackedByteArray()
+	flare_rows.resize(flares.size() * FLARE_ROW)
+	for i in flares.size():
+		var at := i * FLARE_ROW
+		flare_rows.encode_u32(at, flares[i].net_id)
+		_put_vector(flare_rows, at + 4, flares[i].global_position)
+		flare_rows.encode_half(at + 16, flares[i].life)
 	return [time, battery, power_in, power_out, stock, state, outcome, soldiers, spider_rows, commander_peer, flare_rows, pod.health, alloy]
+
+
+static func _put_vector(bytes: PackedByteArray, at: int, v: Vector3) -> void:
+	bytes.encode_float(at, v.x)
+	bytes.encode_float(at + 4, v.y)
+	bytes.encode_float(at + 8, v.z)
+
+
+static func _get_vector(bytes: PackedByteArray, at: int) -> Vector3:
+	return Vector3(bytes.decode_float(at), bytes.decode_float(at + 4), bytes.decode_float(at + 8))
 
 
 func _slow_state() -> Array:
@@ -977,54 +1069,64 @@ func apply_snapshot(data: Array) -> void:
 		commander_view.pod_hit()
 	pod.health = f[11]
 	var lit := {}
-	for row: Array in f[10]:
-		lit[row[0]] = true
-		var flare: Flare = entities.get(row[0], null)
+	var bytes: PackedByteArray = f[10]
+	for at in range(0, bytes.size(), FLARE_ROW):
+		var id := bytes.decode_u32(at)
+		var pos := _get_vector(bytes, at + 4)
+		lit[id] = true
+		var flare: Flare = entities.get(id, null)
 		if !flare:
 			flare = Flare.new()
 			flare.game = self
 			flare.puppet = true
-			flare.position = row[1]
+			flare.position = pos
 			add_child(flare)
-			_track(flare, row[0])
+			_track(flare, id)
 			flares.push_back(flare)
-		flare.target_position = row[1]
-		flare.life = row[2]
+		flare.target_position = pos
+		flare.life = bytes.decode_half(at + 16)
 	for flare in flares.duplicate():
 		if !lit.has(flare.net_id):
 			remove_flare(flare)
 	var seen := {}
-	for row: Array in f[7]:
-		var peer: int = row[0]
+	bytes = f[7]
+	for at in range(0, bytes.size(), SOLDIER_ROW):
+		var peer := bytes.decode_u32(at)
 		seen[peer] = true
 		if peer == Net.local_id():
 			continue
+		var pos := _get_vector(bytes, at + 4)
+		var down := bytes.decode_u8(at + 22) == 1
 		var avatar: Avatar = bodies.get(peer, null)
 		if !avatar:
 			avatar = _make_avatar(peer)
-			avatar.global_position = row[1]
+			avatar.global_position = pos
 			stats[peer] = _new_stats()
-		remote_move(peer, row[1], row[2], row[3])
-		stats[peer].down = 1.0 if row[4] else -1.0
-		avatar.set_down(row[4])
+		remote_move(peer, pos, bytes.decode_float(at + 16), bytes.decode_half(at + 20))
+		stats[peer].down = 1.0 if down else -1.0
+		avatar.set_down(down)
 	for peer in bodies.keys():
 		if !seen.has(peer) and peer != Net.local_id():
 			remove_soldier(peer)
 	seen.clear()
-	for row: Array in f[8]:
-		seen[row[0]] = true
-		var spider: Spider = entities.get(row[0], null)
+	bytes = f[8]
+	for at in range(0, bytes.size(), SPIDER_ROW):
+		var id := bytes.decode_u32(at)
+		var pos := _get_vector(bytes, at + 4)
+		seen[id] = true
+		var spider: Spider = entities.get(id, null)
 		if !spider:
 			spider = Spider.new()
 			spider.game = self
 			spider.puppet = true
-			spider.position = row[1]
+			spider.position = pos
 			add_child(spider)
-			_track(spider, row[0])
+			_track(spider, id)
 			spiders.push_back(spider)
-		spider.target_position = row[1]
-		spider.target_basis = Basis(row[2])
-		spider.show_health(row[3])
+		var q := Quaternion(bytes.decode_s16(at + 16), bytes.decode_s16(at + 18), bytes.decode_s16(at + 20), bytes.decode_s16(at + 22)).normalized()
+		spider.target_position = pos
+		spider.target_basis = Basis(q)
+		spider.show_health(bytes.decode_half(at + 24))
 	for spider in spiders.duplicate():
 		if !seen.has(spider.net_id):
 			spiders.erase(spider)
@@ -1388,6 +1490,7 @@ func construct(plan: Fixture) -> bool:
 		# A cable laid to a blueprint goes up once both its ends are built.
 		if link.blueprint and !link.from.blueprint and !link.to.blueprint:
 			link.blueprint = false
+	_note(&"built", {thing = plan.kind, position = at.origin})
 	_announce("%s built" % Fixture.NAMES[plan.kind], &"built")
 	return true
 
@@ -1731,10 +1834,12 @@ func damage(target: Node3D, amount: float) -> void:
 		if is_down(target):
 			return
 		var s: Dictionary = stats.get(target.get_meta("peer"), _nobody)
+		_tally(target.get_meta("peer"), &"damage_taken", amount)
 		s.health -= amount
 		s.hurt = 1.0
 		s.since_hurt = 0.0
 	elif target is Fixture:
+		_tally(0, &"pod_damage" if target == pod else &"building_damage", amount)
 		(target as Fixture).health -= amount
 		if target == pod:
 			_pod_bitten = 0.0
@@ -1753,6 +1858,7 @@ func remove_spider(spider: Spider) -> void:
 
 
 func spawn_spider(spot: Vector3, frenzied := false) -> void:
+	_tally(0, &"spiders_frenzied" if frenzied else &"spiders")
 	var spider := Spider.new()
 	spider.game = self
 	spider.frenzied = frenzied
@@ -1861,6 +1967,7 @@ func _close_swept_holes(since_rise: float) -> void:
 			holes.erase(hole)
 			entities.erase(hole.net_id)
 			hole.close()
+			_note(&"hole_closed", {position = hole.global_position})
 			sound(&"cancel", hole.global_position)
 
 
@@ -1871,6 +1978,7 @@ func _open_swept_holes(since_set: float) -> void:
 			_pending_holes.erase(pending)
 			var first := !holes.any(func(h: Hole) -> bool: return !h.extraction)
 			_add_hole(pending[0], pending[1])
+			_note(&"hole_opened", {position = pending[0], left_tonight = _pending_holes.size()})
 			sound(&"alarm", pending[0])
 			if first:
 				_announce("Bug holes are tearing open as the dark comes in." if !_pending_holes.is_empty() else "A bug hole's torn open in the dark.")
@@ -1901,6 +2009,7 @@ func _open_extraction_holes() -> void:
 			if holes.any(func(h: Hole) -> bool: return h.global_position.distance_to(at) < HOLE_APART * 0.6 * loose):
 				continue
 			_add_hole(at, spot[1]).extraction = true
+			_note(&"extraction_hole", {position = at})
 			opened += 1
 	_frenzy_in = 3.0
 
@@ -1941,6 +2050,8 @@ func _add_hole(at: Vector3, normal: Vector3, id := 0) -> Hole:
 func _end(new_state: State, text: String) -> void:
 	state = new_state
 	outcome = text
+	if metrics:
+		metrics.finish(State.keys()[new_state], text)
 	_end_in = RESTART_AFTER
 	if player:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

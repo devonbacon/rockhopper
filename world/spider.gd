@@ -168,6 +168,7 @@ func hit(amount: float, by: Node3D = null) -> void:
 		target = by
 		_retarget = 0.5
 	if health <= 0.0:
+		game.spider_killed(by)
 		game.sound(&"spider_die", global_position)
 		game.remove_spider(self)
 

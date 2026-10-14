@@ -204,6 +204,15 @@ zips it as `build/rockhopper-<build>.zip`, named for the hash the server
 checks. It needs Godot's Windows export templates installed. Scripts go in
 as text so the exported game hashes the same as the source does.
 
+Playtest logs: the server (or `metrics` solo) logs each mission to
+`user://sessions/<started>.jsonl`, a JSON object a line: who joined and
+left, what was built, researched, ordered and lost, falls and revives,
+holes and the launch, a sample of how things stand every 30 s, and
+running tallies per player (kills, damage dealt and taken, ore mined and
+handed in, repairs, revives). `tools/fetch_sessions.sh` copies the
+server's into `sessions/`; `python tools/session_summary.py [file]`
+prints a mission's timeline, samples and tallies.
+
 Debug: `command` starts in the commander's seat (with `research`, the
 research panel open, or `armory_panel`, the armory's; `place=pylon` holds
 that to place); `reel` starts you paying a cable out from the pod; `bitten` starts with the pod
@@ -407,6 +416,7 @@ User arguments after `--`, e.g.
 - `audio/sounds.gd`, `audio/sounds.json`: what the music and effects
   are made from.
 - `ui/sound_editor/` (autoload `SoundEditor`): the sound editor.
+- `game/metrics.gd`: the playtest log.
 - `game/commander.gd`: the commander's view.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,
