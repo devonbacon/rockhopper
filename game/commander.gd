@@ -17,8 +17,9 @@ extends Node3D
 ##
 ## Click something built to see how it's doing; P, or its button, switches
 ## it off or on. Right-click pings the spot for the soldiers. R opens the
-## research panel. L, twice, calls the launch: the pod lifts off a little
-## later with whoever's aboard; L again calls it off.
+## research panel; G the armory's, to have gear made for each soldier. L,
+## twice, calls the launch: the pod lifts off a little later with
+## whoever's aboard; L again calls it off.
 
 const PAN_SPEED := 40.0
 ## A cell of the research tree, and the gap left between its buttons.
@@ -28,8 +29,8 @@ const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
 const MAX_HEIGHT := 140.0
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade"]
-const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Wall"}
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade", &"armory"]
+const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Wall", &"armory": "Armory"}
 const PICK := 26.0
 const SELECTED := Color(0.45, 1.0, 0.55)
 const SOLDIER := Color(0.45, 0.85, 1.0)
@@ -62,6 +63,11 @@ var _research: Control
 var _research_buttons := {}
 var _research_note: Label
 var _research_queue: Label
+var _armory: Control
+var _armory_grid: GridContainer
+var _armory_note: Label
+## Whose rows the armory's grid has, to rebuild it when that changes.
+var _armory_peers: Array = []
 var _launch_button: Button
 ## Until when a second press of Launch goes ahead.
 var _launch_armed := 0.0
@@ -225,13 +231,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_X:
 				game.act(&"uncommand", [])
-			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
-				var kind := BUILD[event.physical_keycode - KEY_1]
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0:
+				var kind := BUILD[9 if event.physical_keycode == KEY_0 else event.physical_keycode - KEY_1]
 				_choose(&"" if placing == kind else kind)
 			KEY_P:
 				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
 			KEY_R:
-				_research.visible = !_research.visible
+				_show_panel(_research)
+			KEY_G:
+				_show_panel(_armory)
 			KEY_L:
 				_launch()
 			KEY_DELETE, KEY_BACKSPACE:
@@ -240,10 +248,11 @@ func _unhandled_input(event: InputEvent) -> void:
 					game.act(&"cancel", [_hover.net_id])
 					toast("%s blueprint cancelled, %s back." % [Fixture.NAMES[_hover.kind], Game.price(_hover.paid(), _hover.paid(true))])
 			KEY_ESCAPE:
-				if placing != &"" or focus or _research.visible:
+				if placing != &"" or focus or _research.visible or _armory.visible:
 					_choose(&"")
 					focus = null
 					_research.visible = false
+					_armory.visible = false
 				else:
 					return
 			_:
@@ -258,6 +267,15 @@ func _mouse_hit() -> Dictionary:
 	var to := from + camera.project_ray_normal(mouse) * 800.0
 	var query := PhysicsRayQueryParameters3D.create(from, to, Terrain.ROCK_LAYER | Fixture.LAYER)
 	return get_world_3d().direct_space_state.intersect_ray(query)
+
+
+## Opens the research or armory panel, closing the other; or closes it.
+func _show_panel(panel: Control) -> void:
+	var open := !panel.visible
+	_research.visible = false
+	_armory.visible = false
+	panel.visible = open
+	_update_ui()
 
 
 func _choose(kind: StringName) -> void:
@@ -420,8 +438,12 @@ func _build_ui() -> void:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar.add_child(spacer)
 	var research := _button("Research\n[R]", Vector2(110, 92))
-	research.pressed.connect(func() -> void: _research.visible = !_research.visible)
+	research.pressed.connect(func() -> void: _show_panel(_research))
 	bar.add_child(research)
+	var gear := _button("Armory\n[G]", Vector2(110, 92))
+	gear.pressed.connect(func() -> void: _show_panel(_armory))
+	gear.tooltip_text = "Have armories make gear for each soldier"
+	bar.add_child(gear)
 	_launch_button = _button("", Vector2(110, 92))
 	_launch_button.pressed.connect(_launch)
 	_launch_button.tooltip_text = "Lift off in %d s, with whoever's aboard. Whatever's banked then is the score; staying on gets you more, but every night's worse." % Game.LAUNCH_COUNTDOWN
@@ -431,7 +453,7 @@ func _build_ui() -> void:
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [L] launch  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-0] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [L] launch  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -462,7 +484,8 @@ func _build_ui() -> void:
 			button.add_theme_stylebox_override(look, box)
 		button.position = Vector2(at) * TREE_CELL
 		button.size = TREE_CELL - TREE_GAP
-		button.tooltip_text = Game.UPGRADES[upgrade].text
+		button.tooltip_text = Game.UPGRADES[upgrade].text + ("
+Gear: then made for each soldier at an armory (G)." if Game.GEAR.has(upgrade) else "")
 		button.pressed.connect(func() -> void:
 			game.act(&"research", [upgrade])
 			Sfx.play(&"press"))
@@ -484,6 +507,77 @@ func _build_ui() -> void:
 	_research.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_research.visible = false
 	_layer.add_child(_research)
+
+	var gear_rows := VBoxContainer.new()
+	gear_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gear_rows.add_theme_constant_override("separation", 6)
+	var gear_title := _label(18)
+	gear_title.text = "ARMORY"
+	gear_rows.add_child(gear_title)
+	_armory_note = _label(13, Hud.DIM)
+	gear_rows.add_child(_armory_note)
+	_armory_grid = GridContainer.new()
+	_armory_grid.columns = 1 + Game.GEAR.size()
+	_armory_grid.add_theme_constant_override("h_separation", 6)
+	_armory_grid.add_theme_constant_override("v_separation", 6)
+	gear_rows.add_child(_armory_grid)
+	_armory = _panel(gear_rows)
+	_armory.anchor_left = 1.0
+	_armory.anchor_right = 1.0
+	_armory.offset_left = -24
+	_armory.offset_right = -24
+	_armory.offset_top = 20
+	_armory.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_armory.visible = false
+	_layer.add_child(_armory)
+
+
+## The armory's grid: a row per soldier, a button per piece of gear.
+func _build_armory_grid(peers: Array) -> void:
+	_armory_peers = peers
+	for child in _armory_grid.get_children():
+		child.queue_free()
+	_armory_grid.add_child(_label(13, Hud.DIM))
+	for item: StringName in Game.GEAR:
+		var head := _label(13, Hud.DIM)
+		head.text = Game.UPGRADES[item].name
+		head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_armory_grid.add_child(head)
+	for peer: int in peers:
+		var who := _label(15)
+		who.text = game.name_of(peer) + (" (you)" if peer == Net.local_id() else "")
+		who.set_meta("peer", peer)
+		_armory_grid.add_child(who)
+		for item: StringName in Game.GEAR:
+			var info: Dictionary = Game.GEAR[item]
+			var button := _button("", Vector2(118, 46))
+			button.add_theme_font_size_override("font_size", 12)
+			button.tooltip_text = "%s\nMade for one soldier: %s, %ds." % [Game.UPGRADES[item].text, Game.price(info.cost, info.alloy), info.time]
+			button.set_meta("item", item)
+			button.set_meta("peer", peer)
+			button.pressed.connect(func() -> void:
+				game.act(&"order", [item, peer])
+				Sfx.play(&"press"))
+			_armory_grid.add_child(button)
+
+
+## How a soldier's piece of gear stands: its button's text, and colour.
+func _gear_line(item: StringName, peer: int) -> Array:
+	var info: Dictionary = Game.GEAR[item]
+	if game.equipped(item, peer):
+		return ["WORN", Color(SELECTED, 0.8)]
+	if game.racked.any(func(entry: Array) -> bool: return entry[0] == item and entry[1] == peer):
+		return ["MADE\nwaiting at an armory", Hud.DAY_COLOR]
+	var armory := game.making(item, peer)
+	if armory:
+		return ["%d%%%s\nclick to cancel" % [roundi(armory.research_time / info.time * 100.0), "  NO POWER" if armory.unpowered else ("  OFF" if !armory.enabled else "")], Hud.DAY_COLOR]
+	var cost := Game.price(info.cost, info.alloy)
+	for i in game.orders.size():
+		if game.orders[i][0] == item and game.orders[i][1] == peer:
+			return ["ORDERED %d\n%s" % [i + 1, cost if game.has(item) else "awaiting research"], Hud.FUEL_COLOR]
+	if !game.has(item):
+		return [cost + "\nneeds research", Color(1, 1, 1, 0.5)]
+	return [cost, Color.WHITE]
 
 
 ## Lines from each upgrade to what it opens up.
@@ -529,6 +623,9 @@ func _update_ui() -> void:
 		if lab.kind == &"lab" and lab.researching != &"":
 			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
 			lines.append("RESEARCHING  %s  %d%%%s" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0), "  OFF" if !lab.enabled else ("  NO POWER" if lab.unpowered else "")])
+	for armory in game.built:
+		if armory.kind == &"armory" and armory.researching != &"":
+			lines.append("MAKING  %s for %s  %d%%%s" % [Game.UPGRADES[armory.researching].name, game.name_of(armory.made_for).to_upper(), roundi(armory.research_time / Game.GEAR[armory.researching].time * 100.0), "  OFF" if !armory.enabled else ("  NO POWER" if armory.unpowered else "")])
 	_status.text = "\n".join(lines)
 	_focus_panel.visible = focus != null
 	if focus:
@@ -552,6 +649,20 @@ func _update_ui() -> void:
 		var queued := game.research_queue.map(func(id: StringName) -> String: return String(Game.UPGRADES[id].name).capitalize())
 		_research_queue.text = "Queue: %s" % (" > ".join(queued) if !queued.is_empty() else "empty")
 		_research.get_child(0).get_child(2).queue_redraw()
+	if _armory.visible:
+		var peers := game.bodies.keys()
+		peers.sort()
+		if peers != _armory_peers:
+			_build_armory_grid(peers)
+		var armories := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"armory")
+		var idle := armories.filter(func(f: Fixture) -> bool: return f.researching == &"" and f.enabled).size()
+		_armory_note.text = "Click to order gear for a soldier (researching it first, if need be); click again to take it back.\nIt waits at the armory for them. Fall and not get back up, and you lose what you wore.\n%s" % ("No armory yet: build one to make gear." if armories.is_empty() else "%d armor%s, %d idle." % [armories.size(), "y" if armories.size() == 1 else "ies", idle])
+		for child in _armory_grid.get_children():
+			if child is Button and child.has_meta("item"):
+				var line := _gear_line(child.get_meta("item"), child.get_meta("peer"))
+				(child as Button).text = line[0]
+				(child as Button).modulate = line[1]
+				(child as Button).disabled = line[0] == "WORN"
 
 
 func _name(fixture: Fixture) -> String:
@@ -572,6 +683,8 @@ func _describe(fixture: Fixture) -> String:
 			parts.append("ammo %d/%d, %s (%.1f power a shot, fires at spiders in light)" % [fixture.ammo, Fixture.MAGAZINE, "ready" if fixture.stalled == "" else fixture.stalled, Fixture.TURRET_SHOT])
 		&"lab":
 			parts.append("off" if !fixture.enabled else ("idle" if fixture.researching == &"" else String(Game.UPGRADES[fixture.researching].name).capitalize()))
+		&"armory":
+			parts.append("off" if !fixture.enabled else ("idle" if fixture.researching == &"" else "making a %s for %s" % [String(Game.UPGRADES[fixture.researching].name).capitalize(), game.name_of(fixture.made_for)]))
 		&"lamp":
 			parts.append("off" if !fixture.enabled else ("lit" if fixture.on else "waiting for dark"))
 		&"panel":
@@ -594,7 +707,7 @@ func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
 		button.draw_rect(Rect2(Vector2.ZERO, size), Hud.DAY_COLOR, false, 2.0)
 	Hud.draw_icon(button, kind, Vector2(size.x * 0.5, 32), tint)
 	var font := button.get_theme_default_font()
-	button.draw_string(font, Vector2(0, 66), "%d  %s" % [index + 1, SHORT[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
+	button.draw_string(font, Vector2(0, 66), "%d  %s" % [(index + 1) % 10, SHORT[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
 	var cost := "%d ore" % Fixture.COST[kind] + (" +%d al" % alloy_cost if alloy_cost > 0 else "")
 	button.draw_string(font, Vector2(0, 83), cost, HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Hud.ORE_COLOR if affordable else Hud.ALERT)
 

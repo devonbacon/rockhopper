@@ -4,7 +4,8 @@ extends Node
 ## - checks you stand on the ground;
 ## - builds a drill rig on the deposit nearest the pod, cabled to a
 ##   foundry cabled to the pod, and lets them work for a minute and a half
-##   in daylight, with a lab researching;
+##   in daylight, with a lab researching armour and an armory ordered to
+##   make it for us, which we then put on;
 ## - rides a cable, and from the rig's cable on through the foundry onto
 ##   the pod's, looking that way;
 ## - as a soldier, lays a cable off a pylon to open ground for a new
@@ -13,8 +14,9 @@ extends Node
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
-## - falls with another soldier by, is revived, falls again and gives up,
-##   then falls alone and goes straight back to the pod;
+## - falls with another soldier by, is revived, falls again and gives up
+##   (losing the armour), then falls alone and goes straight back to the
+##   pod;
 ## - skips to midnight and watches the spiders come;
 ## - calls the launch from the command chair and lifts off.
 ## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
@@ -27,6 +29,7 @@ var _stock_before := 0
 var _rig: Fixture
 var _foundry: Fixture
 var _lab: Fixture
+var _armory: Fixture
 var _ride_from := Vector3.ZERO
 
 
@@ -66,19 +69,32 @@ func _step(delta: float) -> bool:
 			_rig = _game.built[-2]
 			if _game.links.size() != 2:
 				push_error("couldn't cable the rig to a foundry to the pod")
-			_game.stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"armour"].cost
-			_game.alloy += Game.UPGRADES[&"armour"].alloy
+			_game.stock += Fixture.COST[&"lab"] + Fixture.COST[&"armory"] + Game.UPGRADES[&"armour"].cost + Game.GEAR[&"armour"].cost
+			_game.alloy += Game.UPGRADES[&"armour"].alloy + Game.GEAR[&"armour"].alloy
 			var frame := Fixture.upright(_game.pod.normal)
-			for i in 16:
-				var lab_spot: Array = _game.terrain.surface_point(_game.pod.global_position + (frame.x * cos(i * 0.4) + frame.z * sin(i * 0.4)) * (8.0 + i * 0.3))
-				if _game.can_build(&"lab", lab_spot[0], lab_spot[1]):
-					_game.build(&"lab", lab_spot[0], lab_spot[1])
-					_lab = _game.built[-1]
-					break
-			if _lab:
+			for i in 32:
+				var spot: Array = _game.terrain.surface_point(_game.pod.global_position + (frame.x * cos(i * 0.4) + frame.z * sin(i * 0.4)) * (8.0 + i * 0.3))
+				var kind := &"lab" if !_lab else &"armory"
+				if _game.can_build(kind, spot[0], spot[1]):
+					var made := _game.build(kind, spot[0], spot[1])
+					if kind == &"lab":
+						_lab = made
+					else:
+						_armory = made
+						break
+			if _lab and _armory:
 				print("lab: %s" % _game.queue_research(&"armour"))
+				var me := Net.local_id()
+				_game.handle(me, &"order", [&"armour", me])
+				var by_soldier := _game.orders.size()
+				_game.commander_peer = me
+				_game.handle(me, &"order", [&"armour", me])
+				_game.commander_peer = 0
+				print("armour ordered by a soldier: %d orders; by the commander: %s" % [by_soldier, _game.orders])
+				if by_soldier != 0 or _game.orders != [[&"armour", me]]:
+					push_error("ordering gear went wrong")
 			else:
-				push_error("couldn't place a lab by the pod")
+				push_error("couldn't place a lab and an armory by the pod")
 			_stock_before = _game.stock
 			var cable := _game.links[-1]
 			player._grab(cable, 1.0)
@@ -114,9 +130,14 @@ func _step(delta: float) -> bool:
 			print("after 90 s: rig holds %d (%s), foundry %d ore in, %d alloy made (%s), stock %d -> %d, alloy %d, on the cables %d" % [_rig.stored, _rig.stalled if _rig.stalled != "" else "drilling", _foundry.ore_in, _foundry.alloy_out, _foundry.stalled if _foundry.stalled != "" else "smelting", _stock_before, _game.stock, _game.alloy, _game.links.reduce(func(n: int, l: Link) -> int: return n + l.items.size(), 0)])
 			if _game.alloy == 0:
 				push_error("no alloy reached the pod")
-			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
+			var racked := _game.racked.duplicate(true)
+			var health_before := _game.max_health()
+			_game.handle(Net.local_id(), &"gear_up", [_armory.net_id])
+			print("research: armour %s; then made: racked %s, orders %s; geared up: wearing %s, max health %.0f -> %.0f" % [_game.has(&"armour"), racked, _game.orders, _game._me().gear, health_before, _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")
+			if !_game.equipped(&"armour") or _game.max_health() != Game.HEALTH + 50.0 or !_game.racked.is_empty():
+				push_error("the armory didn't make the armour, or we couldn't put it on")
 			_game.handle(Net.local_id(), &"research", [&"stabiliser"])
 			var by_soldier := _game.research_queue.duplicate()
 			_game.commander_peer = Net.local_id()
@@ -138,8 +159,12 @@ func _step(delta: float) -> bool:
 			var revived := [_game.down_left, _game.health]
 			_game.health = -10.0
 			_game._look_after(me, 0.01)
+			var wore := _game.equipped(&"armour")
 			_game.handle(me, &"give_up", [])
 			var gave_up := [_game.down_left, _game.health]
+			print("wearing armour when we gave up: %s; after: %s" % [wore, _game.equipped(&"armour")])
+			if !wore or _game.equipped(&"armour"):
+				push_error("giving up didn't cost the armour")
 			_game.remove_soldier(999)
 			_game.health = -10.0
 			_game._look_after(me, 0.01)

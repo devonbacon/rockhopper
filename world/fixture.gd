@@ -27,7 +27,7 @@ extends StaticBody3D
 const LAYER := 2
 ## Barricades are on this too, which spiders collide with.
 const BARRIER_LAYER := 32
-const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5, &"turret": 4, &"barricade": 1}
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5, &"turret": 4, &"barricade": 1, &"armory": 4}
 const ALLOY := {&"battery": 1, &"turret": 2}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
@@ -50,17 +50,17 @@ const TURRET_SHOT := 0.3
 ## How long a turret stays loud after it last fired.
 const LOUD_FOR := 2.0
 ## Hammer blows to put up a blueprint.
-const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6, &"turret": 6, &"barricade": 5}
-const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Barricade"}
+const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6, &"turret": 6, &"barricade": 5, &"armory": 6}
+const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Barricade", &"armory": "Armory"}
 ## How high a placement ghost sits over the ground.
-const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1, &"turret": 1.6, &"barricade": 1.0}
+const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1, &"turret": 1.6, &"barricade": 1.0, &"armory": 0.9}
 ## Steepest ground each can go on, in degrees; the bigger ones sit level
 ## on a plinth.
 const MAX_SLOPE := {&"lamp": 35.0, &"pylon": 35.0}
 const SLOPE := 20.0
 ## How much further than they'd see that spiders hear it working.
-const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0}
-const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry", &"turret"]
+const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0, &"armory": 12.0}
+const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry", &"turret", &"armory"]
 ## Where cables tie on, above the base.
 const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4, &"turret": 3.4}
 
@@ -86,6 +86,8 @@ var stalled := ""
 var charge := 0.0
 var researching: StringName = &""
 var research_time := 0.0
+## Armories: who what's being made is for.
+var made_for := 0
 var unpowered := false
 var blueprint := false
 var hits := 0
@@ -164,6 +166,10 @@ static func ghost_mesh(ghost_kind: StringName) -> Mesh:
 			mount.bottom_radius = 0.6
 			mount.height = 3.2
 			return mount
+		&"armory":
+			var shed := BoxMesh.new()
+			shed.size = Vector3(2.4, 1.8, 1.6)
+			return shed
 		&"barricade":
 			var wall := BoxMesh.new()
 			wall.size = Vector3(3.0, 2.0, 0.5)
@@ -192,6 +198,7 @@ func _ready() -> void:
 		&"drill": _build_drill()
 		&"battery": _build_battery()
 		&"lab": _build_lab()
+		&"armory": _build_armory()
 		&"pylon": _build_pylon()
 		&"foundry": _build_foundry()
 		&"turret": _build_turret()
@@ -208,7 +215,7 @@ func noise() -> float:
 	match kind:
 		&"pod": return NOISE.pod
 		&"drill", &"foundry": return NOISE[kind] if enabled and stalled == "" else 0.0
-		&"lab": return NOISE.lab if enabled and researching != &"" and !unpowered else 0.0
+		&"lab", &"armory": return NOISE[kind] if enabled and researching != &"" and !unpowered else 0.0
 		&"turret": return NOISE.turret if since_shot < LOUD_FOR else 0.0
 	return 0.0
 
@@ -612,6 +619,38 @@ func _build_lab() -> void:
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(2.2, 1.8, 1.6)
 	_add_collider(shape, Vector3(0, 0.9, 0))
+
+
+func _build_armory() -> void:
+	health = 50.0
+	_plinth(Vector2(2.4, 1.6))
+	var grey := _material(Color(0.42, 0.44, 0.46), 0.6, 0.45)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var dark := _material(Color(0.16, 0.17, 0.19), 0.6, 0.4)
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var body := BoxMesh.new()
+	body.size = Vector3(2.4, 1.8, 1.6)
+	_add_mesh(body, grey, Vector3(0, 0.9, 0))
+	var roof := BoxMesh.new()
+	roof.size = Vector3(2.5, 0.14, 1.7)
+	_add_mesh(roof, orange, Vector3(0, 1.85, 0))
+	# An open rack on the front, with suits hung in it.
+	var bay := BoxMesh.new()
+	bay.size = Vector3(1.9, 1.3, 0.05)
+	_add_mesh(bay, dark, Vector3(0, 0.95, 0.81))
+	for i in 3:
+		var suit := BoxMesh.new()
+		suit.size = Vector3(0.38, 0.9, 0.2)
+		_add_mesh(suit, white, Vector3(-0.6 + i * 0.6, 0.95, 0.86))
+		var visor := BoxMesh.new()
+		visor.size = Vector3(0.24, 0.1, 0.04)
+		_add_mesh(visor, orange, Vector3(-0.6 + i * 0.6, 1.25, 0.97))
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(2.42, 0.1, 1.62)
+	_add_mesh(stripe, orange, Vector3(0, 0.25, 0))
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(2.4, 1.9, 1.6)
+	_add_collider(shape, Vector3(0, 0.95, 0))
 
 
 func _build_battery() -> void:

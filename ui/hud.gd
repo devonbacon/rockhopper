@@ -241,7 +241,7 @@ func _update_meters() -> void:
 	var source: String = {"sun": "in sunlight", "lamp": "by a lamp", "pod": "by the pod", "flare": "by a flare"}.get(game.lit_by, "IN THE DARK")
 	_set_meter(&"warmth", warmth, "%d   %s" % [game.warmth, source], COLD_COLOR if game.lit_by == "" else Color.WHITE)
 	var player := game.player
-	_meters[&"fuel"].row.visible = game.has(&"jetpack")
+	_meters[&"fuel"].row.visible = game.equipped(&"jetpack")
 	_set_meter(&"fuel", player.fuel / 100.0, "burning" if player.jetting else "", Color.WHITE)
 
 
@@ -338,7 +338,7 @@ func _update_bottom() -> void:
 	_stock.custom_minimum_size.y = 92 + 22 * labs
 	_stock.queue_redraw()
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
-	_hint.text = "%s    %s%s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[1/2/wheel] rifle/hammer    " if game.has(&"gun") else "", "[MMB] grapple    " if game.has(&"grapple") else ""]
+	_hint.text = "%s    %s%s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[1/2/wheel] rifle/hammer    " if game.equipped(&"gun") else "", "[MMB] grapple    " if game.equipped(&"grapple") else ""]
 
 
 ## The pod's stock: ore filling towards the quota, alloy, and each lab's
@@ -402,6 +402,13 @@ static func draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tin
 		canvas.draw_rect(Rect2(centre + Vector2(-12, -2), Vector2(24, 14)), Color(0.3, 0.8, 0.9) * tint)
 		canvas.draw_line(centre + Vector2(14, -11), centre + Vector2(14, -22), white, 2.0)
 		canvas.draw_arc(centre + Vector2(14, -24), 6, PI * 0.1, PI * 0.9, 8, white, 2.0)
+	elif kind == &"armory":
+		canvas.draw_rect(Rect2(centre + Vector2(-25, -10), Vector2(50, 30)), Color(0.42, 0.44, 0.46) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-26, -14), Vector2(52, 5)), Color(1.0, 0.45, 0.1) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-20, -5), Vector2(40, 22)), dark)
+		for i in 3:
+			canvas.draw_rect(Rect2(centre + Vector2(-16 + i * 12, -3), Vector2(8, 18)), white)
+			canvas.draw_rect(Rect2(centre + Vector2(-15 + i * 12, -1), Vector2(6, 3)), Color(1.0, 0.45, 0.1) * tint)
 	elif kind == &"battery":
 		canvas.draw_rect(Rect2(centre + Vector2(-22, -12), Vector2(44, 28)), white)
 		canvas.draw_rect(Rect2(centre + Vector2(-22, -7), Vector2(44, 5)), gold)

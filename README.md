@@ -31,13 +31,13 @@ you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
 Lamps (1 ore), pylons (1), barricades (1), panels (2), batteries (2 ore
-and 1 alloy), drill rigs (3), research labs (4), turrets (4 ore and 2
-alloy) and foundries (5) are paid for from the
-bank, as is research, and picking something back up refunds it.
+and 1 alloy), drill rigs (3), research labs (4), armories (4), turrets
+(4 ore and 2 alloy) and foundries (5) are paid for from the bank, as are
+research and gear, and picking something back up refunds it.
 Buildings are placed by the commander, from the pod, as blueprints:
 glowing blue holograms, free to place, that do nothing until soldiers
 hammer them up (2 blows for a lamp or pylon, 3 for a panel or battery, 5
-for a rig or barricade, 6 for a lab, foundry or turret). Each blow pays
+for a rig or barricade, 6 for a lab, armory, foundry or turret). Each blow pays
 its share of the cost
 from the bank, the first blows first, and lands only if the bank can pay
 it. Buildings stand upright on a concrete plinth sunk into the rock, on
@@ -93,22 +93,34 @@ first queued upgrade it can start: what it needs is done, and the bank
 can pay. Each costs ore, the bigger ones alloy too, paid when a lab
 starts it, takes 25-45 s, and draws power while it works (it stalls when
 the battery's flat, or it's switched off). Researched upgrades apply to
-everything, already built or not:
+everything, already built or not, except gear (marked *): that, once
+researched, has to be made at an armory for each soldier (see below).
 
-- Rifle: soldiers start with only the hammer.
+- Rifle*: soldiers start with only the hammer.
   - Overcharged rounds: double damage, so two shots kill a spider, not
     three.
   - Stabiliser: half the bloom from firing, and tighter at rest.
-- Blade runners: walk 5 and run 8.5, from 3.5 and 6, and slide up to 16
+- Blade runners*: walk 5 and run 8.5, from 3.5 and 6, and slide up to 16
   m/s, from 9.
-  - Jetpack: hold Space in the air to fly.
+  - Jetpack*: hold Space in the air to fly.
     - Bigger tanks: the jetpack burns fuel 40% slower.
-  - Grapple: middle mouse hooks what you're looking at (see Controls).
-- Heated suit: the cold takes twice as long to freeze you.
-- Armour plating: +50 max health.
+  - Grapple*: middle mouse hooks what you're looking at (see Controls).
+- Heated suit*: the cold takes twice as long to freeze you.
+- Armour plating*: +50 max health.
 - Faster drills: rigs drill 40% faster.
   - Fast cables: cables carry twice as fast.
 - Efficient lamps: lamps draw half the power.
+
+Armories make gear, for one soldier at a time. In the armory panel (G),
+the commander clicks a soldier's row under a piece of gear to order it
+(queueing its research too, if that's not done); clicking again takes
+the order back, or cancels it under way for a refund. Each idle armory
+takes the first order it can: researched, and the bank can pay. A rifle,
+blade runners, a grapple or a heated suit cost 2 ore, a jetpack 2 ore and
+1 alloy, armour 1 ore and 2 alloy; each takes 10-18 s, drawing power
+(0.6/s) and making some noise. What's made waits at any armory for that
+soldier: tap E on one to gear up. Gear's lost if you fall and nobody
+gets you back up, so a downed soldier is worth going back for.
 
 At nightfall, bug holes tear open in the ground, 28-46 m from the
 pod: one the first night, two the second, and so on, and one more with three or
@@ -182,7 +194,7 @@ checks. It needs Godot's Windows export templates installed. Scripts go in
 as text so the exported game hashes the same as the source does.
 
 Debug: `command` starts in the commander's seat (with `research`, the
-research panel open);
+research panel open, or `armory_panel`, the armory's);
 `probe=builder|walker|stander|commander` scripts a joined client, for
 checking a server headlessly.
 
@@ -195,8 +207,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 
 - **Camera:** WASD, the screen edges or dragging with the middle button
   pan, the wheel zooms, Q and E turn it.
-- **Building:** 1-9 or the bar at the bottom picks a lamp, panel,
-  battery, rig, lab, pylon, foundry, turret or barricade; left-click places it as a
+- **Building:** 1-9, 0 or the bar at the bottom picks a lamp, panel,
+  battery, rig, lab, pylon, foundry, turret, barricade or armory; left-click places it as a
   blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
   snaps to the deposit nearest the mouse. Things face the pod to start
   with (barricades standing across the way to it); the wheel turns what
@@ -214,18 +226,19 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
 - **Research (R):** the tech tree; click to queue (see above).
+- **Armory (G):** gear for each soldier; click to order (see above).
 - **X** climbs out; **Esc** pauses.
 
 ## Controls
 
 - **Move:** mouse looks, WASD walks, Shift runs (slowly until you've
-  researched blade runners). Space jumps; once you've researched the
-  jetpack, hold it in the air to fly; it refills on the ground. C or Ctrl
+  got blade runners). Space jumps; once you've a jetpack, hold it in the
+  air to fly; it refills on the ground. C or Ctrl
   while running slides: a burst of speed, faster downhill, and a jump
   out of it keeps the momentum (up to 9 m/s until blade runners). Land
   with it held to slide on. You can steer well in the air.
-- **Weapons:** you start with the hammer; once the rifle's researched, 1,
-  2 or the wheel switch between them.
+- **Weapons:** you start with the hammer; once an armory's made you a
+  rifle, 1, 2 or the wheel switch between them.
   The hammer smashes everything in a short arc in front, hurting
   spiders (two blows kill one), knocking each back a little and
   stunning it for a second, chips ore off a deposit, and puts up the
@@ -235,7 +248,7 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   it on, and R on open ground puts a pylon blueprint there for it. R on
   where it started lets it go. Tap R on a cable to turn it round; hold R
   to cut it.
-- **Grapple (middle mouse, once researched):** a spider gets tugged
+- **Grapple (middle mouse, once you've one):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
   5 s to be ready again after you let go or tug a spider.
@@ -332,7 +345,9 @@ User arguments after `--`, e.g.
 - `aim` holds aim down the sights; `pause` starts paused.
 - `hammer` starts with the hammer out.
 - `lab` builds a research lab ahead of you and queues the rifle;
-  `upgrades=gun,jetpack,...` starts with those researched.
+  `armory` builds an armory there instead;
+  `upgrades=gun,jetpack,...` starts with those researched, and the gear
+  on.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.
 

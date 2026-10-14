@@ -235,6 +235,8 @@ func _physics_process(delta: float) -> void:
 	align_up()
 	var downed := game.down_left >= 0.0
 	var playing := game.state == Game.State.PLAYING and !SoundEditor.open and !downed
+	if weapon == &"gun" and !game.equipped(&"gun"):
+		_switch(&"hammer")
 	if is_instance_valid(zip):
 		_ride(delta, playing)
 	else:
@@ -386,8 +388,8 @@ func _walk(delta: float, playing: bool) -> void:
 	_ads = move_toward(_ads, 1.0 if aiming else 0.0, delta * 7.0)
 	var rush := clampf((horizontal.length() - RUN) * 1.2, 0.0, 12.0)
 	camera.fov = lerpf(FOV + rush, ADS_FOV, _ads)
-	var walk := RUNNER_WALK if game.has(&"runners") else WALK
-	var speed := ADS_SPEED if aiming else ((RUNNER_RUN if game.has(&"runners") else RUN) if Input.is_physical_key_pressed(KEY_SHIFT) else walk)
+	var walk := RUNNER_WALK if game.equipped(&"runners") else WALK
+	var speed := ADS_SPEED if aiming else ((RUNNER_RUN if game.equipped(&"runners") else RUN) if Input.is_physical_key_pressed(KEY_SHIFT) else walk)
 	var wish_dir := global_basis.x * input.x - global_basis.z * input.y
 	var wish := wish_dir * speed
 	var jump_held := playing and Input.is_physical_key_pressed(KEY_SPACE)
@@ -398,7 +400,7 @@ func _walk(delta: float, playing: bool) -> void:
 		_reel(delta, playing)
 	if is_on_floor() and !hooked:
 		var ground_speed := horizontal.length()
-		var slide_max := RUNNER_SLIDE_MAX if game.has(&"runners") else SLIDE_MAX
+		var slide_max := RUNNER_SLIDE_MAX if game.equipped(&"runners") else SLIDE_MAX
 		if !sliding and crouch and ground_speed > walk * 0.9:
 			sliding = true
 			if _slide_cooldown <= 0.0:
@@ -422,7 +424,7 @@ func _walk(delta: float, playing: bool) -> void:
 				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(slide_max)
 	else:
 		sliding = false
-		jetting = jump_held and fuel > 0.0 and game.has(&"jetpack")
+		jetting = jump_held and fuel > 0.0 and game.equipped(&"jetpack")
 		var control := AIR_ACCEL + (JET * 0.6 if jetting else 0.0)
 		var target := speed * (1.2 if jetting else 1.0)
 		if input != Vector2.ZERO:
@@ -544,6 +546,16 @@ func _use(delta: float) -> void:
 			# A tap loads it; holding on picks it up.
 			if released and _use_held < 0.3 and game.carried > 0:
 				game.act(&"load", [target.net_id])
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
+			if progress < 0.3 / (PICK_UP_TIME * 2.0):
+				progress = 0.0
+		&"armory":
+			var mine := game.racked.filter(func(entry: Array) -> bool: return entry[1] == Net.local_id()).map(func(entry: Array) -> String: return String(Game.UPGRADES[entry[0]].name).capitalize())
+			var busy := "idle" if target.researching == &"" else "making a %s for %s" % [String(Game.UPGRADES[target.researching].name).capitalize(), game.name_of(target.made_for)]
+			prompt = "Armory: %s\n%s[Hold E] Pick up" % [busy, ("[E] Gear up: %s    " % ", ".join(mine)) if !mine.is_empty() else ""]
+			# A tap gears you up; holding on picks it up.
+			if released and _use_held < 0.3 and !mine.is_empty():
+				game.act(&"gear_up", [target.net_id])
 			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
 			if progress < 0.3 / (PICK_UP_TIME * 2.0):
 				progress = 0.0
@@ -679,11 +691,19 @@ func _hold(down: bool, delta: float, needed: float, done: Callable) -> void:
 		done.call()
 
 
-## Takes up the gun or the hammer; the gun only once it's researched.
+## Why you've not got a piece of gear.
+func _unequipped(item: StringName) -> String:
+	var gear_name := String(Game.UPGRADES[item].name).capitalize()
+	if !game.has(item):
+		return "No %s: it needs researching, then making at an armory" % gear_name.to_lower()
+	return "No %s: the commander can have an armory make you one" % gear_name.to_lower()
+
+
+## Takes up the gun or the hammer; the gun only once you've been given one.
 func _switch(to: StringName, say := true) -> void:
-	if to == &"gun" and !game.has(&"gun"):
+	if to == &"gun" and !game.equipped(&"gun"):
 		if say:
-			_say("The rifle needs researching")
+			_say(_unequipped(&"gun"))
 		return
 	weapon = to
 	_gun.visible = weapon == &"gun"
@@ -755,8 +775,8 @@ func _ping() -> void:
 func _throw_hook() -> void:
 	if hooked or _hook_cooldown > 0.0:
 		return
-	if !game.has(&"grapple"):
-		_say("The grapple needs researching")
+	if !game.equipped(&"grapple"):
+		_say(_unequipped(&"grapple"))
 		return
 	var from := camera.global_position
 	var to := from - camera.global_basis.z * GRAPPLE_RANGE

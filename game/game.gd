@@ -15,7 +15,7 @@ extends Node3D
 ##
 ## The commander, in the pod, places what gets built, as blueprints that
 ## soldiers hammer up, paid for a blow at a time; strings the cables; and
-## picks what the labs research.
+## picks what the labs research and what gear armories make for whom.
 ##
 ## Foundries smelt ore into alloy, which pays for batteries and the bigger
 ## upgrades. The commander strings cables between pylons, rigs, foundries
@@ -70,6 +70,18 @@ const UPGRADES := {
 	&"cables": {name = "FAST CABLES", cost = 3, alloy = 2, time = 40.0, needs = &"drills", at = Vector2i(1, 6), text = "Cables carry ore and alloy twice as fast"},
 	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, alloy = 0, time = 30.0, at = Vector2i(0, 7), text = "Lamps draw half the power"},
 }
+## Personal gear: once researched, the commander has an armory make it
+## for each soldier, one at a time, for this much; it waits there for
+## them to collect. Lost if you're not got back up when you fall.
+const GEAR := {
+	&"gun": {cost = 2, alloy = 0, time = 12.0},
+	&"runners": {cost = 2, alloy = 0, time = 10.0},
+	&"jetpack": {cost = 2, alloy = 1, time = 18.0},
+	&"grapple": {cost = 2, alloy = 0, time = 12.0},
+	&"heated": {cost = 2, alloy = 0, time = 12.0},
+	&"armour": {cost = 1, alloy = 2, time = 18.0},
+}
+const ARMORY_DRAW := 0.6
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
 const COLD_RATE := 100.0 / 45.0
@@ -139,6 +151,10 @@ var researched := {}
 ## Upgrades the commander's queued, in order; an idle lab takes the first
 ## it can start (what it needs done, and the bank can pay).
 var research_queue: Array[StringName] = []
+## Gear the commander's ordered, [item, peer], in order; an idle armory
+## takes the first it can make. Then made, waiting to be collected.
+var orders: Array = []
+var racked: Array = []
 ## Per soldier, by peer id: health, warmth, carried, lit_by, hurt,
 ## since_hurt.
 var stats := {}
@@ -313,8 +329,19 @@ func _simulate(delta: float) -> void:
 					researched[lab.researching] = true
 					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize(), &"researched")
 					lab.researching = &""
+		for armory in built:
+			if armory.kind == &"armory" and armory.researching != &"" and armory.enabled and state == State.PLAYING:
+				armory.unpowered = battery <= 0.0
+				if !armory.unpowered:
+					power_out += ARMORY_DRAW
+					armory.research_time += delta
+					if armory.research_time >= GEAR[armory.researching].time:
+						racked.append([armory.researching, armory.made_for])
+						_announce("%s made for %s: collect it at the armory" % [String(UPGRADES[armory.researching].name).capitalize(), name_of(armory.made_for)], &"built")
+						armory.researching = &""
 	if state == State.PLAYING:
 		_run_queue()
+		_run_orders()
 	var full := capacity()
 	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
 	for fixture in built:
@@ -379,14 +406,14 @@ func _look_after(peer: int, delta: float) -> void:
 	if s.down >= 0.0:
 		s.down -= delta
 		if s.down <= 0.0:
-			_respawn(peer, "Nobody got to you in time. Back at the pod, without what you carried.")
+			_respawn(peer, "Nobody got to you in time. Back at the pod, without what you carried or wore.")
 		return
 	var head := body.global_position + Terrain.up_at(body.global_position) * 1.65
 	var light := lit_at(head)
 	if light == "" and battery > 0.0 and head.distance_to(pod.global_position) < POD_RANGE:
 		light = "pod"
 	s.lit_by = light
-	s.warmth = clampf(s.warmth + (WARM_RATE if light != "" else -COLD_RATE * (0.5 if has(&"heated") else 1.0)) * delta, 0.0, 100.0)
+	s.warmth = clampf(s.warmth + (WARM_RATE if light != "" else -COLD_RATE * (0.5 if equipped(&"heated", peer) else 1.0)) * delta, 0.0, 100.0)
 	s.since_hurt += delta
 	s.hurt = maxf(0.0, s.hurt - delta * 2.0)
 	if s.flares < FLARES:
@@ -395,7 +422,7 @@ func _look_after(peer: int, delta: float) -> void:
 			s.flare_charge = 0.0
 			s.flares += 1
 	if s.since_hurt > HEAL_DELAY:
-		s.health = minf(max_health(), s.health + HEAL_RATE * delta)
+		s.health = minf(max_health(peer), s.health + HEAL_RATE * delta)
 	if s.warmth <= 0.0:
 		_fall(peer, "You froze in the dark.")
 	elif s.health <= 0.0:
@@ -407,7 +434,7 @@ func _look_after(peer: int, delta: float) -> void:
 func _fall(peer: int, why: String) -> void:
 	var helpers := bodies.keys().filter(func(other: int) -> bool: return other != peer and other != commander_peer and !is_down(bodies[other]))
 	if helpers.is_empty():
-		_respawn(peer, why + " Back at the pod, without what you carried.")
+		_respawn(peer, why + " Back at the pod, without what you carried or wore.")
 		return
 	var s: Dictionary = stats[peer]
 	s.down = DOWN_TIME
@@ -463,7 +490,7 @@ func _me() -> Dictionary:
 
 
 func _new_stats() -> Dictionary:
-	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0}
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0, gear = []}
 
 
 func _track(node: Node, id := 0) -> void:
@@ -478,8 +505,15 @@ func has(upgrade: StringName) -> bool:
 	return researched.has(upgrade)
 
 
-func max_health() -> float:
-	return HEALTH + (50.0 if has(&"armour") else 0.0)
+## Whether a soldier (by default the local one, or the one acting) has
+## that gear on.
+func equipped(item: StringName, peer := 0) -> bool:
+	var s: Dictionary = _me() if peer == 0 else stats.get(peer, _nobody)
+	return s.gear.has(item)
+
+
+func max_health(peer := 0) -> float:
+	return HEALTH + (50.0 if equipped(&"armour", peer) else 0.0)
 
 
 func cable_speed() -> float:
@@ -510,7 +544,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 	if stats[peer].get("down", -1.0) >= 0.0:
 		# Lying down, all you can do is give up.
 		if action == &"give_up":
-			_respawn(peer, "Back at the pod, without what you carried.")
+			_respawn(peer, "Back at the pod, without what you carried or wore.")
 		return
 	_acting = peer
 	var target: Node = entities.get(args[0], null) if !args.is_empty() and args[0] is int else null
@@ -604,6 +638,27 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 						commander_view.toast(reply)
 				else:
 					Net.event.rpc_id(peer, &"toast", [reply])
+		&"order":
+			if peer == commander_peer and args.size() == 2 and GEAR.has(args[0]) and stats.has(args[1]):
+				var reply := order_gear(args[0], args[1])
+				if peer == Net.local_id():
+					if commander_view:
+						commander_view.toast(reply)
+				else:
+					Net.event.rpc_id(peer, &"toast", [reply])
+		&"gear_up":
+			if target is Fixture and built.has(target) and target.kind == &"armory":
+				var s: Dictionary = stats[peer]
+				var got: Array[String] = []
+				for entry: Array in racked.duplicate():
+					if entry[1] == peer:
+						racked.erase(entry)
+						if !s.gear.has(entry[0]):
+							s.gear.append(entry[0])
+							got.append(String(UPGRADES[entry[0]].name).capitalize())
+				if !got.is_empty():
+					sound(&"pick_up", target.global_position)
+					_say_to(peer, "Geared up: %s" % ", ".join(got))
 		&"launch":
 			if peer == commander_peer:
 				if launch_at == INF:
@@ -618,7 +673,7 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			if peer != commander_peer and fallen and reviver and is_down(fallen) and fallen.global_position.distance_to(reviver.global_position) < REVIVE_REACH + 1.5:
 				var s: Dictionary = stats[args[0]]
 				s.down = -1.0
-				s.health = max_health() * REVIVE_HEALTH
+				s.health = max_health(args[0]) * REVIVE_HEALTH
 				s.warmth = maxf(s.warmth, 50.0)
 				s.since_hurt = 0.0
 				_show_down(args[0], false)
@@ -659,6 +714,9 @@ func on_event(kind: StringName, args: Array) -> void:
 		&"toast":
 			if commander_view:
 				commander_view.toast(args[0])
+		&"say":
+			if player:
+				player._say(args[0])
 		&"announce":
 			if hud:
 				hud.announce(args[0])
@@ -685,6 +743,15 @@ func _show_reply(owner: Node, text: String) -> void:
 	owner.screen.reply(text)
 	if commander_view and commander_view.visible and text != "":
 		commander_view.toast(text)
+
+
+## Server: a line for one soldier's prompt.
+func _say_to(peer: int, text: String) -> void:
+	if peer == Net.local_id():
+		if player:
+			player._say(text)
+	else:
+		Net.event.rpc_id(peer, &"say", [text])
 
 
 func _announce(text: String, sound_name := &"announce") -> void:
@@ -779,6 +846,8 @@ func remove_soldier(peer: int) -> void:
 		bodies[peer].queue_free()
 	bodies.erase(peer)
 	stats.erase(peer)
+	orders = orders.filter(func(entry: Array) -> bool: return entry[1] != peer)
+	racked = racked.filter(func(entry: Array) -> bool: return entry[1] != peer)
 
 
 func _make_avatar(peer: int) -> Avatar:
@@ -844,7 +913,7 @@ func _fast_state() -> Array:
 func _slow_state() -> Array:
 	var rows: Array = []
 	for f in built:
-		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0, f.enabled, f.ore_in, f.alloy_out, f.smelted, f.holding.duplicate(), f.ammo, f.aim, f.since_shot])
+		rows.append([f.net_id, f.kind, f.global_position, f.global_basis.get_rotation_quaternion(), f.normal, f.health, f.on, f.stored, f.stalled, f.researching, f.research_time, f.unpowered, f.charge, f.deposit.net_id if f.deposit else 0, f.enabled, f.ore_in, f.alloy_out, f.smelted, f.holding.duplicate(), f.ammo, f.aim, f.since_shot, f.made_for])
 	var alive := PackedInt32Array()
 	for ore in ores:
 		alive.append(ore.net_id)
@@ -857,7 +926,10 @@ func _slow_state() -> Array:
 	var link_rows: Array = []
 	for link in links:
 		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true), link.blueprint])
-	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at, research_queue.duplicate()]
+	var worn := {}
+	for peer in stats:
+		worn[peer] = stats[peer].gear.duplicate()
+	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at, research_queue.duplicate(), orders.duplicate(true), racked.duplicate(true), worn]
 
 
 ## Client: the server's latest of everything that moves.
@@ -949,6 +1021,11 @@ func apply_snapshot(data: Array) -> void:
 func apply_slow(data: Array) -> void:
 	launch_at = data[6]
 	research_queue.assign(data[7])
+	orders = data[8]
+	racked = data[9]
+	for peer: int in data[10]:
+		if stats.has(peer):
+			stats[peer].gear = data[10][peer]
 	var seen := {}
 	for row: Array in data[0]:
 		seen[row[0]] = true
@@ -979,6 +1056,7 @@ func apply_slow(data: Array) -> void:
 		fixture.ammo = row[19]
 		fixture.aim = row[20]
 		fixture.since_shot = row[21]
+		fixture.made_for = row[22]
 	for fixture in built.duplicate():
 		if !seen.has(fixture.net_id):
 			_remove_built(fixture)
@@ -1101,6 +1179,61 @@ func _run_queue() -> void:
 			break
 
 
+## Server: the commander's click on a soldier's gear. Orders it (and
+## queues its research, if that's not done), or takes the order back, or
+## cancels it under way for a refund. Says how that went.
+func order_gear(item: StringName, peer: int) -> String:
+	var info: Dictionary = GEAR[item]
+	var gear_name := String(UPGRADES[item].name).capitalize()
+	if equipped(item, peer):
+		return "%s already has a %s." % [name_of(peer), gear_name]
+	for entry: Array in racked:
+		if entry[0] == item and entry[1] == peer:
+			return "It's made: %s can collect it at an armory." % name_of(peer)
+	var armory := making(item, peer)
+	if armory:
+		armory.researching = &""
+		stock += info.cost
+		alloy += info.alloy
+		return "Cancelled, %s refunded." % price(info.cost, info.alloy)
+	for entry: Array in orders:
+		if entry[0] == item and entry[1] == peer:
+			orders.erase(entry)
+			return "Order taken back."
+	orders.append([item, peer])
+	if !has(item) and !research_queue.has(item) and !researching(item):
+		queue_research(item)
+		return "Ordered; %s queued for research first." % gear_name
+	return "Ordered %s for %s." % [gear_name, name_of(peer)]
+
+
+## Which armory's making item for peer, if any.
+func making(item: StringName, peer: int) -> Fixture:
+	for armory in built:
+		if armory.kind == &"armory" and armory.researching == item and armory.made_for == peer:
+			return armory
+	return null
+
+
+## Starts idle armories on the first orders they can: researched, and
+## paid for.
+func _run_orders() -> void:
+	for armory in built:
+		if armory.kind != &"armory" or armory.researching != &"" or !armory.enabled:
+			continue
+		for entry: Array in orders:
+			var info: Dictionary = GEAR[entry[0]]
+			if !has(entry[0]) or stock < info.cost or alloy < info.alloy:
+				continue
+			stock -= info.cost
+			alloy -= info.alloy
+			armory.researching = entry[0]
+			armory.made_for = entry[1]
+			armory.research_time = 0.0
+			orders.erase(entry)
+			break
+
+
 func capacity() -> float:
 	var total := BATTERY
 	for fixture in built:
@@ -1145,7 +1278,7 @@ func can_build(kind: StringName, pos: Vector3, normal := Vector3.UP) -> bool:
 		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
 		if kind == &"barricade" and fixture.kind == &"barricade":
 			room = 2.9
-		if kind == &"lab" or fixture.kind == &"lab" or kind == &"foundry" or fixture.kind == &"foundry":
+		if [&"lab", &"foundry", &"armory"].has(kind) or [&"lab", &"foundry", &"armory"].has(fixture.kind):
 			room += 1.6
 		if fixture.global_position.distance_to(pos) < room:
 			return false
@@ -1256,9 +1389,13 @@ func pick_up(fixture: Fixture) -> void:
 	stock += Fixture.COST[fixture.kind]
 	alloy += Fixture.ALLOY.get(fixture.kind, 0) + fixture.alloy_out
 	carried += fixture.stored + fixture.ore_in + fixture.ammo / Fixture.ROUNDS_PER_ORE
-	if fixture.researching != &"":
+	if fixture.researching != &"" and fixture.kind == &"lab":
 		stock += UPGRADES[fixture.researching].cost
 		alloy += UPGRADES[fixture.researching].alloy
+	elif fixture.researching != &"":
+		stock += GEAR[fixture.researching].cost
+		alloy += GEAR[fixture.researching].alloy
+		orders.push_front([fixture.researching, fixture.made_for])
 	_remove_built(fixture)
 
 
@@ -1904,10 +2041,17 @@ func _debug_setup() -> void:
 		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"gun"].cost
 		build(&"lab", ahead[0], ahead[1], player.global_position)
 		queue_research(&"gun")
+	if _args.has("armory"):
+		player.rotate_object_local(Vector3.UP, PI)
+		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
+		stock += Fixture.COST[&"armory"]
+		build(&"armory", ahead[0], ahead[1], player.global_position)
 	if _args.has("upgrades"):
 		for upgrade in str(_args.upgrades).split(",", false):
 			if UPGRADES.has(StringName(upgrade)):
 				researched[StringName(upgrade)] = true
+				if GEAR.has(StringName(upgrade)):
+					_me().gear.append(StringName(upgrade))
 	player.debug_aim = _args.has("aim")
 	if _args.has("hammer"):
 		player._switch(&"hammer")
@@ -1920,6 +2064,7 @@ func _debug_setup() -> void:
 	if _args.has("command"):
 		_take_command(Net.local_id())
 		commander_view._research.visible = _args.has("research")
+		commander_view._armory.visible = _args.has("armory_panel")
 	if _args.has("probe"):
 		_probe(_args.probe)
 	if _args.has("shot"):
@@ -2011,6 +2156,9 @@ func _probe(kind: String) -> void:
 		act(&"blueprint", [&"pylon", spot[0], spot[1], pod.global_position])
 		await tree.create_timer(1.0).timeout
 		print("[commander] blueprints %d, stock %d -> %d" % [blueprints.size(), stock_before, stock])
+		act(&"order", [&"gun", Net.local_id()])
+		await tree.create_timer(1.0).timeout
+		print("[commander] ordered a rifle for myself: orders %s, research queue %s" % [orders, research_queue])
 		act(&"uncommand", [])
 		await tree.create_timer(1.0).timeout
 		if !blueprints.is_empty():
