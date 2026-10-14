@@ -14,18 +14,23 @@ extends Node3D
 
 const CELL := 1.5
 ## Half the width of the sampled square, and how far down and up it goes.
-const HALF := 84.0
-const BOTTOM := -16.0
-const TOP := 12.0
+const HALF := 104.0
+const BOTTOM := -32.0
+const TOP := 18.0
 ## The playable area's radius, where the hologram wall stands.
-const FLOOR_RADIUS := 60.0
-const WALL_HEIGHT := 12.0
-const HILLS := 4.0
+const FLOOR_RADIUS := 80.0
+const WALL_HEIGHT := 16.0
+## How high the hills, and the broad rises and dips they sit on, go.
+const HILLS := 4.5
+const SWELL := 9.0
+## Caves stay this far above the bottom of the sampled block, so the rock
+## under them is never open.
+const FLOOR_MARGIN := 3.0
 const CHUNK := 16
 const ROCK_LAYER := 1
 ## The mountains: from the foothills to the far edge, in metres from the
 ## middle, and how tall the ranges and the one giant get.
-const RANGE_NEAR := 110.0
+const RANGE_NEAR := 130.0
 const RANGE_FAR := 1300.0
 const RANGE_HEIGHT := 150.0
 const GIANT_HEIGHT := 320.0
@@ -49,11 +54,14 @@ var generate_ms := 0
 var navigation: NavigationRegion3D
 
 var _shape := FastNoiseLite.new()
+var _swell := FastNoiseLite.new()
 var _rng := RandomNumberGenerator.new()
 ## Boulders (added rock) and craters (carved), as centre and radius, kept
 ## in buckets by ground position: Vector2i -> [boulders, craters].
 var _buckets := {}
 var _faces := PackedVector3Array()
+## Boxes round the caves, padded: deep rock outside them is just rock.
+var _cave_boxes: Array[AABB] = []
 
 
 ## Which way is up at p. The ground's flat, so it's always +y; the rest of
@@ -68,6 +76,9 @@ func generate(seed_value: int, _landing_dir := Vector3.ZERO) -> void:
 	_shape.seed = seed_value
 	_shape.frequency = 0.022
 	_shape.fractal_octaves = 3
+	_swell.seed = seed_value + 3
+	_swell.frequency = 0.007
+	_swell.fractal_octaves = 2
 	_add_features()
 	var cells := Vector3i(ceili(2.0 * HALF / CELL), ceili((TOP - BOTTOM) / CELL), ceili(2.0 * HALF / CELL))
 	var origin := Vector3(-HALF, BOTTOM, -HALF)
@@ -83,13 +94,18 @@ func generate(seed_value: int, _landing_dir := Vector3.ZERO) -> void:
 ## The ground's height at x, z, before anything's added or carved.
 func ground_height(x: float, z: float) -> float:
 	var r := Vector2(x, z).length()
-	return HILLS * _shape.get_noise_2d(x, z) * (1.0 - smoothstep(FLOOR_RADIUS + 4.0, HALF - 4.0, r))
+	return (HILLS * _shape.get_noise_2d(x, z) + SWELL * _swell.get_noise_2d(x, z)) * (1.0 - smoothstep(FLOOR_RADIUS + 4.0, HALF - 4.0, r))
 
 
 ## Signed distance to rock, roughly in metres: negative inside.
 func density(p: Vector3) -> float:
 	var d := p.y - ground_height(p.x, p.z)
 	if d > 6.0:
+		return d
+	# Deep enough that nothing on the surface reaches down to it, and
+	# nowhere near a cave: solid, and too far in for the mesh to care how
+	# far.
+	if d < -8.0 and !_cave_boxes.any(func(box: AABB) -> bool: return box.has_point(p)):
 		return d
 	var bucket: Array = _buckets.get(_bucket_of(p), [[], []])
 	for b: Vector4 in bucket[0]:
@@ -166,21 +182,11 @@ func _add_features() -> void:
 	chambers.clear()
 	worms.clear()
 	_buckets.clear()
-	for i in 10:
-		var at := _floor_point(FLOOR_RADIUS - 6.0)
-		var r := _rng.randf_range(4.0, 9.0)
-		var y := ground_height(at.x, at.y) + r * 0.6
-		_add_bucketed(Vector4(at.x, y, at.y, r), 1)
-	for i in 34:
-		var at := _floor_point(FLOOR_RADIUS - 2.0)
-		var r := _rng.randf_range(0.8, 3.0)
-		var y := ground_height(at.x, at.y) + r * _rng.randf_range(-0.5, 0.1)
-		_add_bucketed(Vector4(at.x, y, at.y, r), 0, BLEND)
 	var previous := Vector3.INF
-	for i in 4:
+	for i in 6:
 		var at := _floor_point(FLOOR_RADIUS - 14.0)
 		var r := _rng.randf_range(5.0, 7.0)
-		var centre := Vector3(at.x, ground_height(at.x, at.y) - r - _rng.randf_range(3.0, 6.0), at.y)
+		var centre := Vector3(at.x, maxf(ground_height(at.x, at.y) - r - _rng.randf_range(3.0, 6.0), BOTTOM + FLOOR_MARGIN + r + 2.5), at.y)
 		chambers.push_back(Vector4(centre.x, centre.y, centre.z, r))
 		# A sloping tunnel up to the surface, so every chamber can be
 		# reached on foot.
@@ -194,6 +200,30 @@ func _add_features() -> void:
 		if previous != Vector3.INF and previous.distance_to(centre) < 50.0:
 			worms.push_back([previous, centre, _rng.randf_range(2.0, 2.4)])
 		previous = centre
+	_cave_boxes.clear()
+	for c in chambers:
+		_cave_boxes.push_back(AABB(Vector3(c.x, c.y, c.z) - Vector3.ONE * (c.w + 9.0), Vector3.ONE * (c.w + 9.0) * 2.0))
+	for w in worms:
+		var box := AABB(w[0], Vector3.ZERO).expand(w[1])
+		_cave_boxes.push_back(box.grow(w[2] + 9.0))
+	# Craters: shallow bowls, none that'd break through into a cave, so
+	# none's a pit you can't climb out of.
+	var craters := 0
+	for attempt in 60:
+		if craters == 16:
+			break
+		var at := _floor_point(FLOOR_RADIUS - 6.0)
+		var r := _rng.randf_range(4.0, 9.0)
+		var y := ground_height(at.x, at.y) + r * 0.7
+		if carve(Vector3(at.x, y - r, at.y)) < 3.0:
+			continue
+		_add_bucketed(Vector4(at.x, y, at.y, r), 1)
+		craters += 1
+	for i in 56:
+		var at := _floor_point(FLOOR_RADIUS - 2.0)
+		var r := _rng.randf_range(0.8, 3.0)
+		var y := ground_height(at.x, at.y) + r * _rng.randf_range(-0.5, 0.1)
+		_add_bucketed(Vector4(at.x, y, at.y, r), 0, BLEND)
 
 
 ## A random point on the floor, within radius of the middle, as x, z.
@@ -339,6 +369,9 @@ func _build_chunks(chunk_tris: Dictionary, positions: PackedVector3Array, normal
 		mesh.surface_set_material(0, material)
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
+		# The rock's a shell, open underneath: it has to shadow from both
+		# sides, or a low sun shines in under it.
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 		add_child(instance)
 		var body_node := StaticBody3D.new()
 		body_node.collision_layer = ROCK_LAYER
@@ -369,6 +402,7 @@ func _add_plain() -> void:
 	var plain := MeshInstance3D.new()
 	plain.mesh = tool.commit()
 	plain.material_override = _rock_material()
+	plain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 	add_child(plain)
 
 
@@ -428,6 +462,7 @@ func _add_mountains(seed_value: int) -> void:
 	material.uv1_scale = Vector3.ONE * 0.012
 	material.albedo_color = Color(0.5, 0.46, 0.42)
 	mountains.material_override = material
+	mountains.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 	add_child(mountains)
 	var body := StaticBody3D.new()
 	body.collision_layer = ROCK_LAYER

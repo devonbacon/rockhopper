@@ -96,11 +96,15 @@ const ARMORY_DRAW := 0.6
 const COLD_RATE := 100.0 / 45.0
 const WARM_RATE := 100.0 / 6.0
 const POD_RANGE := 6.0
-const SURFACE_ORE := 16
+const SURFACE_ORE := 24
 const DEPOSITS := 8
-## The first this many are somewhere you can walk to from the pod without
-## climbing.
-const REACHABLE_DEPOSITS := 4
+## One deposit's this near the pod, and the rest at least this far off,
+## this far apart; the first this many of them somewhere you can walk to
+## from the pod without climbing.
+const DEPOSIT_NEAR := Vector2(14.0, 26.0)
+const DEPOSIT_FAR := 40.0
+const DEPOSIT_APART := 26.0
+const REACHABLE_DEPOSITS := 3
 const START_STOCK := 10
 const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
@@ -121,8 +125,8 @@ const SPIDERS_END := 8
 const SPAWN_GAP_START := 5.0 / 3.0
 const SPAWN_GAP_END := 2.5 / 3.0
 ## Bug holes open this far from the pod, at least this far apart.
-const HOLE_NEAR := 28.0
-const HOLE_FAR := 46.0
+const HOLE_NEAR := 34.0
+const HOLE_FAR := 62.0
 const HOLE_APART := 18.0
 const SNAPSHOT_EVERY := 0.05
 const SLOW_EVERY := 0.25
@@ -1941,25 +1945,34 @@ func _place_pod() -> void:
 	_wire_pod_screen()
 
 
-## Big outcrops that never run out, spread well apart, none too near the
-## pod, on ground flat enough for a rig.
+## Big outcrops that never run out, on ground flat enough for a rig: one a
+## short walk from the pod, the rest spread out well away from it.
 func _place_deposits() -> void:
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	_shuffle(spots)
-	_place_deposits_from(spots, true)
-	_place_deposits_from(spots, false)
+	for loose in [1.0, 0.7]:
+		_place_deposits_from(spots, 1, true, loose, DEPOSIT_NEAR.x, DEPOSIT_NEAR.y)
+	for loose in [1.0, 0.7, 0.5]:
+		_place_deposits_from(spots, 1, false, loose, DEPOSIT_NEAR.x, DEPOSIT_NEAR.y)
+	for loose in [1.0, 0.75]:
+		_place_deposits_from(spots, 1 + REACHABLE_DEPOSITS, true, loose, DEPOSIT_FAR, INF)
+	for loose in [1.0, 0.75, 0.5]:
+		_place_deposits_from(spots, DEPOSITS, false, loose, DEPOSIT_FAR, INF)
 
 
-func _place_deposits_from(spots: Array[Array], reachable_only: bool) -> void:
+## Adds deposits till there are `want`, between near and far from the pod
+## (both eased by loose), and apart.
+func _place_deposits_from(spots: Array[Array], want: int, reachable_only: bool, loose: float, near: float, far: float) -> void:
 	for spot in spots:
-		if deposits.size() == (REACHABLE_DEPOSITS if reachable_only else DEPOSITS):
+		if deposits.size() >= want:
 			break
 		var p: Vector3 = spot[0]
-		if p.distance_to(pod.global_position) < 18.0:
+		var from_pod := p.distance_to(pod.global_position)
+		if from_pod < near * loose or from_pod > far / loose:
 			continue
 		var crowded := false
 		for deposit in deposits:
-			if deposit.global_position.distance_to(p) < 25.0:
+			if deposit.global_position.distance_to(p) < DEPOSIT_APART * loose:
 				crowded = true
 				break
 		if crowded:

@@ -6,8 +6,8 @@ dark is the enemy. It tests whether night coming round, with too few
 lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
-You drop onto a turning asteroid, into a round patch of hills 120 m
-across, marked out by a blue hologram wall you can't go past (it shows when
+You drop onto a turning asteroid, into a round patch of rolling hills,
+rises and hollows 160 m across, marked out by a blue hologram wall you can't go past (it shows when
 you're within about 18 m of it, and always from the pod); beyond it
 the ground flattens out into a plain, ringed by mountains you can't
 reach: walled in some ways, open others, different on every map, with
@@ -17,8 +17,9 @@ then two of night. Low in the sky, it throws the hills' shadows long, so the
 hollows go dark first and the high ground holds the light longest. A
 range to the west brings dusk early, its shadow sweeping in across the
 floor; one to the east holds the dawn back. There's loose ore lying about, big
-deposits that never run out, and a few caves under the ground to shelter
-in.
+deposits that never run out (one a short walk from the pod, the rest
+40 m off or more, spread out), and a few caves under the ground to
+shelter in. Craters are shallow bowls, never breaking into a cave.
 
 Power is one battery, shared by everything. Sunlight fills it, falling
 on the top of the pod or on panels you build (a panel makes more the
@@ -130,7 +131,7 @@ blade runners, a grapple or a heated suit cost 2 ore, a jetpack 2 ore and
 soldier: tap E on one to gear up. Gear's lost if you fall and nobody
 gets you back up, so a downed soldier is worth going back for.
 
-At nightfall, bug holes tear open in the ground, 28-46 m from the
+At nightfall, bug holes tear open in the ground, 34-62 m from the
 pod: one the first night, two the second, and so on, and one more with three or
 more players. They glow red, and close at sunrise. Spiders climb out of
 them all night (never by day, however deep the shadow), more of them and

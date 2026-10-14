@@ -12,6 +12,7 @@ const NIGHT := 120.0
 ## A whole turn of the rock.
 const TURN := DAY + NIGHT
 const TILT := deg_to_rad(25.0)
+const ENERGY := 1.6
 ## How far the sun's climbed at the start.
 const START := deg_to_rad(24.0)
 
@@ -21,7 +22,7 @@ var time := 0.0
 func _ready() -> void:
 	shadow_enabled = true
 	directional_shadow_max_distance = 220.0
-	light_energy = 1.6
+	light_energy = ENERGY
 	light_color = Color(1.0, 0.96, 0.9)
 	sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_AND_SKY
 	set_time(time)
@@ -38,7 +39,10 @@ func set_time(t: float) -> void:
 	time = t
 	var dir := dir_at(t)
 	basis = Basis.looking_at(-dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.FORWARD)
-	visible = dir.y > -0.1
+	# Only once it's over the horizon, brightening as it clears it: from
+	# under it, it'd shine up through the ground.
+	visible = dir.y > 0.0
+	light_energy = ENERGY * smoothstep(0.0, 0.08, dir.y)
 
 
 ## The first time, from the start, the sun's at `angle` round from rising
