@@ -73,6 +73,10 @@ var _launch_button: Button
 var _launch_armed := 0.0
 var _ghost: MeshInstance3D
 var _ghost_material: StandardMaterial3D
+## How far a cable reaches from what's being placed, if it takes cables;
+## and where it'd go.
+var _ring: RangeRing
+var _ghost_at := Vector3.INF
 ## Where things were placed or linked lately: [point, age].
 var _marks: Array = []
 var _hover: Fixture
@@ -99,6 +103,8 @@ func _ready() -> void:
 	_ghost.top_level = true
 	_ghost.visible = false
 	add_child(_ghost)
+	_ring = RangeRing.new()
+	add_child(_ring)
 	_build_ui()
 	global_position = game.pod.global_position
 	_place_camera()
@@ -117,6 +123,7 @@ func leave() -> void:
 	visible = false
 	_layer.visible = false
 	_ghost.visible = false
+	_ring.hide_ring()
 	placing = &""
 	focus = null
 	game.terrain.wall_material.set_shader_parameter("reveal", 18.0)
@@ -329,6 +336,8 @@ func _placement(hit: Dictionary, kind: StringName) -> Dictionary:
 ## Shows what's being placed where it'd go.
 func _aim_ghost(hit: Dictionary) -> void:
 	var kind := placing
+	_ring.hide_ring()
+	_ghost_at = Vector3.INF
 	if kind == &"":
 		_ghost.visible = false
 		return
@@ -336,6 +345,9 @@ func _aim_ghost(hit: Dictionary) -> void:
 	_ghost.visible = !spot.is_empty()
 	if spot.is_empty():
 		return
+	if Fixture.CABLE_HEIGHT.has(kind):
+		_ring.show_around(spot.position, Link.RANGE, Color(Link.ORE, 0.8), 0.7)
+		_ghost_at = spot.position
 	_ghost.mesh = Fixture.ghost_mesh(kind) if _ghost.get_meta("kind", &"") != kind else _ghost.mesh
 	_ghost.set_meta("kind", kind)
 	var ok := game.can_build(kind, spot.position, spot.normal)
@@ -775,6 +787,11 @@ func _draw_overlay() -> void:
 			_text(font, at, text, 13, color)
 			if fixture.noise() > 0.0:
 				_text(font, at + Vector2(0, 14), "LOUD", 11, Color(SPIDER, 0.8))
+	for fixture: Fixture in game.built + [game.pod]:
+		if fixture.health < fixture.max_health - 0.5:
+			var bar := _screen(fixture.global_position + fixture.normal * Hud.bar_height(fixture))
+			if bar != Vector2.INF:
+				Hud.draw_health_bar(_overlay, bar + Vector2(0, 10), fixture.health / fixture.max_health)
 	for link in game.links:
 		var a := _screen(link.start())
 		var b := _screen(link.end())
@@ -792,6 +809,16 @@ func _draw_overlay() -> void:
 			var color := Color(Hud.DAY_COLOR if ping.commander else Hud.FUEL_COLOR, fade)
 			_overlay.draw_arc(at, 10.0 + 4.0 * sin(ping.age * 6.0), 0, TAU, 24, color, 2.0)
 			_text(font, at + Vector2(0, -16), "PING" if ping.commander else String(ping.name).to_upper(), 13, color)
+	# Placing something that takes cables: what's in a cable's reach of it.
+	if _ghost_at != Vector3.INF:
+		var from := _screen(_ghost_at + Vector3.UP * 2.0)
+		for fixture: Fixture in game.built + game.blueprints + [game.pod]:
+			if Fixture.CABLE_HEIGHT.has(fixture.kind) and fixture.global_position.distance_to(_ghost_at) < Link.RANGE:
+				var at := _screen(fixture.cable_point())
+				if at != Vector2.INF:
+					_overlay.draw_arc(at, 9.0, 0, TAU, 20, Link.ORE, 2.0)
+					if from != Vector2.INF:
+						_overlay.draw_line(at, from, Color(Link.ORE, 0.35), 1.5)
 	if _alarm > 0.0:
 		_overlay.draw_rect(Rect2(Vector2.ZERO, _overlay.size), Color(Hud.ALERT, 0.5 * _alarm), false, 10.0)
 

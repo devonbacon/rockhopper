@@ -150,6 +150,8 @@ var _flare_cooldown := 0.0
 ## Where the cable you're paying out runs from, if you are.
 var reel: Fixture
 var _reel_line: MeshInstance3D
+## How far the cable you're paying out reaches.
+var _reach_ring: RangeRing
 var _r_was_down := false
 var _cut_held := 0.0
 ## The cable lit up under the crosshair.
@@ -192,6 +194,8 @@ func _ready() -> void:
 	_hammer.visible = true
 	_rope = _line(Color(1.0, 0.6, 0.2))
 	_reel_line = _line(Link.ORE)
+	_reach_ring = RangeRing.new()
+	add_child(_reach_ring)
 
 
 ## Turns the body so its up points away from the centre, keeping where it
@@ -275,6 +279,9 @@ func _physics_process(delta: float) -> void:
 	_reel_line.visible = reel != null
 	if reel:
 		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
+		_reach_ring.show_around(reel.global_position, Link.RANGE, Color(Link.ORE, 0.9))
+	else:
+		_reach_ring.hide_ring()
 	if playing:
 		_cable_hint = ""
 		_use(delta)

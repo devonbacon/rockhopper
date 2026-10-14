@@ -477,6 +477,7 @@ func _draw_overlay() -> void:
 		_draw_ping(centre, ping)
 	_draw_rig_markers()
 	_draw_blueprint_markers()
+	_draw_damage_markers()
 
 
 func _draw_blueprint_markers() -> void:
@@ -491,6 +492,36 @@ func _draw_blueprint_markers() -> void:
 		_overlay.draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), BLUEPRINT_COLOR, false, 2.0)
 		_overlay.draw_string_outline(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, 4, Color(0, 0, 0, 0.7))
 		_overlay.draw_string(font, at + Vector2(-80, -14), text, HORIZONTAL_ALIGNMENT_CENTER, 160, 13, BLUEPRINT_COLOR)
+
+
+## A bar over anything built that's been bitten, so it's patched up.
+func _draw_damage_markers() -> void:
+	var camera := game.player.camera
+	for fixture: Fixture in game.built + [game.pod]:
+		if fixture.health >= fixture.max_health - 0.5:
+			continue
+		var top := fixture.global_position + fixture.normal * Hud.bar_height(fixture)
+		if camera.is_position_behind(top) or camera.global_position.distance_to(top) > 60.0:
+			continue
+		draw_health_bar(_overlay, camera.unproject_position(top) + Vector2(0, 10), fixture.health / fixture.max_health)
+
+
+## How high over something its health bar goes.
+static func bar_height(fixture: Fixture) -> float:
+	if fixture.kind == &"pod":
+		return 5.4
+	if fixture.kind == &"drill":
+		return 4.6
+	return Fixture.CABLE_HEIGHT.get(fixture.kind, Fixture.GHOST_LIFT.get(fixture.kind, 1.0) * 2.0 + 0.4) + 0.4
+
+
+## A small health bar centred on at: green, going yellow, then red.
+static func draw_health_bar(canvas: CanvasItem, at: Vector2, fraction: float) -> void:
+	var size := Vector2(46, 6)
+	var box := Rect2(at - size * 0.5, size)
+	var color := Color(1.0, 0.3, 0.25).lerp(Color(1.0, 0.8, 0.3), clampf(fraction * 2.0, 0.0, 1.0)).lerp(Color(0.4, 1.0, 0.45), clampf(fraction * 2.0 - 1.0, 0.0, 1.0))
+	canvas.draw_rect(box.grow(1.5), Color(0, 0, 0, 0.7))
+	canvas.draw_rect(Rect2(box.position, Vector2(size.x * clampf(fraction, 0.0, 1.0), size.y)), color)
 
 
 func _draw_rig_markers() -> void:

@@ -2150,6 +2150,15 @@ func _debug_setup() -> void:
 		_take_command(Net.local_id())
 		commander_view._research.visible = _args.has("research")
 		commander_view._armory.visible = _args.has("armory_panel")
+		if _args.has("place"):
+			commander_view.placing = StringName(_args.place)
+			get_viewport().warp_mouse(get_viewport().get_visible_rect().size * Vector2(0.56, 0.42))
+	if _args.has("reel"):
+		player.reel = pod
+	if _args.has("bitten"):
+		pod.health *= 0.6
+		for fixture in built:
+			fixture.health *= 0.35
 	if _args.has("probe"):
 		_probe(_args.probe)
 	if _args.has("shot"):

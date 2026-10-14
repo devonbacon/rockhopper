@@ -203,7 +203,9 @@ checks. It needs Godot's Windows export templates installed. Scripts go in
 as text so the exported game hashes the same as the source does.
 
 Debug: `command` starts in the commander's seat (with `research`, the
-research panel open, or `armory_panel`, the armory's);
+research panel open, or `armory_panel`, the armory's; `place=pylon` holds
+that to place); `reel` starts you paying a cable out from the pod; `bitten` starts with the pod
+and everything built damaged;
 `probe=builder|walker|stander|commander` scripts a joined client, for
 checking a server headlessly.
 
@@ -219,7 +221,9 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 - **Building:** 1-9, 0 or the bar at the bottom picks a lamp, panel,
   battery, rig, lab, pylon, foundry, turret, barricade or armory; left-click places it as a
   blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
-  snaps to the deposit nearest the mouse. Things face the pod to start
+  snaps to the deposit nearest the mouse. Placing something that takes
+  cables shows a ring for how far one reaches, and circles what's in
+  reach. Damaged buildings show a health bar. Things face the pod to start
   with (barricades standing across the way to it); the wheel turns what
   you're placing, and Ctrl and the wheel zooms meanwhile. Delete over a
   blueprint cancels it, refunding what its blows have
@@ -261,7 +265,10 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   go. A cable runs the way you laid it, except that it always runs into
   the pod and out of a rig, whichever end you started from. Right-click
   a cable to turn it round; hold right mouse
-  to cut it.
+  to cut it. While you pay one out, a ring on the ground shows how far
+  it reaches (20 m).
+- **Repairs:** anything built that's been bitten shows a health bar over
+  it, green to red; hammer it to patch it up.
 - **Grapple (middle mouse, once you've one):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
