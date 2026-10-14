@@ -2,8 +2,9 @@ class_name Hud
 extends CanvasLayer
 ## Readouts. Top left, meters for health, the battery, suit warmth and
 ## the jetpack. Top right, the pod's launch clock and a strip of the next
-## day and night where you're standing. Bottom, the ore banked in the pod
-## and alloy, what you carry, and research. In the middle, a
+## day and night where you're standing. Bottom, what's in the pod (ore
+## against the quota, alloy, research under way) and what you carry (ore
+## and flares). In the middle, a
 ## crosshair that fills as you hold E, what E would do, a marker for the
 ## pod pinned to the screen's edge when it's out of view, and markers on
 ## drill rigs and blueprints, with how far along they are.
@@ -23,6 +24,9 @@ const ALERT := Color(1.0, 0.4, 0.3)
 const HEALTH_COLOR := Color(1.0, 0.35, 0.35)
 const FORECAST_STEPS := 120
 const BLUEPRINT_COLOR := Color(0.45, 0.8, 1.0)
+const ALLOY_COLOR := Color(0.78, 0.82, 0.95)
+const STOCK_WIDTH := 300.0
+const POCKET_WIDTH := 150.0
 
 var game: Game
 
@@ -30,9 +34,7 @@ var _meters := {}
 var _launch: Label
 var _sky: Label
 var _strip: Control
-var _ore: Label
-var _carried: Label
-var _research: Label
+var _stock: Control
 var _notice: Label
 var _hint: Label
 var _prompt: Label
@@ -286,7 +288,7 @@ func _update_clock() -> void:
 	elif change < 0:
 		_sky.text = "The sun won't leave you here" if lit_now else "The sun won't reach you here"
 	else:
-		_sky.text = "%s in %s" % ["Sunset" if lit_now else "Sunrise", _clock_text(Sun.DAY * change / float(FORECAST_STEPS))]
+		_sky.text = "%s in %s" % ["Sunset" if lit_now else "Sunrise", _clock_text(Sun.TURN * change / float(FORECAST_STEPS))]
 	_sky.modulate = COLD_COLOR if lit_now else DAY_COLOR
 	_strip.queue_redraw()
 
@@ -299,7 +301,7 @@ func _draw_strip() -> void:
 	for i in steps:
 		var x := width * i / float(steps)
 		_strip.draw_rect(Rect2(x, 0, width / steps + 0.5, _strip.size.y), DAY_COLOR if _forecast[i] else NIGHT_COLOR)
-	var launch := (Game.MISSION - game.time) / Sun.DAY
+	var launch := (Game.MISSION - game.time) / Sun.TURN
 	if launch < 1.0:
 		_strip.draw_rect(Rect2(width * launch - 1.5, -3, 3, _strip.size.y + 6), ALERT)
 	_strip.draw_rect(Rect2(0, -3, 2, _strip.size.y + 6), Color.WHITE)
@@ -308,17 +310,11 @@ func _draw_strip() -> void:
 func _build_bottom() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
-	var ore_column := VBoxContainer.new()
-	ore_column.alignment = BoxContainer.ALIGNMENT_CENTER
-	_ore = _label(26, ORE_COLOR)
-	ore_column.add_child(_ore)
-	_carried = _label(14, DIM)
-	ore_column.add_child(_carried)
-	_research = _label(14, DIM)
-	ore_column.add_child(_research)
-	var ore_panel := _panel(ore_column)
-	ore_panel.custom_minimum_size = Vector2(210, 104)
-	row.add_child(ore_panel)
+	_stock = Control.new()
+	_stock.custom_minimum_size = Vector2(STOCK_WIDTH + POCKET_WIDTH, 92)
+	_stock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stock.draw.connect(_draw_stock)
+	row.add_child(_panel(_stock))
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 8)
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -331,16 +327,61 @@ func _build_bottom() -> void:
 
 
 func _update_bottom() -> void:
-	_ore.text = "%d / %d in pod" % [game.stock, Game.QUOTA]
-	_ore.modulate = DAY_COLOR if game.stock >= Game.QUOTA else ORE_COLOR
-	_carried.text = "carrying %d    flares %d / %d" % [game.carried, game.flares_left, Game.FLARES]
-	_research.text = "%d alloy in pod" % game.alloy
-	for lab in game.built:
-		if lab.kind == &"lab" and lab.researching != &"":
-			var upgrade: Dictionary = Game.UPGRADES[lab.researching]
-			_research.text += "\n%s %d%%%s" % [String(upgrade.name).capitalize(), roundi(lab.research_time / upgrade.time * 100.0), " (no power)" if lab.unpowered else ""]
+	var labs := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lab" and f.researching != &"").size()
+	_stock.custom_minimum_size.y = 92 + 22 * labs
+	_stock.queue_redraw()
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
 	_hint.text = "%s    [1/2/wheel] gun/hammer    %s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[MMB] grapple    " if game.has(&"grapple") else ""]
+
+
+## The pod's stock: ore filling towards the quota, alloy, and each lab's
+## research; then what you're carrying, and your flares.
+func _draw_stock() -> void:
+	var font := _stock.get_theme_default_font()
+	var met := game.stock >= Game.QUOTA
+	var ore_tint := DAY_COLOR if met else ORE_COLOR
+	_stock.draw_string(font, Vector2(0, 12), "IN THE POD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
+	var number := str(game.stock)
+	_stock.draw_string(font, Vector2(0, 44), number, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, ore_tint)
+	var after := font.get_string_size(number, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x + 8.0
+	_stock.draw_string(font, Vector2(after, 44), "/ %d ore%s" % [Game.QUOTA, "  quota met" if met else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, DIM)
+	var bar := Rect2(0, 54, STOCK_WIDTH - 24, 8)
+	_stock.draw_rect(bar, Color(1, 1, 1, 0.08))
+	_stock.draw_rect(Rect2(bar.position, Vector2(bar.size.x * minf(float(game.stock) / Game.QUOTA, 1.0), bar.size.y)), ore_tint)
+	for quarter: float in [0.25, 0.5, 0.75]:
+		_stock.draw_line(Vector2(bar.size.x * quarter, bar.position.y), Vector2(bar.size.x * quarter, bar.end.y), PANEL, 2.0)
+	_draw_gem(Vector2(6, 80), 6.0, ALLOY_COLOR)
+	_stock.draw_string(font, Vector2(18, 86), "%d alloy" % game.alloy, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ALLOY_COLOR if game.alloy > 0 else DIM)
+	var y := 92.0
+	for lab in game.built:
+		if lab.kind != &"lab" or lab.researching == &"":
+			continue
+		var upgrade: Dictionary = Game.UPGRADES[lab.researching]
+		var done: float = clampf(lab.research_time / upgrade.time, 0.0, 1.0)
+		var stalled := "  OFF" if !lab.enabled else ("  NO POWER" if lab.unpowered else "")
+		_stock.draw_string(font, Vector2(0, y + 15), "%s%s" % [String(upgrade.name).capitalize(), stalled], HORIZONTAL_ALIGNMENT_LEFT, 150, 14, ALERT if stalled != "" else Color.WHITE)
+		var track := Rect2(156, y + 7, STOCK_WIDTH - 220, 6)
+		_stock.draw_rect(track, Color(1, 1, 1, 0.08))
+		_stock.draw_rect(Rect2(track.position, Vector2(track.size.x * done, track.size.y)), BLUEPRINT_COLOR)
+		_stock.draw_string(font, Vector2(track.end.x + 6, y + 15), "%d%%" % roundi(done * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, DIM)
+		y += 22.0
+	var x := STOCK_WIDTH
+	_stock.draw_line(Vector2(x - 12, 2), Vector2(x - 12, _stock.size.y - 2), EDGE, 1.0)
+	_stock.draw_string(font, Vector2(x, 12), "CARRYING", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
+	var carrying := ORE_COLOR if game.carried > 0 else DIM
+	_draw_gem(Vector2(x + 9, 34), 9.0, carrying)
+	_stock.draw_string(font, Vector2(x + 26, 44), "%d ore" % game.carried, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, carrying)
+	_stock.draw_string(font, Vector2(x, 72), "FLARES", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
+	for i in Game.FLARES:
+		var at := Vector2(x + 7 + i * 18, 84)
+		if i < game.flares_left:
+			_stock.draw_circle(at, 6, DAY_COLOR)
+		else:
+			_stock.draw_arc(at, 6, 0, TAU, 16, DIM, 1.5)
+
+
+func _draw_gem(at: Vector2, radius: float, color: Color) -> void:
+	_stock.draw_colored_polygon(PackedVector2Array([at + Vector2(0, -radius), at + Vector2(radius * 0.8, 0), at + Vector2(0, radius), at + Vector2(-radius * 0.8, 0)]), color)
 
 
 ## A buildable's icon, about 50 px across, centred on centre.

@@ -51,7 +51,7 @@ const LAB_DRAW := 0.6
 const FOUNDRY_DRAW := 1.0
 ## Each costs ore, and some alloy too.
 const UPGRADES := {
-	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, text = "Walk and run as fast as you're built to"},
+	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, text = "Walk, run and slide as fast as you're built to"},
 	&"jetpack": {name = "JETPACK", cost = 3, alloy = 2, time = 35.0, text = "Hold Space in the air to fly"},
 	&"armour": {name = "ARMOUR PLATING", cost = 3, alloy = 3, time = 40.0, text = "+50 max health"},
 	&"heated": {name = "HEATED SUIT", cost = 4, alloy = 0, time = 30.0, text = "Cold takes twice as long to freeze you"},
@@ -482,16 +482,18 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				target.enabled = !target.enabled
 		&"link":
 			var onto: Node = entities.get(args[1], null)
-			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
-				add_link(target, onto, 0, true)
+			if peer != commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
+				sound(&"clank", onto.global_position)
+				add_link(target, onto, 0, target.blueprint or onto.blueprint)
 		&"link_pylon":
-			if peer == commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
+			if peer != commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
 				add_link(target, place_blueprint(&"pylon", args[1], args[2], target.global_position), 0, true)
 		&"flip":
-			if peer == commander_peer and target is Link and can_flip(target) == "":
+			if peer != commander_peer and target is Link and can_flip(target) == "":
 				flip(target)
 		&"unlink":
-			if peer == commander_peer and target is Link:
+			if peer != commander_peer and target is Link:
+				sound(&"clank", (target.start() + target.end()) * 0.5)
 				remove_link(target)
 		&"string":
 			if target is Link and target.blueprint and !target.from.blueprint and !target.to.blueprint:
@@ -523,11 +525,19 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 					Net.event.rpc_id(id, &"ping", ping)
 		&"press":
 			if target and "screen" in target and target.screen:
-				var reply: String = "RESEARCH IS PICKED FROM THE COMMAND CHAIR." if target is Fixture and target.kind == &"lab" and peer != commander_peer else target.screen.pressed.call(args[1])
+				var reply: String = target.screen.pressed.call(args[1])
 				if peer == Net.local_id():
 					_show_reply(target, reply)
 				else:
 					Net.event.rpc_id(peer, &"reply", [args[0], reply])
+		&"research":
+			if peer == commander_peer and target is Fixture and built.has(target) and target.kind == &"lab" and UPGRADES.has(args[1]):
+				var reply := research(target, args[1])
+				if peer == Net.local_id():
+					if commander_view:
+						commander_view.toast(reply)
+				else:
+					Net.event.rpc_id(peer, &"toast", [reply])
 		&"uncommand":
 			if commander_peer == peer:
 				_leave_command(peer)
@@ -560,6 +570,9 @@ func on_event(kind: StringName, args: Array) -> void:
 				place_player(args[0], pod.global_position)
 				player._say(args[1])
 				Sfx.play(&"respawn")
+		&"toast":
+			if commander_view:
+				commander_view.toast(args[0])
 		&"announce":
 			if hud:
 				hud.announce(args[0])
@@ -858,9 +871,6 @@ func apply_slow(data: Array) -> void:
 			add_child(fixture)
 			_track(fixture, row[0])
 			built.push_back(fixture)
-			if fixture.kind == &"lab":
-				_wire_lab_screen(fixture)
-				_send_presses(fixture)
 		fixture.health = row[5]
 		if fixture.kind == &"lamp" and fixture.on != row[6]:
 			fixture.set_on(row[6])
@@ -945,57 +955,46 @@ func _send_presses(owner: Node) -> void:
 		owner.screen.send = func(action: StringName) -> void: act(&"press", [owner.net_id, action])
 
 
-func _wire_lab_screen(lab: Fixture) -> void:
-	var screen := lab.screen
-	screen.info = func() -> String:
-		if lab.researching == &"":
-			return "IDLE. PICK SOMETHING TO RESEARCH."
-		var upgrade: Dictionary = UPGRADES[lab.researching]
-		var left: float = upgrade.time - lab.research_time
-		return "%s  %ds%s" % [upgrade.name, ceili(left), "  NO POWER" if lab.unpowered else ""]
-	screen.button = func(action: StringName) -> Array:
-		var upgrade: Dictionary = UPGRADES[action]
-		if has(action):
-			return ["%s   DONE" % upgrade.name, false, false]
-		if action == &"tanks" and !has(&"jetpack"):
-			return ["%s   NEEDS JETPACK" % upgrade.name, false, false]
-		if lab.researching == action:
-			return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
-		var busy := lab.researching != &"" or researching(action) != null
-		return ["%s   %s  %ds" % [upgrade.name, price(upgrade.cost, upgrade.alloy).to_upper(), upgrade.time], !busy and stock >= upgrade.cost and alloy >= upgrade.alloy, false]
-	screen.describe = func(action: StringName) -> String:
-		var upgrade: Dictionary = UPGRADES[action]
-		if has(action):
-			return "%s: researched" % String(upgrade.name).capitalize()
-		if commander_peer != Net.local_id():
-			return "%s: %s\nResearch is picked from the command chair" % [String(upgrade.name).capitalize(), upgrade.text]
-		if lab.researching == action:
-			return "[E] Cancel %s, refunding %s" % [String(upgrade.name).capitalize(), price(upgrade.cost, upgrade.alloy)]
-		return "[E] Research %s: %s" % [String(upgrade.name).capitalize(), upgrade.text]
-	screen.pressed = func(action: StringName) -> String:
-		var upgrade: Dictionary = UPGRADES[action]
-		if has(action):
-			return "ALREADY RESEARCHED."
-		if lab.researching == action:
-			lab.researching = &""
-			stock += upgrade.cost
-			alloy += upgrade.alloy
-			return "CANCELLED. %s REFUNDED." % price(upgrade.cost, upgrade.alloy).to_upper()
-		if action == &"tanks" and !has(&"jetpack"):
-			return "RESEARCH THE JETPACK FIRST."
-		if lab.researching != &"":
-			return "BUSY: CANCEL THE CURRENT RESEARCH FIRST."
-		if researching(action) != null:
-			return "ANOTHER LAB IS ON IT."
-		if stock < upgrade.cost:
-			return "NOT ENOUGH ORE BANKED."
-		if alloy < upgrade.alloy:
-			return "NOT ENOUGH ALLOY BANKED."
-		stock -= upgrade.cost
-		alloy -= upgrade.alloy
-		lab.researching = action
-		lab.research_time = 0.0
-		return "RESEARCHING %s." % upgrade.name
+## How an upgrade stands at a lab, for the commander's research panel:
+## [text, whether it can be pressed, whether it's under way].
+func research_state(lab: Fixture, upgrade_id: StringName) -> Array:
+	var upgrade: Dictionary = UPGRADES[upgrade_id]
+	if has(upgrade_id):
+		return ["%s   DONE" % upgrade.name, false, false]
+	if upgrade_id == &"tanks" and !has(&"jetpack"):
+		return ["%s   NEEDS JETPACK" % upgrade.name, false, false]
+	if lab.researching == upgrade_id:
+		return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
+	var busy := lab.researching != &"" or researching(upgrade_id) != null
+	return ["%s   %s  %ds" % [upgrade.name, price(upgrade.cost, upgrade.alloy).to_upper(), upgrade.time], !busy and stock >= upgrade.cost and alloy >= upgrade.alloy, false]
+
+
+## Server: starts the lab on an upgrade, or cancels it if it's on it
+## already. Says how that went.
+func research(lab: Fixture, upgrade_id: StringName) -> String:
+	var upgrade: Dictionary = UPGRADES[upgrade_id]
+	if has(upgrade_id):
+		return "Already researched."
+	if lab.researching == upgrade_id:
+		lab.researching = &""
+		stock += upgrade.cost
+		alloy += upgrade.alloy
+		return "Cancelled, %s refunded." % price(upgrade.cost, upgrade.alloy)
+	if upgrade_id == &"tanks" and !has(&"jetpack"):
+		return "Research the jetpack first."
+	if lab.researching != &"":
+		return "That lab's busy: cancel what it's on first."
+	if researching(upgrade_id) != null:
+		return "Another lab is on it."
+	if stock < upgrade.cost:
+		return "Not enough ore banked."
+	if alloy < upgrade.alloy:
+		return "Not enough alloy banked."
+	stock -= upgrade.cost
+	alloy -= upgrade.alloy
+	lab.researching = upgrade_id
+	lab.research_time = 0.0
+	return "Researching %s." % String(upgrade.name).capitalize()
 
 
 func capacity() -> float:
@@ -1063,8 +1062,6 @@ func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vecto
 	_track(fixture)
 	built.push_back(fixture)
 	_light_check = 0.0
-	if kind == &"lab":
-		_wire_lab_screen(fixture)
 	return fixture
 
 
@@ -1126,6 +1123,9 @@ func construct(plan: Fixture) -> bool:
 			link.from = fixture
 		if link.to == plan:
 			link.to = fixture
+		# A cable laid to a blueprint goes up once both its ends are built.
+		if link.blueprint and !link.from.blueprint and !link.to.blueprint:
+			link.blueprint = false
 	_announce("%s built" % Fixture.NAMES[plan.kind], &"built")
 	return true
 
@@ -1370,11 +1370,7 @@ func hand_in() -> void:
 
 
 func screens() -> Array[Screen]:
-	var all: Array[Screen] = [pod.screen]
-	for fixture in built:
-		if fixture.kind == &"lab":
-			all.push_back(fixture.screen)
-	return all
+	return [pod.screen]
 
 
 func _wire_pod_screen() -> void:
@@ -1557,8 +1553,8 @@ func _spawn_spiders(delta: float) -> void:
 ## Nightfall: one bug hole the first night, one more each night after, and
 ## one more with three players or more, out away from the pod.
 func _open_holes() -> void:
-	var first_sunset := (PI - Sun.START) / TAU * Sun.DAY
-	var night := floori((time - first_sunset) / Sun.DAY) + 1
+	var first_sunset := Sun.time_of(PI)
+	var night := floori((time - first_sunset) / Sun.TURN) + 1
 	var want := night + (1 if bodies.size() >= 3 else 0)
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	_shuffle(spots)
@@ -1801,7 +1797,7 @@ func _debug_setup() -> void:
 		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
 		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"tanks"].cost
 		build(&"lab", ahead[0], ahead[1], player.global_position)
-		built[-1].screen.pressed.call(&"tanks")
+		research(built[-1], &"tanks")
 	player.debug_aim = _args.has("aim")
 	if _args.has("hammer"):
 		player._switch(&"hammer")

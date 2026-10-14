@@ -7,8 +7,9 @@ extends Node
 ##   in daylight, with a lab researching;
 ## - rides a cable, and from the rig's cable on through the foundry onto
 ##   the pod's, looking that way;
-## - drags a cable off a pylon to open ground for a new pylon, hammers
-##   both up, and turns the cable round;
+## - as a soldier, lays a cable off a pylon to open ground for a new
+##   pylon, hammers that up (the cable goes up with it), and turns the
+##   cable round, which the commander can't;
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
@@ -72,7 +73,7 @@ func _step(delta: float) -> bool:
 					_lab = _game.built[-1]
 					break
 			if _lab:
-				print("lab: %s" % _lab.screen.pressed.call(&"armour"))
+				print("lab: %s" % _game.research(_lab, &"armour"))
 			else:
 				push_error("couldn't place a lab by the pod")
 			_stock_before = _game.stock
@@ -113,10 +114,16 @@ func _step(delta: float) -> bool:
 			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")
-			_game.handle(Net.local_id(), &"press", [_lab.net_id, &"stabiliser"])
-			print("a soldier pressing the lab's screen: researching '%s'" % _lab.researching)
-			if _lab.researching != &"":
-				push_error("a soldier started research from the lab's screen")
+			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
+			var by_soldier := _lab.researching
+			_game.commander_peer = Net.local_id()
+			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
+			var by_commander := _lab.researching
+			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
+			_game.commander_peer = 0
+			print("research asked for by a soldier: '%s'; by the commander: '%s', then cancelled: '%s'" % [by_soldier, by_commander, _lab.researching])
+			if by_soldier != &"" or by_commander != &"stabiliser" or _lab.researching != &"":
+				push_error("research from the command chair went wrong")
 			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
 			var plan := _game.place_blueprint(&"pylon", plan_spot[0], plan_spot[1])
 			for i in plan.hits_needed():
@@ -125,7 +132,6 @@ func _step(delta: float) -> bool:
 			print("hammered up a pylon blueprint: built %s" % built)
 			if !built:
 				push_error("hammering didn't put the blueprint up")
-			_game.commander_peer = Net.local_id()
 			var pylon: Fixture = _game.built[-1]
 			var reached := false
 			for i in 16:
@@ -140,12 +146,10 @@ func _step(delta: float) -> bool:
 			if !reached or cable.from != pylon or !cable.to.blueprint:
 				push_error("couldn't drag a cable to a new pylon")
 			var far := cable.to
-			_game.handle(Net.local_id(), &"string", [cable.net_id])
 			var early := !cable.blueprint
 			for i in far.hits_needed():
 				_game.construct(far)
-			_game.handle(Net.local_id(), &"string", [cable.net_id])
-			print("strung before the far pylon was up %s; after, onto the built one %s, strung %s" % [early, !cable.to.blueprint and _game.built.has(cable.to), !cable.blueprint])
+			print("strung before the far pylon was up %s; once it's built, onto it %s, strung %s" % [early, !cable.to.blueprint and _game.built.has(cable.to), !cable.blueprint])
 			if early or cable.to.blueprint or cable.blueprint:
 				push_error("the cable didn't follow its blueprint end into the built pylon")
 			far = cable.to
@@ -155,8 +159,10 @@ func _step(delta: float) -> bool:
 			print("flipped it: %s; the pod's cable stays in: %s" % [flipped, _game.links[1].to == _game.pod])
 			if !flipped or _game.links[1].to != _game.pod:
 				push_error("flipping went wrong")
-			_game.commander_peer = 0
 			_game.commander_peer = Net.local_id()
+			_game.handle(Net.local_id(), &"flip", [cable.net_id])
+			if cable.from != far:
+				push_error("the commander turned a cable round")
 			_game.handle(Net.local_id(), &"switch", [_rig.net_id])
 			var off := !_rig.enabled
 			_game.handle(Net.local_id(), &"switch", [_rig.net_id])
@@ -177,9 +183,9 @@ func _step(delta: float) -> bool:
 			if _game.stock != stock + 3:
 				push_error("pressing the pod's screen didn't hand in what we carried")
 			print(_game.debug_defence(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 8.0, _game.pod.global_position))
-			var midnight := (1.5 * PI - Sun.START) / TAU * Sun.DAY
+			var midnight := Sun.time_of(1.5 * PI)
 			while midnight < _game.time:
-				midnight += Sun.DAY
+				midnight += Sun.TURN
 			_game.time = midnight
 			_game.sun.set_time(_game.time)
 			print("skipped to midnight, t=%.0f, dark here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])

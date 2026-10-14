@@ -606,18 +606,9 @@ func _build_lab() -> void:
 	_add_mesh(_cylinder(0.04, 0.04, 0.8), white, Vector3(0.7, 2.2, -0.4))
 	var dish := _cylinder(0.45, 0.08, 0.18)
 	_add_mesh(dish, white, Vector3(0.7, 2.65, -0.4)).rotation = Vector3(0.5, 0, 0.3)
-	screen = Screen.new()
-	screen.title = "RESEARCH LAB"
-	screen.size_m = Vector2(1.5, 1.4)
-	screen.pixels = Vector2i(640, 598)
-	screen.button_height = 34.0
-	screen.button_font = 19
-	screen.buttons.assign(Game.UPGRADES.keys())
-	var frame := BoxMesh.new()
-	frame.size = Vector3(screen.size_m.x + 0.1, screen.size_m.y + 0.1, 0.04)
-	_add_mesh(frame, dark, Vector3(0, 0.9, 0.81))
-	screen.position = Vector3(0, 0.9, 0.84)
-	add_child(screen)
+	var window := BoxMesh.new()
+	window.size = Vector3(1.6, 0.6, 0.04)
+	_add_mesh(window, dark, Vector3(0, 1.1, 0.81))
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(2.2, 1.8, 1.6)
 	_add_collider(shape, Vector3(0, 0.9, 0))

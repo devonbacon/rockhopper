@@ -11,8 +11,8 @@ across, marked out by a blue hologram wall you can't go past; beyond it
 the ground flattens out into a plain, ringed by mountains you can't
 reach: walled in some ways, open others, different on every map, with
 one giant somewhere. The pod lands mid-morning. The
-sun crosses the sky every five minutes, then there's a night as long as
-the day. Low in the sky, it throws the hills' shadows long, so the
+rock turns every five minutes: three minutes of sun crossing the sky,
+then two of night. Low in the sky, it throws the hills' shadows long, so the
 hollows go dark first and the high ground holds the light longest. A
 range to the west brings dusk early, its shadow sweeping in across the
 floor; one to the east holds the dawn back. There's loose ore lying about, big
@@ -47,10 +47,11 @@ when the pod launches, after twelve minutes, is the score (the quota is
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
-it away. The commander lays a cable from one pylon, rig, foundry,
-turret or the pod to another, up to 20 m, with clear air under it, for
-free: it goes down as a hologram line, and a soldier strings it up with
-one hammer blow. Ore and alloy travel along it one way at 3 m/s, 1.5
+it away. Soldiers lay the cables, free, from one pylon, rig, foundry or
+turret to another or to the pod, up to 20 m, with clear air under it;
+one run to a blueprint, or to open ground (which puts a pylon blueprint
+there), waits as a hologram line and goes up once both its ends are
+built. Ore and alloy travel along it one way at 3 m/s, 1.5
 m apart. Rigs send ore, foundries send alloy, pylons pass on whatever
 reaches them (holding 4), turrets take ore as ammunition, and the pod
 takes everything into the bank. A
@@ -81,14 +82,15 @@ foundry that's smelting louder, and a lab at work a little; the pod hums.
 Spiders hear them from further than they can see.
 
 A research lab works through upgrades for this mission, one at a time,
-picked by the commander from the command chair (its screen shows how
-it's going, but soldiers can't start or cancel anything there): each
+picked by the commander from the command chair's research panel, the
+only place it's picked or followed (labs have no screen): each
 costs ore, the bigger ones alloy too, takes 30-45 s, and draws power
 while it works (it stalls when the battery's flat, or it's switched off).
 Pressing the one in progress cancels it and refunds the cost. Researched upgrades apply to
 everything, already built or not:
 
-- Blade runners: walk 5 and run 8.5, from 3.5 and 6.
+- Blade runners: walk 5 and run 8.5, from 3.5 and 6, and slide up to 16
+  m/s, from 9.
 - Jetpack: hold Space in the air to fly.
 - Armour plating: +50 max health.
 - Heated suit: the cold takes twice as long to freeze you.
@@ -189,10 +191,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   you're placing, and Ctrl and the wheel zooms meanwhile. Delete over a
   blueprint cancels it, refunding what its blows have
   paid.
-- **Cables (L, or the bar):** click where it runs from, then where it
-  runs to; a dashed line shows whether it can go, and why not. Shift
-  carries on from where it ended. Right-click or Esc stops. It's a
-  blueprint till a soldier hammers it. Delete over a cable cuts it.
+- **Cables** are the soldiers' to lay; they show here, arrowed the way
+  they run.
 - **Inspect:** click something built to see how it's doing (a foundry's
   bins, a rig's hopper, its hull, whether it's loud). P, or the button
   beside it, switches it off or on; P over a building does the same.
@@ -209,17 +209,24 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   researched blade runners). Space jumps; once you've researched the
   jetpack, hold it in the air to fly; it refills on the ground. C or Ctrl
   while running slides: a burst of speed, faster downhill, and a jump
-  out of it keeps the momentum. Land with it held to slide on.
+  out of it keeps the momentum (up to 9 m/s until blade runners). Land
+  with it held to slide on. You can steer well in the air.
 - **Weapons:** 1, 2 or the wheel switch between the gun and the hammer.
   The hammer smashes everything in a short arc in front, hurting
-  spiders badly (one blow kills one) and knocking them flying, chips ore off a deposit, and puts up
-  the commander's blueprints a blow at a time.
+  spiders (two blows kill one), knocking each back a little and
+  stunning it for a second, chips ore off a deposit, and puts up the
+  commander's blueprints a blow at a time.
+- **Cables (R):** R on a pylon, rig, foundry or turret, built or a
+  blueprint, pays a cable out behind you; R on another, or the pod, ties
+  it on, and R on open ground puts a pylon blueprint there for it. R on
+  where it started lets it go. Tap R on a cable to turn it round; hold R
+  to cut it.
 - **Grapple (middle mouse, once researched):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
   5 s to be ready again after you let go or tug a spider.
 - **Fire:** left mouse, held, about 2.4 shots a second; a spider takes
-  three (30 health, 10 a shot; one hammer blow). Shots land in a
+  three (30 health, 10 a shot; two hammer blows). Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
   tighter, but slow on your feet.
@@ -331,8 +338,7 @@ User arguments after `--`, e.g.
 - `world/sun.gd`, `world/space.gdshader`: the sun and the sky.
 - `world/fixture.gd`: the pod, ore, deposits, and everything built.
 - `world/link.gd`: cables.
-- `world/screen.gd`, `world/screen.gdshader`: the screens on the pod and
-  labs.
+- `world/screen.gd`, `world/screen.gdshader`: the pod's screen.
 - `world/flare.gd`: flares.
 - `world/hole.gd`: bug holes.
 - `world/spider.gd`: the spiders.

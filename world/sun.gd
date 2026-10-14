@@ -1,12 +1,16 @@
 class_name Sun
 extends DirectionalLight3D
 ## The star, crossing the sky as the rock turns: up in the east, over at
-## 65 degrees, down in the west, then a night as long as the day. Low in
+## 65 degrees, down in the west, then a night shorter than the day. Low in
 ## the sky the hills' shadows run long, so the hollows go dark first and
 ## the high ground holds the light longest; the mountains round about cast
 ## shadows a long way, too.
 
-const DAY := 300.0
+## Seconds the sun's up, and down.
+const DAY := 180.0
+const NIGHT := 120.0
+## A whole turn of the rock.
+const TURN := DAY + NIGHT
 const TILT := deg_to_rad(25.0)
 ## How far the sun's climbed at the start.
 const START := deg_to_rad(24.0)
@@ -25,7 +29,8 @@ func _ready() -> void:
 
 ## Unit vector towards the sun at time t.
 static func dir_at(t: float) -> Vector3:
-	var angle := START + TAU * t / DAY
+	var u := fposmod(t - time_of(0.0), TURN)
+	var angle := PI * u / DAY if u < DAY else PI + PI * (u - DAY) / NIGHT
 	return Vector3(cos(angle), sin(angle) * cos(TILT), sin(angle) * sin(TILT))
 
 
@@ -34,6 +39,13 @@ func set_time(t: float) -> void:
 	var dir := dir_at(t)
 	basis = Basis.looking_at(-dir, Vector3.UP if absf(dir.y) < 0.99 else Vector3.FORWARD)
 	visible = dir.y > -0.1
+
+
+## The first time, from the start, the sun's at `angle` round from rising
+## (PI sets, 1.5 PI is midnight).
+static func time_of(angle: float) -> float:
+	var from_rise := angle / PI * DAY if angle <= PI else DAY + (angle - PI) / PI * NIGHT
+	return fposmod(from_rise - START / PI * DAY, TURN)
 
 
 ## Whether the sun's up and nothing but space lies between p and it, now
@@ -51,5 +63,5 @@ func lights(p: Vector3, space: PhysicsDirectSpaceState3D, t: float = NAN) -> boo
 func forecast(p: Vector3, space: PhysicsDirectSpaceState3D, steps: int) -> Array[bool]:
 	var lit: Array[bool] = []
 	for i in steps:
-		lit.push_back(lights(p, space, time + DAY * i / float(steps)))
+		lit.push_back(lights(p, space, time + TURN * i / float(steps)))
 	return lit

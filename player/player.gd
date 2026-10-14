@@ -14,6 +14,12 @@ extends CharacterBody3D
 ## the right; at a junction you carry on down whichever cable's nearest
 ## the way you're looking, and you drop off short of a dead end. E again
 ## or Space lets go. F toggles the headlamp.
+##
+## Soldiers lay the cables: R on a pylon, rig, foundry or turret (built or
+## a blueprint) pays one out behind you; R on another, or the pod, ties it
+## on, and R on open ground puts a pylon blueprint there for it. A cable
+## to a blueprint goes up once both ends are built. Tap R on a cable to
+## turn it round; hold R to cut it.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -22,9 +28,12 @@ const RUN := 6.0
 const RUNNER_WALK := 5.0
 const RUNNER_RUN := 8.5
 const ACCEL := 30.0
-const AIR_ACCEL := 4.0
+const AIR_ACCEL := 10.0
 const SLIDE_BOOST := 3.0
-const SLIDE_MAX := 16.0
+## Top speed sliding, and slide-jumping off it: low until you've
+## researched blade runners.
+const SLIDE_MAX := 9.0
+const RUNNER_SLIDE_MAX := 16.0
 const SLIDE_FRICTION := 2.0
 const SLIDE_SLOPE := 1.6
 const SLIDE_STEER := 4.0
@@ -38,6 +47,10 @@ const JET_DRAIN := 35.0
 const JET_RISE := 5.0
 const JET_REFILL := 45.0
 const REACH := 4.5
+## How far off you can aim at what a cable ties to, and how long R's held
+## to cut one.
+const CABLE_REACH := 10.0
+const CUT_TIME := 0.8
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
@@ -59,7 +72,10 @@ const SETTLE := 9.0
 const DAMAGE := 10.0
 const GUN_RANGE := 60.0
 const HAMMER_EVERY := 0.75
-const HAMMER_DAMAGE := 30.0
+## Two blows kill a spider; each knocks it back a little and stuns it.
+const HAMMER_DAMAGE := 15.0
+const HAMMER_KNOCK := 4.0
+const HAMMER_STUN := 1.0
 const HAMMER_REACH := 3.2
 const GRAPPLE_RANGE := 25.0
 const GRAPPLE_PULL := 14.0
@@ -127,6 +143,15 @@ var _rope: MeshInstance3D
 var _rope_flash := 0.0
 var _yank_from := Vector3.ZERO
 var _flare_cooldown := 0.0
+## Where the cable you're paying out runs from, if you are.
+var reel: Fixture
+var _reel_line: MeshInstance3D
+var _r_was_down := false
+var _cut_held := 0.0
+## The cable lit up under the crosshair.
+var _lit: Link
+## What R would do, added to the prompt.
+var _cable_hint := ""
 
 
 func _ready() -> void:
@@ -158,7 +183,8 @@ func _ready() -> void:
 	camera.add_child(headlamp)
 	_build_gun()
 	_build_hammer()
-	_build_rope()
+	_rope = _line(Color(1.0, 0.6, 0.2))
+	_reel_line = _line(Link.ORE)
 
 
 ## Turns the body so its up points away from the centre, keeping where it
@@ -228,7 +254,15 @@ func _physics_process(delta: float) -> void:
 		rest += 2.0
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
 	if playing:
+		_cable_hint = ""
 		_use(delta)
+		if _cable_hint != "":
+			prompt = _cable_hint if prompt == "" else prompt + "\n" + _cable_hint
+	elif reel:
+		reel = null
+	_reel_line.visible = reel != null
+	if reel:
+		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if trigger and _cooldown <= 0.0:
 			if weapon == &"gun":
@@ -353,10 +387,11 @@ func _walk(delta: float, playing: bool) -> void:
 		_reel(delta, playing)
 	if is_on_floor() and !hooked:
 		var ground_speed := horizontal.length()
+		var slide_max := RUNNER_SLIDE_MAX if game.has(&"runners") else SLIDE_MAX
 		if !sliding and crouch and ground_speed > walk * 0.9:
 			sliding = true
 			if _slide_cooldown <= 0.0:
-				horizontal = horizontal.normalized() * minf(ground_speed + SLIDE_BOOST, SLIDE_MAX)
+				horizontal = horizontal.normalized() * minf(ground_speed + SLIDE_BOOST, slide_max)
 				_slide_cooldown = SLIDE_COOLDOWN
 		if sliding and (!crouch or ground_speed < walk * 0.6):
 			sliding = false
@@ -366,14 +401,14 @@ func _walk(delta: float, playing: bool) -> void:
 			var downhill := gravity - normal * gravity.dot(normal)
 			horizontal += (downhill - up * downhill.dot(up)) * SLIDE_SLOPE * delta
 			horizontal = horizontal.move_toward(Vector3.ZERO, SLIDE_FRICTION * delta)
-			horizontal = (horizontal + wish_dir * SLIDE_STEER * delta).limit_length(SLIDE_MAX)
+			horizontal = (horizontal + wish_dir * SLIDE_STEER * delta).limit_length(slide_max)
 		else:
 			horizontal = horizontal.move_toward(wish, ACCEL * delta)
 		fuel = minf(100.0, fuel + JET_REFILL * delta)
 		if jump_held:
 			vertical = up * JUMP
 			if sliding:
-				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(SLIDE_MAX)
+				horizontal = (horizontal * SLIDE_JUMP_BOOST).limit_length(slide_max)
 	else:
 		sliding = false
 		jetting = jump_held and fuel > 0.0 and game.has(&"jetpack")
@@ -431,6 +466,8 @@ func _use(delta: float) -> void:
 		prompt = "[E] / [Space] Let go"
 		if pressed:
 			let_go()
+		return
+	if _lay_cable(delta):
 		return
 	if _aim_screen():
 		if _screen.hover != &"":
@@ -499,6 +536,86 @@ func _use(delta: float) -> void:
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
 
 
+## R: paying a cable out, tying it on, or putting a pylon down for it;
+## and turning cables round or cutting them. True while a cable's being
+## paid out, which is all the prompt's about then.
+func _lay_cable(delta: float) -> bool:
+	var down := Input.is_physical_key_pressed(KEY_R)
+	var pressed := down and !_r_was_down
+	var released := !down and _r_was_down
+	_r_was_down = down
+	if !is_instance_valid(reel):
+		reel = null
+	if is_instance_valid(_lit):
+		_lit.highlight = false
+	_lit = null
+	var hit := _aim(CABLE_REACH)
+	var target: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
+	if target and target.kind == &"deposit" and target.rig:
+		target = target.rig
+	if reel:
+		var start := Fixture.NAMES.get(reel.kind, "pylon") as String
+		if reel.cable_point().distance_to(global_position) > Link.RANGE + 4.0:
+			reel = null
+			_say("Too far: the cable slipped off the %s" % start)
+			return false
+		if target and target != reel and Fixture.CABLE_HEIGHT.has(target.kind):
+			var to_name := "pod" if target == game.pod else Fixture.NAMES[target.kind] as String
+			var why := game.can_link(reel, target)
+			prompt = "Cable from the %s\n%s" % [start, ("[R] Tie it to the %s" % to_name) if why == "" else why]
+			if pressed and why == "":
+				Sfx.play(&"latch")
+				game.act(&"link", [reel.net_id, target.net_id])
+				reel = null
+		elif target == reel:
+			prompt = "Cable from the %s\n[R] Let it go" % start
+			if pressed:
+				reel = null
+		elif !hit.is_empty() and !target:
+			var why := game.can_link_pylon(reel, hit.position, hit.normal)
+			prompt = "Cable from the %s\n%s" % [start, "[R] A new pylon here" if why == "" else why]
+			if pressed and why == "":
+				Sfx.play(&"place")
+				game.act(&"link_pylon", [reel.net_id, hit.position, hit.normal])
+				reel = null
+		else:
+			prompt = "Cable from the %s\n[R] on a pylon, rig, foundry, turret or the pod ties it on;\non open ground, a new pylon" % start
+		return true
+	var cable := _aim_cable(REACH + 2.0)
+	if cable.is_empty():
+		cable = _aim_cable(REACH + 2.0, true)
+	if !cable.is_empty() and (!target or cable[2] < camera.global_position.distance_to(hit.position)):
+		var link: Link = cable[0]
+		_lit = link
+		link.highlight = true
+		_cable_hint = "[R] Turn it round    [Hold R] Cut it"
+		if released and _cut_held > 0.0 and _cut_held < 0.3:
+			var why := game.can_flip(link)
+			if why != "":
+				_say(why)
+			else:
+				Sfx.play(&"press")
+				game.act(&"flip", [link.net_id])
+				_say("Cable turned round")
+		_cut_held = _cut_held + delta if down else 0.0
+		if down:
+			progress = maxf(_cut_held, 0.0) / CUT_TIME
+		if _cut_held >= CUT_TIME:
+			# Held on past the cut: letting go mustn't flip what's next.
+			_cut_held = -100.0
+			Sfx.play(&"cancel")
+			game.act(&"unlink", [link.net_id])
+			_say("Cable cut")
+		return false
+	_cut_held = 0.0
+	if target and target != game.pod and Fixture.CABLE_HEIGHT.has(target.kind):
+		_cable_hint = "[R] Run a cable from it"
+		if pressed:
+			reel = target
+			Sfx.play(&"latch")
+	return false
+
+
 ## Whether the crosshair's on a screen within reach; if so it's _screen.
 func _aim_screen() -> bool:
 	if is_instance_valid(_screen):
@@ -550,7 +667,7 @@ func _smash() -> void:
 		if to.length() < HAMMER_REACH and to.normalized().dot(ahead) > 0.55:
 			Sfx.play(&"smash")
 			game.act(&"hit", [spider.net_id, HAMMER_DAMAGE])
-			game.act(&"fling", [spider.net_id, (to.normalized() + up_direction * 0.6) * 9.0, 0.8])
+			game.act(&"fling", [spider.net_id, to.normalized() * HAMMER_KNOCK + up_direction * 2.5, HAMMER_STUN])
 	var hit := _aim(HAMMER_REACH)
 	var plan := _aim_cable(HAMMER_REACH + 1.0, true)
 	if !plan.is_empty() and (hit.is_empty() or plan[2] < from.distance_to(hit.position)):
@@ -637,16 +754,12 @@ func _draw_rope(delta: float) -> void:
 	_rope.visible = hooked or _rope_flash > 0.0
 	if !_rope.visible:
 		return
-	var from := camera.global_transform * Vector3(-0.25, -0.2, -0.4)
-	var length := from.distance_to(end)
-	if length < 0.05:
-		return
-	var along := (end - from) / length
-	var side := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.RIGHT).normalized()
-	_rope.global_transform = Transform3D(Basis(side, along * length, side.cross(along)), (from + end) * 0.5)
+	_stretch(_rope, camera.global_transform * Vector3(-0.25, -0.2, -0.4), end)
 
 
-func _build_rope() -> void:
+## A thin line to stretch between two points: the grapple's rope, or the
+## cable you're paying out.
+func _line(color: Color) -> MeshInstance3D:
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = 0.015
 	mesh.bottom_radius = 0.015
@@ -654,14 +767,24 @@ func _build_rope() -> void:
 	mesh.radial_segments = 4
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(1.0, 0.6, 0.2)
-	_rope = MeshInstance3D.new()
-	_rope.mesh = mesh
-	_rope.material_override = material
-	_rope.top_level = true
-	_rope.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_rope.visible = false
-	add_child(_rope)
+	material.albedo_color = color
+	var line := MeshInstance3D.new()
+	line.mesh = mesh
+	line.material_override = material
+	line.top_level = true
+	line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	line.visible = false
+	add_child(line)
+	return line
+
+
+func _stretch(line: MeshInstance3D, from: Vector3, end: Vector3) -> void:
+	var length := from.distance_to(end)
+	if length < 0.05:
+		return
+	var along := (end - from) / length
+	var side := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.RIGHT).normalized()
+	line.global_transform = Transform3D(Basis(side, along * length, side.cross(along)), (from + end) * 0.5)
 
 
 func _build_hammer() -> void:

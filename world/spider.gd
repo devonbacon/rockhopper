@@ -106,6 +106,10 @@ func _physics_process(delta: float) -> void:
 	if _flung > 0.0:
 		_flung -= delta
 		velocity -= up * GRAVITY * delta
+		if is_on_floor():
+			# Down again, it skids to a halt and stays dazed.
+			var vertical := up * velocity.dot(up)
+			velocity = vertical + (velocity - vertical).move_toward(Vector3.ZERO, 14.0 * delta)
 		up_direction = up
 		move_and_slide()
 		_animate(delta, 1.5)
