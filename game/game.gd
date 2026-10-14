@@ -128,6 +128,10 @@ const SPAWN_GAP_END := 2.5 / 3.0
 const HOLE_NEAR := 34.0
 const HOLE_FAR := 62.0
 const HOLE_APART := 18.0
+## Seconds an unseen line takes to sweep across the play area, east to
+## west, from sunset opening the night's bug holes as it passes them, and
+## from sunrise closing them.
+const SWEEP := 30.0
 const SNAPSHOT_EVERY := 0.05
 const SLOW_EVERY := 0.25
 const MOVE_EVERY := 1.0 / 30.0
@@ -227,7 +231,8 @@ var _rng := RandomNumberGenerator.new()
 var _light_check := 0.0
 var _spawn_in := 2.0
 var _frenzy_in := 0.0
-var _hole_check := 0.0
+## Tonight's holes that the dusk line hasn't reached yet: [position, normal].
+var _pending_holes: Array = []
 var _night := false
 var _snap_in := 0.0
 var _slow_in := 0.0
@@ -1802,12 +1807,16 @@ func _ping_beam(at: Vector3, from_commander: bool) -> void:
 func _spawn_spiders(delta: float) -> void:
 	var players := (1.0 + maxi(1, bodies.size())) * 0.5
 	_spawn_frenzied(delta, players)
-	if Sun.dir_at(time).y > 0.0:
+	var since_rise := fposmod(time - Sun.time_of(0.0), Sun.TURN)
+	if since_rise < Sun.DAY:
 		_night = false
-		_close_sunlit_holes(delta)
-	elif !_night:
-		_night = true
-		_open_holes()
+		_pending_holes.clear()
+		_close_swept_holes(since_rise)
+	else:
+		if !_night:
+			_night = true
+			_plan_holes()
+		_open_swept_holes(since_rise - Sun.DAY)
 	_spawn_in -= delta
 	var night_holes := holes.filter(func(h: Hole) -> bool: return !h.extraction)
 	if _spawn_in > 0.0 or night_holes.is_empty():
@@ -1840,19 +1849,31 @@ func _spot_by(hole: Hole) -> Vector3:
 	return terrain.surface_point(spot)[0]
 
 
-## By day, the night's holes close as the sunrise reaches each.
-func _close_sunlit_holes(delta: float) -> void:
-	_hole_check -= delta
-	if _hole_check > 0.0:
-		return
-	_hole_check = 0.25
-	var space := get_world_3d().direct_space_state
+## Seconds after the dawn or dusk line sets off that it reaches p.
+func _swept_at(p: Vector3) -> float:
+	return SWEEP * clampf((Terrain.FLOOR_RADIUS - p.x) / (2.0 * Terrain.FLOOR_RADIUS), 0.0, 1.0)
+
+
+## By day, the night's holes close as the dawn line passes each.
+func _close_swept_holes(since_rise: float) -> void:
 	for hole in holes.duplicate():
-		if !hole.extraction and sun.lights(hole.global_position + hole.normal * 0.6, space):
+		if !hole.extraction and since_rise >= _swept_at(hole.global_position):
 			holes.erase(hole)
 			entities.erase(hole.net_id)
 			hole.close()
 			sound(&"cancel", hole.global_position)
+
+
+## By night, tonight's holes open as the dusk line passes each.
+func _open_swept_holes(since_set: float) -> void:
+	for pending: Array in _pending_holes.duplicate():
+		if since_set >= _swept_at(pending[0]):
+			_pending_holes.erase(pending)
+			var first := !holes.any(func(h: Hole) -> bool: return !h.extraction)
+			_add_hole(pending[0], pending[1])
+			sound(&"alarm", pending[0])
+			if first:
+				_announce("Bug holes are tearing open as the dark comes in." if !_pending_holes.is_empty() else "A bug hole's torn open in the dark.")
 
 
 ## Closes the night's holes, or the ones the engines tore.
@@ -1884,9 +1905,11 @@ func _open_extraction_holes() -> void:
 	_frenzy_in = 3.0
 
 
-## Nightfall: one bug hole the first night, one more each night after, and
-## one more with three players or more, out away from the pod.
-func _open_holes() -> void:
+## Nightfall: where tonight's bug holes will open, as the dusk line
+## reaches them: one the first night, one more each night after, and one
+## more with three players or more, out away from the pod.
+func _plan_holes() -> void:
+	_pending_holes.clear()
 	var first_sunset := Sun.time_of(PI)
 	var night := floori((time - first_sunset) / Sun.TURN) + 1
 	var want := night + (1 if bodies.size() >= 3 else 0)
@@ -1894,16 +1917,15 @@ func _open_holes() -> void:
 	_shuffle(spots)
 	for loose in [1.0, 0.5]:
 		for spot in spots:
-			if holes.filter(func(h: Hole) -> bool: return !h.extraction).size() >= want:
+			if _pending_holes.size() >= want:
 				break
 			var at: Vector3 = spot[0]
 			var from_pod := at.distance_to(pod.global_position)
 			if from_pod < HOLE_NEAR * loose or from_pod > HOLE_FAR / loose or Vector2(at.x, at.z).length() > Terrain.FLOOR_RADIUS - 4.0 or (spot[1] as Vector3).y < 0.8 * loose:
 				continue
-			if holes.any(func(h: Hole) -> bool: return h.global_position.distance_to(at) < HOLE_APART * loose):
+			if holes.any(func(h: Hole) -> bool: return h.global_position.distance_to(at) < HOLE_APART * loose) or _pending_holes.any(func(p: Array) -> bool: return (p[0] as Vector3).distance_to(at) < HOLE_APART * loose):
 				continue
-			_add_hole(at, spot[1])
-	_announce("Bug holes are tearing open in the dark." if holes.size() > 1 else "A bug hole's torn open in the dark.")
+			_pending_holes.push_back([at, spot[1]])
 
 
 func _add_hole(at: Vector3, normal: Vector3, id := 0) -> Hole:

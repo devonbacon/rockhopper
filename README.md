@@ -133,10 +133,10 @@ gets you back up, so a downed soldier is worth going back for.
 
 At nightfall, bug holes tear open in the ground, 34-62 m from the
 pod: one the first night, two the second, and so on, and one more with three or
-more players. They glow red, and close one by one as the sunrise
-reaches each (one in a hollow, or in the shadow of a range, stays open
-longer). Spiders climb out of
-them all night, and after dawn from any the sun hasn't reached yet, more of them and
+more players. They open one by one as dusk sweeps across the map from
+east to west over 30 s, glow red, and close the same way as the sunrise
+sweeps across it (shade doesn't keep one open). Spiders climb out of
+them all night, and after dawn from any the sunrise hasn't reached yet, more of them and
 more often as the mission goes on, and with more players: at most 3 at
 once at first and 8 by twelve minutes in, solo, coming up as often as
 every 1.7 s at first and 0.8 s by then, and still climbing after (to 16
