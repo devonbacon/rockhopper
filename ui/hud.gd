@@ -337,7 +337,7 @@ func _update_bottom() -> void:
 	var labs := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lab" and f.researching != &"").size()
 	_stock.custom_minimum_size.y = 92 + 22 * labs
 	_stock.queue_redraw()
-	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
+	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build    [RMB] cables"
 	_hint.text = "%s    %s%s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[1/2/wheel] rifle/hammer    " if game.equipped(&"gun") else "", "[MMB] grapple    " if game.equipped(&"grapple") else ""]
 
 

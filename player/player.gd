@@ -579,25 +579,29 @@ func _fallen_ahead() -> int:
 	return 0
 
 
-## R: paying a cable out, tying it on, or putting a pylon down for it;
-## and turning cables round or cutting them. True while a cable's being
-## paid out, which is all the prompt's about then.
+## Right mouse, with the hammer out: paying a cable out, tying it on, or
+## putting a pylon down for it; and turning cables round or cutting them.
+## True while a cable's being paid out, which is all the prompt's about
+## then.
 func _lay_cable(delta: float) -> bool:
-	var down := Input.is_physical_key_pressed(KEY_R)
+	var down := weapon == &"hammer" and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	var pressed := down and !_r_was_down
 	var released := !down and _r_was_down
 	_r_was_down = down
-	if !is_instance_valid(reel):
+	if !is_instance_valid(reel) or weapon != &"hammer":
 		reel = null
 	if is_instance_valid(_lit):
 		_lit.highlight = false
 	_lit = null
+	if weapon != &"hammer":
+		_cut_held = 0.0
+		return false
 	var hit := _aim(CABLE_REACH)
 	var target: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
 	if target and target.kind == &"deposit" and target.rig:
 		target = target.rig
 	if reel:
-		var start := Fixture.NAMES.get(reel.kind, "pylon") as String
+		var start := "pod" if reel == game.pod else Fixture.NAMES[reel.kind] as String
 		if reel.cable_point().distance_to(global_position) > Link.RANGE + 4.0:
 			reel = null
 			_say("Too far: the cable slipped off the %s" % start)
@@ -605,24 +609,24 @@ func _lay_cable(delta: float) -> bool:
 		if target and target != reel and Fixture.CABLE_HEIGHT.has(target.kind):
 			var to_name := "pod" if target == game.pod else Fixture.NAMES[target.kind] as String
 			var why := game.can_link(reel, target)
-			prompt = "Cable from the %s\n%s" % [start, ("[R] Tie it to the %s" % to_name) if why == "" else why]
+			prompt = "Cable from the %s\n%s" % [start, ("[RMB] Tie it to the %s" % to_name) if why == "" else why]
 			if pressed and why == "":
 				Sfx.play(&"latch")
 				game.act(&"link", [reel.net_id, target.net_id])
 				reel = null
 		elif target == reel:
-			prompt = "Cable from the %s\n[R] Let it go" % start
+			prompt = "Cable from the %s\n[RMB] Let it go" % start
 			if pressed:
 				reel = null
 		elif !hit.is_empty() and !target:
 			var why := game.can_link_pylon(reel, hit.position, hit.normal)
-			prompt = "Cable from the %s\n%s" % [start, "[R] A new pylon here" if why == "" else why]
+			prompt = "Cable from the %s\n%s" % [start, "[RMB] A new pylon here" if why == "" else why]
 			if pressed and why == "":
 				Sfx.play(&"place")
 				game.act(&"link_pylon", [reel.net_id, hit.position, hit.normal])
 				reel = null
 		else:
-			prompt = "Cable from the %s\n[R] on a pylon, rig, foundry, turret or the pod ties it on;\non open ground, a new pylon" % start
+			prompt = "Cable from the %s\n[RMB] on a pylon, rig, foundry, turret or the pod ties it on;\non open ground, a new pylon" % start
 		return true
 	var cable := _aim_cable(REACH + 2.0)
 	if cable.is_empty():
@@ -631,7 +635,7 @@ func _lay_cable(delta: float) -> bool:
 		var link: Link = cable[0]
 		_lit = link
 		link.highlight = true
-		_cable_hint = "[R] Turn it round    [Hold R] Cut it"
+		_cable_hint = "[RMB] Turn it round    [Hold RMB] Cut it"
 		if released and _cut_held > 0.0 and _cut_held < 0.3:
 			var why := game.can_flip(link)
 			if why != "":
@@ -651,8 +655,8 @@ func _lay_cable(delta: float) -> bool:
 			_say("Cable cut")
 		return false
 	_cut_held = 0.0
-	if target and target != game.pod and Fixture.CABLE_HEIGHT.has(target.kind):
-		_cable_hint = "[R] Run a cable from it"
+	if target and Fixture.CABLE_HEIGHT.has(target.kind):
+		_cable_hint = "[RMB] Run a cable from it"
 		if pressed:
 			reel = target
 			Sfx.play(&"latch")

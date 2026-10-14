@@ -250,10 +250,13 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   spiders (two blows kill one), knocking each back a little and
   stunning it for a second, chips ore off a deposit, and puts up the
   commander's blueprints a blow at a time.
-- **Cables (R):** R on a pylon, rig, foundry or turret, built or a
-  blueprint, pays a cable out behind you; R on another, or the pod, ties
-  it on, and R on open ground puts a pylon blueprint there for it. R on
-  where it started lets it go. Tap R on a cable to turn it round; hold R
+- **Cables (right mouse, with the hammer out):** right-click a pylon,
+  rig, foundry, turret or the pod, built or a blueprint, to pay a cable
+  out behind you; right-click another to tie it on, or open ground to put
+  a pylon blueprint there for it. Right-click where it started to let it
+  go. A cable runs the way you laid it, except that it always runs into
+  the pod and out of a rig, whichever end you started from. Right-click
+  a cable to turn it round; hold right mouse
   to cut it.
 - **Grapple (middle mouse, once you've one):** a spider gets tugged
   towards you; anything else (rock, a building) reels you in, up to

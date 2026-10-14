@@ -206,6 +206,13 @@ func _step(delta: float) -> bool:
 			_game.handle(Net.local_id(), &"flip", [cable.net_id])
 			var flipped := cable.from == far and cable.to == pylon
 			_game.handle(Net.local_id(), &"flip", [_game.links[1].net_id])
+			var links_before := _game.links.size()
+			_game.handle(Net.local_id(), &"link", [_game.pod.net_id, far.net_id])
+			var backwards: Link = _game.links[-1]
+			print("laid a cable from the pod to a pylon: it runs into the pod %s" % [_game.links.size() == links_before + 1 and backwards.from == far and backwards.to == _game.pod])
+			if _game.links.size() != links_before + 1 or backwards.to != _game.pod:
+				push_error("a cable laid from the pod didn't turn round into it")
+			_game.remove_link(backwards)
 			print("flipped it: %s; the pod's cable stays in: %s" % [flipped, _game.links[1].to == _game.pod])
 			if !flipped or _game.links[1].to != _game.pod:
 				push_error("flipping went wrong")

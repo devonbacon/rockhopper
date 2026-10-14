@@ -594,10 +594,13 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 			var onto: Node = entities.get(args[1], null)
 			if peer != commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
 				sound(&"clank", onto.global_position)
-				add_link(target, onto, 0, target.blueprint or onto.blueprint)
+				var ends := cable_ends(target, onto)
+				add_link(ends[0], ends[1], 0, target.blueprint or onto.blueprint)
 		&"link_pylon":
 			if peer != commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
-				add_link(target, place_blueprint(&"pylon", args[1], args[2], target.global_position), 0, true)
+				var new_pylon := place_blueprint(&"pylon", args[1], args[2], target.global_position)
+				var ends := cable_ends(target, new_pylon)
+				add_link(ends[0], ends[1], 0, true)
 		&"flip":
 			if peer != commander_peer and target is Link and can_flip(target) == "":
 				flip(target)
@@ -1433,6 +1436,9 @@ func can_link(a: Fixture, b: Fixture) -> String:
 		return "Pick somewhere else to run it to."
 	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind):
 		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
+	var ends := cable_ends(a, b)
+	a = ends[0]
+	b = ends[1]
 	if a == pod:
 		return "The pod only takes cables in."
 	if b.kind == &"drill":
@@ -1443,12 +1449,18 @@ func can_link(a: Fixture, b: Fixture) -> String:
 	return cable_clear(a.cable_point(), b.cable_point())
 
 
+## Which way a cable laid from a to b runs: that way, unless that'd be
+## out of the pod or into a rig, which it turns round.
+func cable_ends(a: Fixture, b: Fixture) -> Array[Fixture]:
+	if a == pod or (b.kind == &"drill" and a != pod):
+		return [b, a]
+	return [a, b]
+
+
 ## Why a cable can't run from a to a new pylon at pos, or "" if it can.
 func can_link_pylon(a: Fixture, pos: Vector3, normal: Vector3) -> String:
 	if !Fixture.CABLE_HEIGHT.has(a.kind):
 		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
-	if a == pod:
-		return "The pod only takes cables in."
 	if !can_build(&"pylon", pos, normal):
 		return "No room for a pylon there."
 	return cable_clear(a.cable_point(), pos + Terrain.up_at(pos) * Fixture.CABLE_HEIGHT.pylon)
