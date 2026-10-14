@@ -17,7 +17,8 @@ extends Node3D
 ##
 ## Click something built to see how it's doing; P, or its button, switches
 ## it off or on. Right-click pings the spot for the soldiers. R opens the
-## research panel.
+## research panel. L, twice, calls the launch: the pod lifts off a little
+## later with whoever's aboard; L again calls it off.
 
 const PAN_SPEED := 40.0
 const TURN_SPEED := 1.8
@@ -57,6 +58,9 @@ var _power_button: Button
 var _research: Control
 var _research_rows: VBoxContainer
 var _research_buttons := {}
+var _launch_button: Button
+## Until when a second press of Launch goes ahead.
+var _launch_armed := 0.0
 var _ghost: MeshInstance3D
 var _ghost_material: StandardMaterial3D
 ## Where things were placed or linked lately: [point, age].
@@ -224,6 +228,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
 			KEY_R:
 				_research.visible = !_research.visible
+			KEY_L:
+				_launch()
 			KEY_DELETE, KEY_BACKSPACE:
 				if _hover and _hover.blueprint:
 					Sfx.play(&"cancel")
@@ -253,6 +259,19 @@ func _mouse_hit() -> Dictionary:
 func _choose(kind: StringName) -> void:
 	placing = kind
 	_ghost.visible = false
+
+
+## Calls the launch, on a second press within a few seconds; or, counting
+## down, calls it off.
+func _launch() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if game.launch_at == INF and now > _launch_armed:
+		_launch_armed = now + 3.0
+		toast("Press Launch again to lift off in %d s. Anyone not aboard is left behind." % Game.LAUNCH_COUNTDOWN)
+		return
+	_launch_armed = 0.0
+	Sfx.play(&"press")
+	game.act(&"launch", [])
 
 
 func _switch(fixture: Fixture) -> void:
@@ -399,12 +418,16 @@ func _build_ui() -> void:
 	var research := _button("Research\n[R]", Vector2(110, 92))
 	research.pressed.connect(func() -> void: _research.visible = !_research.visible)
 	bar.add_child(research)
+	_launch_button = _button("", Vector2(110, 92))
+	_launch_button.pressed.connect(_launch)
+	_launch_button.tooltip_text = "Lift off in %d s, with whoever's aboard. Whatever's banked then is the score; staying on gets you more, but every night's worse." % Game.LAUNCH_COUNTDOWN
+	bar.add_child(_launch_button)
 	var bar_panel := _panel(bar)
 	bar_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-9] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [L] launch  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -449,11 +472,11 @@ func _lab_for(upgrade: StringName) -> Fixture:
 
 
 func _update_ui() -> void:
-	var left := maxf(0.0, Game.MISSION - game.time)
+	var left := maxf(0.0, game.launch_at - game.time)
 	var lines := ["ORE  %d / %d" % [game.stock, Game.QUOTA],
 		"ALLOY  %d" % game.alloy,
 		"BATTERY  %d / %d   %+.1f/s" % [game.battery, game.capacity(), game.power_in - game.power_out],
-		"LAUNCH IN  %d:%02d" % [int(left) / 60, int(left) % 60],
+		("LAUNCH IN  %d:%02d" % [int(left) / 60, int(left) % 60]) if game.launch_at < INF else "ON THE ROCK  %d:%02d" % [int(game.time) / 60, int(game.time) % 60],
 		"POD HULL  %d%%" % roundi(game.pod.health / game.pod.max_health * 100.0),
 		"SOLDIERS  %d" % (game.bodies.size() - (1 if game.commander_peer != 0 else 0))]
 	for lab in game.built:
@@ -466,6 +489,8 @@ func _update_ui() -> void:
 		_focus_label.text = "%s   %s" % [_name(focus).to_upper(), _describe(focus)]
 		_power_button.visible = Fixture.SWITCHED.has(focus.kind)
 		_power_button.text = "Switch off [P]" if focus.enabled else "Switch on [P]"
+	_launch_button.text = "Call off\n[L]" if game.launch_at < INF else "Launch\n[L]"
+	_launch_button.modulate = Hud.ALERT if game.launch_at < INF or Time.get_ticks_msec() / 1000.0 < _launch_armed else Color.WHITE
 	for kind in _build_buttons:
 		(_build_buttons[kind] as Button).queue_redraw()
 	if _research.visible:

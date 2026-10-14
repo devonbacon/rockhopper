@@ -13,7 +13,8 @@ extends Node
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
-## - skips to midnight and watches the spiders come.
+## - skips to midnight and watches the spiders come;
+## - calls the launch from the command chair and lifts off.
 ## Run it as a scene, with --fixed-fps 60 so it goes as fast as it can:
 ## Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn
 
@@ -207,5 +208,22 @@ func _step(delta: float) -> bool:
 			print("flare thrown at our feet 30 s ago (we may have been shoved): still burning %s, flares left %d, pod hull %.0f" % [flare_lit, _game.flares_left, _game.pod.health])
 			if !flare_lit:
 				push_error("the flare didn't land and burn by us")
+			_game.handle(Net.local_id(), &"launch", [])
+			var by_soldier := _game.launch_at
+			_game.commander_peer = Net.local_id()
+			_game.handle(Net.local_id(), &"launch", [])
+			_game.handle(Net.local_id(), &"launch", [])
+			var called_off := _game.launch_at
+			_game.handle(Net.local_id(), &"launch", [])
+			print("launch called by a soldier: %s; by the commander, then called off: %s; called again for %.0f s on" % [by_soldier < INF, called_off < INF, _game.launch_at - _game.time])
+			if by_soldier < INF or called_off < INF or _game.launch_at == INF:
+				push_error("calling the launch went wrong")
+			_phase = 6
+		6:
+			if _game.state == Game.State.PLAYING:
+				return false
+			print("after the launch: %s" % _game.outcome)
+			if _game.state != Game.State.WON:
+				push_error("the commander's launch didn't extract")
 			return true
 	return false

@@ -42,8 +42,10 @@ its share of the cost
 from the bank, the first blows first, and lands only if the bank can pay
 it. Buildings stand upright on a concrete plinth sunk into the rock, on
 ground up to 20° steep (35° for lamps and pylons). What's in the bank
-when the pod launches, after twelve minutes, is the score (the quota is
-100 ore; alloy doesn't count). Be beside the pod then, or be left behind.
+when the pod launches is the score (the quota is 100 ore; alloy doesn't
+count). The commander calls the launch, whenever they like: it lifts off
+45 s later, and anyone not beside the pod then is left behind. Staying
+on banks more, but every night is worse than the last.
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
@@ -103,12 +105,13 @@ everything, already built or not:
 - Efficient lamps: lamps draw half the power.
 
 At nightfall, bug holes tear open in the ground, 28-46 m from the
-pod: one the first night, two the second, and one more with three or
+pod: one the first night, two the second, and so on, and one more with three or
 more players. They glow red, and close at sunrise. Spiders climb out of
 them all night (never by day, however deep the shadow), more of them and
 more often as the mission goes on, and with more players: at most 3 at
-once at first and 8 by the end, solo, coming up as often as every 1.7 s
-at first and 0.8 s by the end, with each player past the first adding
+once at first and 8 by twelve minutes in, solo, coming up as often as
+every 1.7 s at first and 0.8 s by then, and still climbing after (to 16
+at once and every 0.4 s), with each player past the first adding
 half as much again. They go for the nearest thing within 40 m, one of
 you or anything you've built, counting you a little nearer than you are
 and the pod a little further; but anything working loud enough draws
@@ -197,6 +200,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   bins, a rig's hopper, its hull, whether it's loud). P, or the button
   beside it, switches it off or on; P over a building does the same.
 - **Ping:** right-click.
+- **Launch (L, twice, or the bar):** the pod lifts off 45 s later with
+  whoever's beside it; L again calls it off.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
 - **Research (R):** every upgrade, started on an idle lab; press the one
@@ -236,7 +241,7 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   (E or Space lets go).
 - **The pod's screen:** look at a button on it and press E, to hand in
   what you carry, or take command. It also shows the ore and alloy
-  banked, the battery, the hull and the launch clock.
+  banked, the battery, the hull and, once it's called, the launch countdown.
 - **Flare (Q):** throws one where you're looking.
 - **Ping (G):** marks the spot you're looking at for everyone
   for 8 s: a beam of light, and a marker on screen with your name and how
@@ -257,7 +262,7 @@ pulses in sixteenths, pumping, the arpeggio runs, low brass swells on
 the chord changes, and every other phrase the brass plays the theme.
 With three or more spiders near you (or the pod, from the command
 chair), rock drums and chugging guitar come in under the theme. When the
-pod's being bitten, or in the last minute, it goes four on the floor
+pod's being bitten, or once the launch is called, it goes four on the floor
 with the arpeggio an octave up. It climbs straight away, with a crash,
 and comes back down only after four calmer bars. The pause menu has its
 volume, kept between runs. The score is `audio/music.gd`; the synth,

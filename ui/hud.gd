@@ -32,6 +32,7 @@ var game: Game
 
 var _meters := {}
 var _launch: Label
+var _launch_title: Label
 var _sky: Label
 var _strip: Control
 var _stock: Control
@@ -256,7 +257,8 @@ func _build_clock() -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 6)
 	var title := _label(13, DIM)
-	title.text = "POD LAUNCHES IN"
+	title.text = "ON THE ROCK"
+	_launch_title = title
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	column.add_child(title)
 	_launch = _label(30)
@@ -278,9 +280,14 @@ func _build_clock() -> void:
 
 
 func _update_clock() -> void:
-	var left := maxf(0.0, Game.MISSION - game.time)
-	_launch.text = _clock_text(left)
-	_launch.modulate = ALERT if left < 60.0 else Color.WHITE
+	if game.launch_at < INF:
+		_launch_title.text = "POD LAUNCHES IN"
+		_launch.text = _clock_text(maxf(0.0, game.launch_at - game.time))
+		_launch.modulate = ALERT
+	else:
+		_launch_title.text = "ON THE ROCK"
+		_launch.text = _clock_text(game.time)
+		_launch.modulate = Color.WHITE
 	var lit_now := !_forecast.is_empty() and _forecast[0]
 	var change := _forecast.find(!lit_now)
 	if _forecast.is_empty():
@@ -301,7 +308,7 @@ func _draw_strip() -> void:
 	for i in steps:
 		var x := width * i / float(steps)
 		_strip.draw_rect(Rect2(x, 0, width / steps + 0.5, _strip.size.y), DAY_COLOR if _forecast[i] else NIGHT_COLOR)
-	var launch := (Game.MISSION - game.time) / Sun.TURN
+	var launch := (game.launch_at - game.time) / Sun.TURN
 	if launch < 1.0:
 		_strip.draw_rect(Rect2(width * launch - 1.5, -3, 3, _strip.size.y + 6), ALERT)
 	_strip.draw_rect(Rect2(0, -3, 2, _strip.size.y + 6), Color.WHITE)

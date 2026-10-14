@@ -39,7 +39,11 @@ extends Node3D
 
 enum State { PLAYING, WON, LOST }
 
-const MISSION := 720.0
+## Seconds over which the spiders' spawning climbs to its END numbers;
+## it keeps climbing past them, so staying on gets riskier.
+const RAMP := 720.0
+## Seconds from the commander calling the launch to lift-off.
+const LAUNCH_COUNTDOWN := 45.0
 const QUOTA := 100
 const BATTERY := 100.0
 const START_BATTERY := 60.0
@@ -117,6 +121,8 @@ var battery := START_BATTERY
 var power_in := 0.0
 var power_out := 0.0
 ## Ore in the pod.
+## When the pod lifts off: INF until the commander calls the launch.
+var launch_at := INF
 var stock := START_STOCK
 var alloy := 0
 var researched := {}
@@ -320,7 +326,7 @@ func _simulate(delta: float) -> void:
 	for peer in bodies.keys():
 		if peer != commander_peer:
 			_look_after(peer, delta)
-	if time >= MISSION:
+	if time >= launch_at:
 		var aboard := 1 if commander_peer != 0 else 0
 		for peer in bodies:
 			if peer != commander_peer and (bodies[peer] as Node3D).global_position.distance_to(pod.global_position) < POD_RANGE + 2.0:
@@ -344,7 +350,7 @@ func _feed_music() -> void:
 	Music.night = Sun.dir_at(time).y < 0.05
 	Music.danger = near
 	Music.alarm = time - _pod_hurt_at < 6.0
-	Music.final = MISSION - time < 60.0
+	Music.final = launch_at < INF
 
 
 ## One soldier's warmth and health, and a trip back to the pod if they've
@@ -538,6 +544,14 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 						commander_view.toast(reply)
 				else:
 					Net.event.rpc_id(peer, &"toast", [reply])
+		&"launch":
+			if peer == commander_peer:
+				if launch_at == INF:
+					launch_at = time + LAUNCH_COUNTDOWN
+					_announce("The pod launches in %d s: get back aboard!" % LAUNCH_COUNTDOWN, &"alarm")
+				else:
+					launch_at = INF
+					_announce("Launch called off.")
 		&"uncommand":
 			if commander_peer == peer:
 				_leave_command(peer)
@@ -771,7 +785,7 @@ func _slow_state() -> Array:
 	var link_rows: Array = []
 	for link in links:
 		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true), link.blueprint])
-	return [rows, alive, researched.keys(), plans, hole_rows, link_rows]
+	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at]
 
 
 ## Client: the server's latest of everything that moves.
@@ -858,6 +872,7 @@ func apply_snapshot(data: Array) -> void:
 ## Client: the server's latest of what's built, what ore's left, and what's
 ## been researched.
 func apply_slow(data: Array) -> void:
+	launch_at = data[6]
 	var seen := {}
 	for row: Array in data[0]:
 		seen[row[0]] = true
@@ -1376,9 +1391,9 @@ func screens() -> Array[Screen]:
 func _wire_pod_screen() -> void:
 	var screen := pod.screen
 	screen.info = func() -> String:
-		var left := maxf(0.0, MISSION - time)
-		return "ORE BANKED    %d / %d\nALLOY         %d\nBATTERY       %d%%   HULL %d%%\nLAUNCH IN     %d:%02d" % [
-			stock, QUOTA, alloy, roundi(battery / capacity() * 100.0), roundi(pod.health / pod.max_health * 100.0), int(left) / 60, int(left) % 60]
+		var left := maxf(0.0, launch_at - time)
+		return "ORE BANKED    %d / %d\nALLOY         %d\nBATTERY       %d%%   HULL %d%%\n%s" % [
+			stock, QUOTA, alloy, roundi(battery / capacity() * 100.0), roundi(pod.health / pod.max_health * 100.0), ("LAUNCH IN     %d:%02d" % [int(left) / 60, int(left) % 60]) if launch_at < INF else "LAUNCH        COMMANDER'S CALL"]
 	screen.button = func(action: StringName) -> Array:
 		if action == &"command":
 			if commander_peer == 0:
@@ -1538,10 +1553,10 @@ func _spawn_spiders(delta: float) -> void:
 	_spawn_in -= delta
 	if _spawn_in > 0.0 or holes.is_empty():
 		return
-	var progress := time / MISSION
+	var progress := time / RAMP
 	var players := (1.0 + maxi(1, bodies.size())) * 0.5
-	_spawn_in = lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress) / players
-	if spiders.size() >= roundi(lerpf(SPIDERS_START, SPIDERS_END, progress) * players):
+	_spawn_in = maxf(lerpf(SPAWN_GAP_START, SPAWN_GAP_END, progress), SPAWN_GAP_END * 0.5) / players
+	if spiders.size() >= roundi(minf(lerpf(SPIDERS_START, SPIDERS_END, progress), SPIDERS_END * 2.0) * players):
 		return
 	var hole: Hole = holes[_rng.randi() % holes.size()]
 	var frame := Fixture.upright(hole.normal)

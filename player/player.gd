@@ -253,16 +253,16 @@ func _physics_process(delta: float) -> void:
 	if !is_on_floor():
 		rest += 2.0
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
+	if !playing or !is_instance_valid(reel):
+		reel = null
+	_reel_line.visible = reel != null
+	if reel:
+		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
 	if playing:
 		_cable_hint = ""
 		_use(delta)
 		if _cable_hint != "":
 			prompt = _cable_hint if prompt == "" else prompt + "\n" + _cable_hint
-	elif reel:
-		reel = null
-	_reel_line.visible = reel != null
-	if reel:
-		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if trigger and _cooldown <= 0.0:
 			if weapon == &"gun":
