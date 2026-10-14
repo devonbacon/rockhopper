@@ -83,25 +83,31 @@ save power at night or to quiet them. A rig that's drilling is loud, a
 foundry that's smelting louder, and a lab at work a little; the pod hums.
 Spiders hear them from further than they can see.
 
-A research lab works through upgrades for this mission, one at a time,
-picked by the commander from the command chair's research panel, the
-only place it's picked or followed (labs have no screen): each
-costs ore, the bigger ones alloy too, takes 30-45 s, and draws power
-while it works (it stalls when the battery's flat, or it's switched off).
-Pressing the one in progress cancels it and refunds the cost. Researched upgrades apply to
+Research labs work through upgrades for this mission, laid out as a tech
+tree in the command chair's research panel, the only place they're
+picked or followed (labs have no screen). The commander queues them:
+clicking one queues it, after whatever it needs that isn't done or
+queued yet; clicking it again takes it off the queue (with what's queued
+after it), or cancels it under way for a refund. Each idle lab takes the
+first queued upgrade it can start: what it needs is done, and the bank
+can pay. Each costs ore, the bigger ones alloy too, paid when a lab
+starts it, takes 25-45 s, and draws power while it works (it stalls when
+the battery's flat, or it's switched off). Researched upgrades apply to
 everything, already built or not:
 
+- Rifle: soldiers start with only the hammer.
+  - Overcharged rounds: double damage, so two shots kill a spider, not
+    three.
+  - Stabiliser: half the bloom from firing, and tighter at rest.
 - Blade runners: walk 5 and run 8.5, from 3.5 and 6, and slide up to 16
   m/s, from 9.
-- Jetpack: hold Space in the air to fly.
-- Armour plating: +50 max health.
+  - Jetpack: hold Space in the air to fly.
+    - Bigger tanks: the jetpack burns fuel 40% slower.
+  - Grapple: middle mouse hooks what you're looking at (see Controls).
 - Heated suit: the cold takes twice as long to freeze you.
-- Bigger tanks (after the jetpack): it burns fuel 40% slower.
-- Overcharged rounds: double damage, so two shots kill a spider, not three.
-- Stabiliser: half the bloom from firing, and tighter at rest.
-- Grapple: middle mouse hooks what you're looking at (see Controls).
+- Armour plating: +50 max health.
 - Faster drills: rigs drill 40% faster.
-- Fast cables: cables carry twice as fast.
+  - Fast cables: cables carry twice as fast.
 - Efficient lamps: lamps draw half the power.
 
 At nightfall, bug holes tear open in the ground, 28-46 m from the
@@ -204,8 +210,7 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   whoever's beside it; L again calls it off.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
-- **Research (R):** every upgrade, started on an idle lab; press the one
-  in progress to cancel it.
+- **Research (R):** the tech tree; click to queue (see above).
 - **X** climbs out; **Esc** pauses.
 
 ## Controls
@@ -216,7 +221,8 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   while running slides: a burst of speed, faster downhill, and a jump
   out of it keeps the momentum (up to 9 m/s until blade runners). Land
   with it held to slide on. You can steer well in the air.
-- **Weapons:** 1, 2 or the wheel switch between the gun and the hammer.
+- **Weapons:** you start with the hammer; once the rifle's researched, 1,
+  2 or the wheel switch between them.
   The hammer smashes everything in a short arc in front, hurting
   spiders (two blows kill one), knocking each back a little and
   stunning it for a second, chips ore off a deposit, and puts up the
@@ -230,7 +236,7 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   towards you; anything else (rock, a building) reels you in, up to
   10 m/s, for as long as you hold the button, from up to 25 m. It takes
   5 s to be ready again after you let go or tug a spider.
-- **Fire:** left mouse, held, about 2.4 shots a second; a spider takes
+- **Fire:** left mouse, held, about 3 shots a second; a spider takes
   three (30 health, 10 a shot; two hammer blows). Shots land in a
   cone (the crosshair's ticks) that widens as you fire, move or jump, and
   settles back. Hold right mouse to aim down the sights: zoomed, much
@@ -322,7 +328,8 @@ User arguments after `--`, e.g.
 - `yaw=D` turns you and `pitch=D` tilts your view, by D degrees.
 - `aim` holds aim down the sights; `pause` starts paused.
 - `hammer` starts with the hammer out.
-- `lab` builds a research lab ahead of you and starts it researching.
+- `lab` builds a research lab ahead of you and queues the rifle;
+  `upgrades=gun,jetpack,...` starts with those researched.
 - `shot=path.png` saves a screenshot after `shot_at` seconds (default
   3), then quits.
 

@@ -21,6 +21,9 @@ extends Node3D
 ## later with whoever's aboard; L again calls it off.
 
 const PAN_SPEED := 40.0
+## A cell of the research tree, and the gap left between its buttons.
+const TREE_CELL := Vector2(230, 54)
+const TREE_GAP := Vector2(30, 8)
 const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
@@ -56,8 +59,9 @@ var _focus_panel: Control
 var _focus_label: Label
 var _power_button: Button
 var _research: Control
-var _research_rows: VBoxContainer
 var _research_buttons := {}
+var _research_note: Label
+var _research_queue: Label
 var _launch_button: Button
 ## Until when a second press of Launch goes ahead.
 var _launch_armed := 0.0
@@ -431,23 +435,47 @@ func _build_ui() -> void:
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
-	_research_rows = VBoxContainer.new()
-	_research_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_research_rows.add_theme_constant_override("separation", 6)
+	var rows := VBoxContainer.new()
+	rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rows.add_theme_constant_override("separation", 6)
 	var title := _label(18)
 	title.text = "RESEARCH"
-	_research_rows.add_child(title)
+	rows.add_child(title)
+	_research_note = _label(13, Hud.DIM)
+	rows.add_child(_research_note)
+	var tree := Control.new()
+	tree.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var columns := 0
+	var tree_rows := 0
 	for upgrade: StringName in Game.UPGRADES:
-		var button := _button("", Vector2(440, 34))
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var at: Vector2i = Game.UPGRADES[upgrade].at
+		columns = maxi(columns, at.x + 1)
+		tree_rows = maxi(tree_rows, at.y + 1)
+		var button := _button("", TREE_CELL - TREE_GAP)
+		button.add_theme_font_size_override("font_size", 13)
+		for look: String in ["normal", "hover", "pressed", "disabled"]:
+			var box := StyleBoxFlat.new()
+			box.bg_color = Color(1, 1, 1, 0.1 if look == "hover" else 0.04)
+			box.border_color = Color(1, 1, 1, 0.35)
+			box.set_border_width_all(1)
+			box.set_corner_radius_all(4)
+			button.add_theme_stylebox_override(look, box)
+		button.position = Vector2(at) * TREE_CELL
+		button.size = TREE_CELL - TREE_GAP
+		button.tooltip_text = Game.UPGRADES[upgrade].text
 		button.pressed.connect(func() -> void:
-			var lab := _lab_for(upgrade)
-			if lab:
-				game.act(&"research", [lab.net_id, upgrade])
-				Sfx.play(&"press"))
-		_research_rows.add_child(button)
+			game.act(&"research", [upgrade])
+			Sfx.play(&"press"))
+		tree.add_child(button)
 		_research_buttons[upgrade] = button
-	_research = _panel(_research_rows)
+	tree.custom_minimum_size = Vector2(columns, tree_rows) * TREE_CELL - TREE_GAP
+	tree.draw.connect(func() -> void: _draw_tree(tree))
+	rows.add_child(tree)
+	_research_queue = _label(13, Hud.DIM)
+	_research_queue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_research_queue.custom_minimum_size.x = tree.custom_minimum_size.x
+	rows.add_child(_research_queue)
+	_research = _panel(rows)
 	_research.anchor_left = 1.0
 	_research.anchor_right = 1.0
 	_research.offset_left = -24
@@ -458,17 +486,35 @@ func _build_ui() -> void:
 	_layer.add_child(_research)
 
 
-## The lab to ask about upgrade: the one researching it, else an idle one,
-## else any.
-func _lab_for(upgrade: StringName) -> Fixture:
+## Lines from each upgrade to what it opens up.
+func _draw_tree(tree: Control) -> void:
+	for upgrade: StringName in Game.UPGRADES:
+		var needs: StringName = Game.UPGRADES[upgrade].get("needs", &"")
+		if needs == &"":
+			continue
+		var from := Vector2(Game.UPGRADES[needs].at) * TREE_CELL + Vector2(TREE_CELL.x - TREE_GAP.x, (TREE_CELL.y - TREE_GAP.y) * 0.5)
+		var to := Vector2(Game.UPGRADES[upgrade].at) * TREE_CELL + Vector2(0, (TREE_CELL.y - TREE_GAP.y) * 0.5)
+		var bend := Vector2(from.x + TREE_GAP.x * 0.5, from.y)
+		var color := Color(SELECTED, 0.9) if game.has(needs) else Color(1, 1, 1, 0.25)
+		tree.draw_polyline(PackedVector2Array([from, bend, Vector2(bend.x, to.y), to]), color, 2.0)
+
+
+## How an upgrade stands: its button's second line, and its colour.
+func _research_line(upgrade: StringName) -> Array:
+	var info: Dictionary = Game.UPGRADES[upgrade]
+	if game.has(upgrade):
+		return ["DONE", Color(SELECTED, 0.8)]
 	var lab := game.researching(upgrade)
 	if lab:
-		return lab
-	var labs := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lab")
-	for candidate: Fixture in labs:
-		if candidate.researching == &"":
-			return candidate
-	return labs[0] if !labs.is_empty() else null
+		return ["%d%%%s  click to cancel" % [roundi(lab.research_time / info.time * 100.0), "  NO POWER" if lab.unpowered else ("  OFF" if !lab.enabled else "")], Hud.DAY_COLOR]
+	var cost := "%s, %ds" % [Game.price(info.cost, info.alloy), info.time]
+	var place := game.research_queue.find(upgrade)
+	if place >= 0:
+		return ["QUEUED %d  %s" % [place + 1, cost], Hud.FUEL_COLOR]
+	var needs: StringName = info.get("needs", &"")
+	if needs != &"" and !game.has(needs):
+		return [cost, Color(1, 1, 1, 0.5)]
+	return [cost, Color.WHITE]
 
 
 func _update_ui() -> void:
@@ -494,17 +540,18 @@ func _update_ui() -> void:
 	for kind in _build_buttons:
 		(_build_buttons[kind] as Button).queue_redraw()
 	if _research.visible:
+		var labs := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lab")
+		var idle := labs.filter(func(f: Fixture) -> bool: return f.researching == &"" and f.enabled).size()
+		_research_note.text = "Click to queue (with what it needs); click again to take it off, or cancel it.\n%s" % ("No lab yet: build one to research." if labs.is_empty() else "%d lab%s, %d idle." % [labs.size(), "" if labs.size() == 1 else "s", idle])
 		for upgrade: StringName in _research_buttons:
 			var button: Button = _research_buttons[upgrade]
-			var lab := _lab_for(upgrade)
-			if !lab:
-				button.text = "%s   NEEDS A LAB" % Game.UPGRADES[upgrade].name
-				button.disabled = true
-				continue
-			var state: Array = game.research_state(lab, upgrade)
-			button.text = state[0]
-			button.disabled = !state[1]
-			button.tooltip_text = Game.UPGRADES[upgrade].text
+			var line := _research_line(upgrade)
+			button.text = "%s\n%s" % [Game.UPGRADES[upgrade].name, line[0]]
+			button.modulate = line[1]
+			button.disabled = game.has(upgrade)
+		var queued := game.research_queue.map(func(id: StringName) -> String: return String(Game.UPGRADES[id].name).capitalize())
+		_research_queue.text = "Queue: %s" % (" > ".join(queued) if !queued.is_empty() else "empty")
+		_research.get_child(0).get_child(2).queue_redraw()
 
 
 func _name(fixture: Fixture) -> String:

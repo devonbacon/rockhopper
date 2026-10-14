@@ -74,7 +74,7 @@ func _step(delta: float) -> bool:
 					_lab = _game.built[-1]
 					break
 			if _lab:
-				print("lab: %s" % _game.research(_lab, &"armour"))
+				print("lab: %s" % _game.queue_research(&"armour"))
 			else:
 				push_error("couldn't place a lab by the pod")
 			_stock_before = _game.stock
@@ -115,16 +115,16 @@ func _step(delta: float) -> bool:
 			print("research: armour %s, max health %.0f" % [_game.has(&"armour"), _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")
-			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
-			var by_soldier := _lab.researching
+			_game.handle(Net.local_id(), &"research", [&"stabiliser"])
+			var by_soldier := _game.research_queue.duplicate()
 			_game.commander_peer = Net.local_id()
-			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
-			var by_commander := _lab.researching
-			_game.handle(Net.local_id(), &"research", [_lab.net_id, &"stabiliser"])
+			_game.handle(Net.local_id(), &"research", [&"stabiliser"])
+			var by_commander := _game.research_queue.duplicate()
+			_game.handle(Net.local_id(), &"research", [&"gun"])
 			_game.commander_peer = 0
-			print("research asked for by a soldier: '%s'; by the commander: '%s', then cancelled: '%s'" % [by_soldier, by_commander, _lab.researching])
-			if by_soldier != &"" or by_commander != &"stabiliser" or _lab.researching != &"":
-				push_error("research from the command chair went wrong")
+			print("research queued by a soldier: %s; by the commander, stabiliser: %s; then the rifle taken off: %s" % [by_soldier, by_commander, _game.research_queue])
+			if !by_soldier.is_empty() or by_commander != [&"gun", &"stabiliser"] or !_game.research_queue.is_empty():
+				push_error("queueing research from the command chair went wrong")
 			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
 			var plan := _game.place_blueprint(&"pylon", plan_spot[0], plan_spot[1])
 			for i in plan.hits_needed():
@@ -208,6 +208,9 @@ func _step(delta: float) -> bool:
 			print("flare thrown at our feet 30 s ago (we may have been shoved): still burning %s, flares left %d, pod hull %.0f" % [flare_lit, _game.flares_left, _game.pod.health])
 			if !flare_lit:
 				push_error("the flare didn't land and burn by us")
+			if _game.state != Game.State.PLAYING:
+				print("the undefended pod fell in the night: no launch to check")
+				return true
 			_game.handle(Net.local_id(), &"launch", [])
 			var by_soldier := _game.launch_at
 			_game.commander_peer = Net.local_id()
@@ -221,6 +224,8 @@ func _step(delta: float) -> bool:
 			_phase = 6
 		6:
 			if _game.state == Game.State.PLAYING:
+				# Nobody's defending it: keep the spiders from ending it first.
+				_game.pod.health = _game.pod.max_health
 				return false
 			print("after the launch: %s" % _game.outcome)
 			if _game.state != Game.State.WON:

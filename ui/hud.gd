@@ -338,7 +338,7 @@ func _update_bottom() -> void:
 	_stock.custom_minimum_size.y = 92 + 22 * labs
 	_stock.queue_redraw()
 	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
-	_hint.text = "%s    [1/2/wheel] gun/hammer    %s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[MMB] grapple    " if game.has(&"grapple") else ""]
+	_hint.text = "%s    %s%s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[1/2/wheel] rifle/hammer    " if game.has(&"gun") else "", "[MMB] grapple    " if game.has(&"grapple") else ""]
 
 
 ## The pod's stock: ore filling towards the quota, alloy, and each lab's

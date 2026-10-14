@@ -54,7 +54,7 @@ const CUT_TIME := 0.8
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
-const FIRE_EVERY := 0.42
+const FIRE_EVERY := 0.32
 const FOV := 80.0
 const ADS_FOV := 52.0
 const ADS_SPEED := 2.4
@@ -98,7 +98,7 @@ var game: Game
 var camera: Camera3D
 var headlamp: SpotLight3D
 var fuel := 100.0
-var weapon := &"gun"
+var weapon := &"hammer"
 var hooked := false
 ## The cable you're riding, how far along, and which way.
 var zip: Link
@@ -183,6 +183,8 @@ func _ready() -> void:
 	camera.add_child(headlamp)
 	_build_gun()
 	_build_hammer()
+	_gun.visible = false
+	_hammer.visible = true
 	_rope = _line(Color(1.0, 0.6, 0.2))
 	_reel_line = _line(Link.ORE)
 
@@ -216,7 +218,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if !captured:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_switch(&"hammer" if weapon == &"gun" else &"gun")
+			_switch(&"hammer" if weapon == &"gun" else &"gun", false)
 		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_throw_hook()
 	elif event is InputEventKey and event.pressed and !event.echo:
@@ -648,7 +650,12 @@ func _hold(down: bool, delta: float, needed: float, done: Callable) -> void:
 		done.call()
 
 
-func _switch(to: StringName) -> void:
+## Takes up the gun or the hammer; the gun only once it's researched.
+func _switch(to: StringName, say := true) -> void:
+	if to == &"gun" and !game.has(&"gun"):
+		if say:
+			_say("The rifle needs researching")
+		return
 	weapon = to
 	_gun.visible = weapon == &"gun"
 	_hammer.visible = weapon == &"hammer"

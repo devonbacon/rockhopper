@@ -53,19 +53,22 @@ const LAMP_DRAW := 0.4
 const BATTERY_BANK := 80.0
 const LAB_DRAW := 0.6
 const FOUNDRY_DRAW := 1.0
-## Each costs ore, and some alloy too.
+## The tech tree. Each costs ore, and some alloy too, paid when a lab
+## starts it, and `needs` another researched first. `at` is its place in
+## the commander's tree: column (how deep), row.
 const UPGRADES := {
-	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, text = "Walk, run and slide as fast as you're built to"},
-	&"jetpack": {name = "JETPACK", cost = 3, alloy = 2, time = 35.0, text = "Hold Space in the air to fly"},
-	&"armour": {name = "ARMOUR PLATING", cost = 3, alloy = 3, time = 40.0, text = "+50 max health"},
-	&"heated": {name = "HEATED SUIT", cost = 4, alloy = 0, time = 30.0, text = "Cold takes twice as long to freeze you"},
-	&"tanks": {name = "BIGGER TANKS", cost = 3, alloy = 0, time = 30.0, text = "The jetpack burns fuel 40% slower"},
-	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 3, alloy = 3, time = 45.0, text = "Double damage from the gun"},
-	&"stabiliser": {name = "STABILISER", cost = 4, alloy = 0, time = 30.0, text = "Half the bloom from firing, tighter at rest"},
-	&"drills": {name = "FASTER DRILLS", cost = 4, alloy = 2, time = 45.0, text = "Rigs drill 40% faster"},
-	&"cables": {name = "FAST CABLES", cost = 3, alloy = 2, time = 40.0, text = "Cables carry ore and alloy twice as fast"},
-	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, alloy = 0, time = 30.0, text = "Lamps draw half the power"},
-	&"grapple": {name = "GRAPPLE", cost = 4, alloy = 0, time = 30.0, text = "Middle mouse: reel yourself to rock, or tug a spider to you"},
+	&"gun": {name = "RIFLE", cost = 3, alloy = 0, time = 25.0, at = Vector2i(0, 0), text = "A hitscan rifle (1, or the wheel); until then, only the hammer"},
+	&"rounds": {name = "OVERCHARGED ROUNDS", cost = 3, alloy = 3, time = 45.0, needs = &"gun", at = Vector2i(1, 0), text = "Double damage from the rifle"},
+	&"stabiliser": {name = "STABILISER", cost = 4, alloy = 0, time = 30.0, needs = &"gun", at = Vector2i(1, 1), text = "Half the bloom from firing, tighter at rest"},
+	&"runners": {name = "BLADE RUNNERS", cost = 3, alloy = 0, time = 25.0, at = Vector2i(0, 2), text = "Walk, run and slide as fast as you're built to"},
+	&"jetpack": {name = "JETPACK", cost = 3, alloy = 2, time = 35.0, needs = &"runners", at = Vector2i(1, 2), text = "Hold Space in the air to fly"},
+	&"tanks": {name = "BIGGER TANKS", cost = 3, alloy = 0, time = 30.0, needs = &"jetpack", at = Vector2i(2, 2), text = "The jetpack burns fuel 40% slower"},
+	&"grapple": {name = "GRAPPLE", cost = 4, alloy = 0, time = 30.0, needs = &"runners", at = Vector2i(1, 3), text = "Middle mouse: reel yourself to rock, or tug a spider to you"},
+	&"heated": {name = "HEATED SUIT", cost = 4, alloy = 0, time = 30.0, at = Vector2i(0, 4), text = "Cold takes twice as long to freeze you"},
+	&"armour": {name = "ARMOUR PLATING", cost = 3, alloy = 3, time = 40.0, at = Vector2i(0, 5), text = "+50 max health"},
+	&"drills": {name = "FASTER DRILLS", cost = 4, alloy = 2, time = 45.0, at = Vector2i(0, 6), text = "Rigs drill 40% faster"},
+	&"cables": {name = "FAST CABLES", cost = 3, alloy = 2, time = 40.0, needs = &"drills", at = Vector2i(1, 6), text = "Cables carry ore and alloy twice as fast"},
+	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, alloy = 0, time = 30.0, at = Vector2i(0, 7), text = "Lamps draw half the power"},
 }
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
@@ -126,6 +129,9 @@ var launch_at := INF
 var stock := START_STOCK
 var alloy := 0
 var researched := {}
+## Upgrades the commander's queued, in order; an idle lab takes the first
+## it can start (what it needs done, and the bank can pay).
+var research_queue: Array[StringName] = []
 ## Per soldier, by peer id: health, warmth, carried, lit_by, hurt,
 ## since_hurt.
 var stats := {}
@@ -297,6 +303,8 @@ func _simulate(delta: float) -> void:
 					researched[lab.researching] = true
 					_announce("Researched: %s" % String(UPGRADES[lab.researching].name).capitalize(), &"researched")
 					lab.researching = &""
+	if state == State.PLAYING:
+		_run_queue()
 	var full := capacity()
 	battery = clampf(battery + (power_in - power_out) * delta, 0.0, full)
 	for fixture in built:
@@ -537,8 +545,8 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				else:
 					Net.event.rpc_id(peer, &"reply", [args[0], reply])
 		&"research":
-			if peer == commander_peer and target is Fixture and built.has(target) and target.kind == &"lab" and UPGRADES.has(args[1]):
-				var reply := research(target, args[1])
+			if peer == commander_peer and !args.is_empty() and UPGRADES.has(args[0]):
+				var reply := queue_research(args[0])
 				if peer == Net.local_id():
 					if commander_view:
 						commander_view.toast(reply)
@@ -785,7 +793,7 @@ func _slow_state() -> Array:
 	var link_rows: Array = []
 	for link in links:
 		link_rows.append([link.net_id, link.from.net_id, link.to.net_id, link.items.duplicate(true), link.blueprint])
-	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at]
+	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at, research_queue.duplicate()]
 
 
 ## Client: the server's latest of everything that moves.
@@ -873,6 +881,7 @@ func apply_snapshot(data: Array) -> void:
 ## been researched.
 func apply_slow(data: Array) -> void:
 	launch_at = data[6]
+	research_queue.assign(data[7])
 	var seen := {}
 	for row: Array in data[0]:
 		seen[row[0]] = true
@@ -970,46 +979,59 @@ func _send_presses(owner: Node) -> void:
 		owner.screen.send = func(action: StringName) -> void: act(&"press", [owner.net_id, action])
 
 
-## How an upgrade stands at a lab, for the commander's research panel:
-## [text, whether it can be pressed, whether it's under way].
-func research_state(lab: Fixture, upgrade_id: StringName) -> Array:
-	var upgrade: Dictionary = UPGRADES[upgrade_id]
-	if has(upgrade_id):
-		return ["%s   DONE" % upgrade.name, false, false]
-	if upgrade_id == &"tanks" and !has(&"jetpack"):
-		return ["%s   NEEDS JETPACK" % upgrade.name, false, false]
-	if lab.researching == upgrade_id:
-		return ["%s   %d%%   CANCEL" % [upgrade.name, roundi(lab.research_time / upgrade.time * 100.0)], true, true]
-	var busy := lab.researching != &"" or researching(upgrade_id) != null
-	return ["%s   %s  %ds" % [upgrade.name, price(upgrade.cost, upgrade.alloy).to_upper(), upgrade.time], !busy and stock >= upgrade.cost and alloy >= upgrade.alloy, false]
-
-
-## Server: starts the lab on an upgrade, or cancels it if it's on it
-## already. Says how that went.
-func research(lab: Fixture, upgrade_id: StringName) -> String:
+## Server: the commander's click on an upgrade. Queues it (and whatever
+## it needs, first), or takes it off the queue, or cancels it under way
+## for a refund. Says how that went.
+func queue_research(upgrade_id: StringName) -> String:
 	var upgrade: Dictionary = UPGRADES[upgrade_id]
 	if has(upgrade_id):
 		return "Already researched."
-	if lab.researching == upgrade_id:
+	var lab := researching(upgrade_id)
+	if lab:
 		lab.researching = &""
 		stock += upgrade.cost
 		alloy += upgrade.alloy
+		_unqueue_after(upgrade_id)
 		return "Cancelled, %s refunded." % price(upgrade.cost, upgrade.alloy)
-	if upgrade_id == &"tanks" and !has(&"jetpack"):
-		return "Research the jetpack first."
-	if lab.researching != &"":
-		return "That lab's busy: cancel what it's on first."
-	if researching(upgrade_id) != null:
-		return "Another lab is on it."
-	if stock < upgrade.cost:
-		return "Not enough ore banked."
-	if alloy < upgrade.alloy:
-		return "Not enough alloy banked."
-	stock -= upgrade.cost
-	alloy -= upgrade.alloy
-	lab.researching = upgrade_id
-	lab.research_time = 0.0
-	return "Researching %s." % String(upgrade.name).capitalize()
+	if research_queue.has(upgrade_id):
+		research_queue.erase(upgrade_id)
+		_unqueue_after(upgrade_id)
+		return "Taken off the queue."
+	var chain: Array[StringName] = []
+	var at := upgrade_id
+	while at != &"" and !has(at) and !research_queue.has(at) and !researching(at):
+		chain.push_front(at)
+		at = UPGRADES[at].get("needs", &"")
+	research_queue.append_array(chain)
+	if chain.size() > 1:
+		return "Queued, after %s." % ", ".join(chain.slice(0, -1).map(func(id: StringName) -> String: return String(UPGRADES[id].name).capitalize()))
+	return "Queued."
+
+
+## Takes off the queue whatever needs upgrade_id, which won't be done now.
+func _unqueue_after(upgrade_id: StringName) -> void:
+	for queued in research_queue.duplicate():
+		if UPGRADES[queued].get("needs", &"") == upgrade_id:
+			research_queue.erase(queued)
+			_unqueue_after(queued)
+
+
+## Starts idle labs on the first queued upgrades they can.
+func _run_queue() -> void:
+	for lab in built:
+		if lab.kind != &"lab" or lab.researching != &"" or !lab.enabled:
+			continue
+		for queued in research_queue:
+			var upgrade: Dictionary = UPGRADES[queued]
+			var needs: StringName = upgrade.get("needs", &"")
+			if (needs != &"" and !has(needs)) or stock < upgrade.cost or alloy < upgrade.alloy:
+				continue
+			stock -= upgrade.cost
+			alloy -= upgrade.alloy
+			lab.researching = queued
+			lab.research_time = 0.0
+			research_queue.erase(queued)
+			break
 
 
 func capacity() -> float:
@@ -1810,9 +1832,13 @@ func _debug_setup() -> void:
 	if _args.has("lab"):
 		player.rotate_object_local(Vector3.UP, PI)
 		var ahead: Array = terrain.surface_point(player.global_position - player.global_basis.z * 5.0)
-		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"tanks"].cost
+		stock += Fixture.COST[&"lab"] + Game.UPGRADES[&"gun"].cost
 		build(&"lab", ahead[0], ahead[1], player.global_position)
-		research(built[-1], &"tanks")
+		queue_research(&"gun")
+	if _args.has("upgrades"):
+		for upgrade in str(_args.upgrades).split(",", false):
+			if UPGRADES.has(StringName(upgrade)):
+				researched[StringName(upgrade)] = true
 	player.debug_aim = _args.has("aim")
 	if _args.has("hammer"):
 		player._switch(&"hammer")
