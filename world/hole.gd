@@ -1,7 +1,7 @@
 class_name Hole
 extends Node3D
 ## A bug hole: torn open in the ground at nightfall, where the spiders come
-## up from, and closed again at sunrise.
+## up from, and closed again once the sunrise reaches it.
 
 const RADIUS := 1.6
 
@@ -47,6 +47,15 @@ func _ready() -> void:
 	_glow.omni_range = 14.0
 	_glow.position.y = 1.5
 	add_child(_glow)
+
+
+## Shrinks shut, then goes.
+func close() -> void:
+	set_process(false)
+	var tween := create_tween()
+	tween.tween_property(self, "scale", Vector3(0.05, 1.0, 0.05), 0.8).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
+	tween.parallel().tween_property(_glow, "light_energy", 0.0, 0.8)
+	tween.tween_callback(queue_free)
 
 
 func _process(delta: float) -> void:

@@ -227,6 +227,7 @@ var _rng := RandomNumberGenerator.new()
 var _light_check := 0.0
 var _spawn_in := 2.0
 var _frenzy_in := 0.0
+var _hole_check := 0.0
 var _night := false
 var _snap_in := 0.0
 var _slow_in := 0.0
@@ -1114,7 +1115,7 @@ func apply_slow(data: Array) -> void:
 		if !seen.has(hole.net_id):
 			holes.erase(hole)
 			entities.erase(hole.net_id)
-			hole.queue_free()
+			hole.close()
 	seen.clear()
 	for row: Array in data[5]:
 		seen[row[0]] = true
@@ -1803,9 +1804,8 @@ func _spawn_spiders(delta: float) -> void:
 	_spawn_frenzied(delta, players)
 	if Sun.dir_at(time).y > 0.0:
 		_night = false
-		_close_holes(false)
-		return
-	if !_night:
+		_close_sunlit_holes(delta)
+	elif !_night:
 		_night = true
 		_open_holes()
 	_spawn_in -= delta
@@ -1840,13 +1840,28 @@ func _spot_by(hole: Hole) -> Vector3:
 	return terrain.surface_point(spot)[0]
 
 
+## By day, the night's holes close as the sunrise reaches each.
+func _close_sunlit_holes(delta: float) -> void:
+	_hole_check -= delta
+	if _hole_check > 0.0:
+		return
+	_hole_check = 0.25
+	var space := get_world_3d().direct_space_state
+	for hole in holes.duplicate():
+		if !hole.extraction and sun.lights(hole.global_position + hole.normal * 0.6, space):
+			holes.erase(hole)
+			entities.erase(hole.net_id)
+			hole.close()
+			sound(&"cancel", hole.global_position)
+
+
 ## Closes the night's holes, or the ones the engines tore.
 func _close_holes(extraction: bool) -> void:
 	for hole in holes.duplicate():
 		if hole.extraction == extraction:
 			holes.erase(hole)
 			entities.erase(hole.net_id)
-			hole.queue_free()
+			hole.close()
 
 
 func _open_extraction_holes() -> void:
