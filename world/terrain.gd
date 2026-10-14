@@ -35,6 +35,8 @@ const BLEND := 1.2
 ## Features are bucketed by where they sit on the ground, this wide.
 const BUCKET := 16.0
 
+## The hologram wall's, to show it from afar in the commander's view.
+var wall_material: ShaderMaterial
 ## Chambers: centre and radius. Worms: segments, as [a, b, radius].
 var chambers: Array[Vector4] = []
 var worms: Array[Array] = []
@@ -436,7 +438,8 @@ func _add_mountains(seed_value: int) -> void:
 	add_child(body)
 
 
-## The edge of the playable area: a hologram wall, brighter as you near it.
+## The edge of the playable area: a hologram wall, showing only near it,
+## brighter the nearer.
 func _add_wall() -> void:
 	var cylinder := CylinderMesh.new()
 	cylinder.top_radius = FLOOR_RADIUS
@@ -449,6 +452,7 @@ func _add_wall() -> void:
 	var material := ShaderMaterial.new()
 	material.shader = load("res://world/boundary.gdshader")
 	material.set_shader_parameter("radius", FLOOR_RADIUS)
+	wall_material = material
 	var wall := MeshInstance3D.new()
 	wall.mesh = cylinder
 	wall.material_override = material

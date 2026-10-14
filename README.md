@@ -7,7 +7,8 @@ lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
 You drop onto a turning asteroid, into a round patch of hills 120 m
-across, marked out by a blue hologram wall you can't go past; beyond it
+across, marked out by a blue hologram wall you can't go past (it shows when
+you're within about 18 m of it, and always from the pod); beyond it
 the ground flattens out into a plain, ringed by mountains you can't
 reach: walled in some ways, open others, different on every map, with
 one giant somewhere. The pod lands mid-morning. The

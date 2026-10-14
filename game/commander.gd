@@ -110,6 +110,7 @@ func enter() -> void:
 	camera.make_current()
 	global_position = game.pod.global_position
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	game.terrain.wall_material.set_shader_parameter("reveal", 1.0e6)
 
 
 func leave() -> void:
@@ -118,6 +119,7 @@ func leave() -> void:
 	_ghost.visible = false
 	placing = &""
 	focus = null
+	game.terrain.wall_material.set_shader_parameter("reveal", 18.0)
 
 
 ## The pod's been bitten: a red flash round the edge, and word of it.
