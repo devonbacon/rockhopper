@@ -242,7 +242,7 @@ func _update_meters() -> void:
 	_set_meter(&"battery", game.battery / game.capacity(), "%d / %d   %+.1f/s" % [game.battery, game.capacity(), net], ALERT if net < 0.0 else Color.WHITE)
 	var warmth := game.warmth / 100.0
 	_meters[&"warmth"].fill.bg_color = COLD_COLOR.lerp(WARM_COLOR, warmth)
-	var source: String = {"sun": "in sunlight", "lamp": "by a lamp", "pod": "by the pod", "flare": "by a flare"}.get(game.lit_by, "IN THE DARK")
+	var source: String = {"sun": "in sunlight", "lamp": "by a lamp", "base": "by the base's lights", "vent": "by a vent", "pod": "by the pod"}.get(game.lit_by, "IN THE DARK")
 	_set_meter(&"warmth", warmth, "%d   %s" % [game.warmth, source], COLD_COLOR if game.lit_by == "" else Color.WHITE)
 	var player := game.player
 	_meters[&"fuel"].row.visible = game.equipped(&"jetpack")
@@ -383,7 +383,7 @@ func _draw_stock() -> void:
 	_draw_gem(Vector2(x + 9, 34), 9.0, carrying)
 	_stock.draw_string(font, Vector2(x + 26, 44), "%d ore%s" % [game.carried, "  + ammo box" if game.ammo_box else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 24, carrying if !game.ammo_box else DAY_COLOR)
 	_stock.draw_string(font, Vector2(x, 72), "FLARES", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
-	for i in Game.FLARES:
+	for i in Game.FLARES_MAX:
 		var at := Vector2(x + 7 + i * 18, 84)
 		if i < game.flares_left:
 			_stock.draw_circle(at, 6, DAY_COLOR)
@@ -446,6 +446,15 @@ static func draw_icon(canvas: CanvasItem, kind: StringName, centre: Vector2, tin
 		canvas.draw_rect(Rect2(centre + Vector2(-24, 8), Vector2(48, 4)), Color(1.0, 0.45, 0.1) * tint)
 		canvas.draw_rect(Rect2(centre + Vector2(-27, -14), Vector2(5, 34)), dark)
 		canvas.draw_rect(Rect2(centre + Vector2(22, -14), Vector2(5, 34)), dark)
+	elif kind == &"tap":
+		canvas.draw_circle(centre + Vector2(0, -22), 9, Color(0.85, 0.8, 0.75, 0.35) * tint)
+		canvas.draw_circle(centre + Vector2(6, -30), 7, Color(0.85, 0.8, 0.75, 0.25) * tint)
+		canvas.draw_rect(Rect2(centre + Vector2(-6, -16), Vector2(12, 14)), dark)
+		canvas.draw_rect(Rect2(centre + Vector2(-20, -2), Vector2(40, 22)), white)
+		canvas.draw_rect(Rect2(centre + Vector2(-20, 4), Vector2(40, 4)), Color(1.0, 0.45, 0.1) * tint)
+		canvas.draw_line(centre + Vector2(-13, -6), centre + Vector2(-13, 20), gold, 2.5)
+		canvas.draw_line(centre + Vector2(13, -6), centre + Vector2(13, 20), gold, 2.5)
+		canvas.draw_rect(Rect2(centre + Vector2(-24, 20), Vector2(48, 3)), Color(1.0, 0.4, 0.1) * tint)
 	elif kind == &"lamp":
 		canvas.draw_circle(centre + Vector2(0, -12), 13, Color(1.0, 0.75, 0.4, 0.18) * tint)
 		canvas.draw_line(centre + Vector2(0, -8), centre + Vector2(0, 18), Color(0.7, 0.7, 0.72) * tint, 3.0)

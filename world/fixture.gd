@@ -5,9 +5,15 @@ extends StaticBody3D
 ## on a plinth sunk into the rock where it slopes.
 ##
 ## Ore is a small cluster, gone once mined. A deposit is a big outcrop
-## that never runs out: you can chip at it by hand, or build a drill rig
+## holding a few dozen: you can chip at it by hand, or build a drill rig
 ## over it. A rig drills while it's lit, by the sun or a lamp, into a
 ## hopper that cables carry away, or you can empty by hand.
+##
+## A vent breathes steam, warm and glowing, day and night. A geothermal
+## tap built over one makes power, while it's cabled back to the pod.
+##
+## Everything built carries a small light that comes on in the dark,
+## while there's power: it keeps you warm close by.
 ##
 ## What the commander places starts as a blueprint: a hologram that does
 ## nothing till soldiers hammer it up, each blow paying its share of the
@@ -27,12 +33,17 @@ extends StaticBody3D
 const LAYER := 2
 ## Barricades are on this too, which spiders collide with.
 const BARRIER_LAYER := 32
-const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5, &"turret": 4, &"barricade": 1, &"armory": 4}
+const COST := {&"lamp": 1, &"panel": 2, &"battery": 2, &"drill": 3, &"lab": 4, &"pylon": 1, &"foundry": 5, &"turret": 4, &"barricade": 1, &"armory": 4, &"tap": 5}
 const ALLOY := {&"battery": 1, &"turret": 2}
 const HEALTH := 30.0
 const DRILL_EVERY := 6.0
 const HOPPER := 12
 const LAMP_RANGE := 13.0
+## A building's own light: how far it shows, and how near it keeps you
+## warm.
+const GLOW_RANGE := 10.0
+const GLOW_WARM := 7.0
+const VENT_WARM := 6.0
 ## Foundries: SMELT_ORE ore makes one alloy every SMELT_EVERY seconds,
 ## with room for BIN of each.
 const SMELT_EVERY := 6.0
@@ -50,19 +61,22 @@ const TURRET_SHOT := 0.3
 ## How long a turret stays loud after it last fired.
 const LOUD_FOR := 2.0
 ## Hammer blows to put up a blueprint.
-const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6, &"turret": 6, &"barricade": 5, &"armory": 6}
-const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Barricade", &"armory": "Armory"}
+const BUILD_HITS := {&"lamp": 2, &"panel": 3, &"battery": 3, &"drill": 5, &"lab": 6, &"pylon": 2, &"foundry": 6, &"turret": 6, &"barricade": 5, &"armory": 6, &"tap": 6}
+const NAMES := {&"lamp": "Lamp", &"panel": "Solar panel", &"battery": "Battery", &"drill": "Drill rig", &"lab": "Research lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Barricade", &"armory": "Armory", &"tap": "Geothermal tap"}
 ## How high a placement ghost sits over the ground.
-const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1, &"turret": 1.6, &"barricade": 1.0, &"armory": 0.9}
+const GHOST_LIFT := {&"lamp": 0.8, &"panel": 0.3, &"battery": 0.35, &"drill": 1.9, &"lab": 0.85, &"pylon": 2.2, &"foundry": 1.1, &"turret": 1.6, &"barricade": 1.0, &"armory": 0.9, &"tap": 1.3}
 ## Steepest ground each can go on, in degrees; the bigger ones sit level
 ## on a plinth.
 const MAX_SLOPE := {&"lamp": 35.0, &"pylon": 35.0}
 const SLOPE := 20.0
 ## How much further than they'd see that spiders hear it working.
-const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0, &"armory": 12.0}
-const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry", &"turret", &"armory"]
+const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0, &"armory": 12.0, &"tap": 14.0}
+## Off, a building's idle and dark.
+const SWITCHED: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade", &"armory", &"tap"]
 ## Where cables tie on, above the base.
-const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4}
+const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4, &"tap": 3.0}
+## What only sends along a cable, never takes.
+const SENDERS: Array[StringName] = [&"drill", &"tap"]
 
 var kind: StringName
 var net_id := 0
@@ -71,11 +85,16 @@ var normal := Vector3.UP
 ## whether they're lit.
 var sunlit := false
 var on := false
+## Ore: how much it gives; a deposit: how much it has left; a vent: the
+## power a tap on it makes.
 var amount := 3
+var full_amount := 0
+var power := 0.0
 ## Lamps, panels and rigs: spiders wear this down.
 var health := HEALTH
 var max_health := HEALTH
-## A deposit's rig, and a rig's deposit.
+## A deposit's rig, and a rig's deposit; or a vent's tap, and a tap's
+## vent.
 var rig: Fixture
 var deposit: Fixture
 ## Rigs: ore in the hopper, progress towards the next, and why it isn't
@@ -117,6 +136,7 @@ var _shaft: Node3D
 var _status: StandardMaterial3D
 var _fill: MeshInstance3D
 var _holo: StandardMaterial3D
+var _shards: Array[Node3D] = []
 
 
 static func make(fixture_kind: StringName, pos: Vector3, surface_normal: Vector3) -> Fixture:
@@ -203,6 +223,12 @@ func _ready() -> void:
 		&"foundry": _build_foundry()
 		&"turret": _build_turret()
 		&"barricade": _build_barricade()
+		&"vent": _build_vent()
+		&"tap": _build_tap()
+	if !blueprint and COST.has(kind) and kind != &"lamp":
+		_add_glow()
+	if kind == &"pod":
+		_add_glow()
 	if kind == &"barricade" and !blueprint:
 		collision_layer |= BARRIER_LAYER
 	if blueprint:
@@ -217,6 +243,7 @@ func noise() -> float:
 		&"drill", &"foundry": return NOISE[kind] if enabled and stalled == "" else 0.0
 		&"lab", &"armory": return NOISE[kind] if enabled and researching != &"" and !unpowered else 0.0
 		&"turret": return NOISE.turret if since_shot < LOUD_FOR else 0.0
+		&"tap": return NOISE.tap if enabled and stalled == "" else 0.0
 	return 0.0
 
 
@@ -281,19 +308,48 @@ func smelt(delta: float, powered: bool) -> void:
 func set_on(value: bool) -> void:
 	on = value
 	light.visible = on
-	_bulb.emission_energy_multiplier = 6.0 if on else 0.0
+	if _bulb:
+		_bulb.emission_energy_multiplier = 6.0 if on else 0.0
+
+
+## Deposits: shows what's left, a shard gone for each part dug out.
+func show_left() -> void:
+	var showing := ceili(_shards.size() * amount / float(maxi(1, full_amount)))
+	for i in _shards.size():
+		_shards[i].visible = i < showing
+
+
+## A small light up top, for the dark.
+func _add_glow() -> void:
+	light = OmniLight3D.new()
+	light.light_color = Color(1.0, 0.85, 0.65)
+	light.omni_range = GLOW_RANGE
+	light.light_energy = 1.8
+	light.position = Vector3.UP * (4.6 if kind == &"pod" else (CABLE_HEIGHT.get(kind, 2.0) + 0.4))
+	add_child(light)
+	_bulb = _material(Color(1.0, 0.85, 0.6), 0.0, 0.3)
+	_bulb.emission_enabled = true
+	_bulb.emission = Color(1.0, 0.75, 0.45)
+	var bulb := SphereMesh.new()
+	bulb.radius = 0.09
+	bulb.height = 0.18
+	_add_mesh(bulb, _bulb, light.position - Vector3.UP * 0.15).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	set_on(false)
 
 
 ## Rigs: drills for delta seconds if it's lit and has room, given whether
 ## it's lit.
 func drill(delta: float, lit: bool, every: float = DRILL_EVERY) -> void:
-	stalled = "off" if !enabled else ("full" if stored >= HOPPER else ("dark" if !lit else ""))
+	stalled = "off" if !enabled else ("spent" if deposit and deposit.amount <= 0 else ("full" if stored >= HOPPER else ("dark" if !lit else "")))
 	if stalled != "":
 		return
 	drilled += delta
 	if drilled >= every:
 		drilled -= every
 		stored += 1
+		if deposit:
+			deposit.amount -= 1
+			deposit.show_left()
 
 
 ## Rigs: empties up to amount from the hopper, returning what it gave.
@@ -524,6 +580,7 @@ func _build_deposit() -> void:
 		var out := rng.randf_range(0.2, 1.1)
 		var shard := _add_mesh(mesh, crystal, Vector3(cos(angle) * out, height * 0.4 + 0.3, sin(angle) * out))
 		shard.rotation = Vector3(sin(angle) * out * 0.5, rng.randf_range(0, TAU), -cos(angle) * out * 0.5)
+		_shards.append(shard)
 	var shape := SphereShape3D.new()
 	shape.radius = 1.6
 	_add_collider(shape, Vector3(0, 0.9, 0))
@@ -664,11 +721,11 @@ func _build_armory() -> void:
 	var screen_basis := Basis(Vector3.UP.cross(out), Vector3.UP, out)
 	screen = Screen.new()
 	screen.title = "ARMORY  //  FAB-7"
-	screen.size_m = Vector2(1.3, 1.02)
-	screen.pixels = Vector2i(640, 500)
+	screen.size_m = Vector2(1.3, 1.1)
+	screen.pixels = Vector2i(640, 540)
 	screen.button_height = 34.0
 	screen.button_font = 20
-	screen.buttons.assign(Game.GEAR.keys() + [&"ammo"])
+	screen.buttons.assign(Game.GEAR.keys() + [&"ammo", &"flares"])
 	var frame := BoxMesh.new()
 	frame.size = Vector3(screen.size_m.x + 0.1, screen.size_m.y + 0.1, 0.05)
 	_add_mesh(frame, dark, Vector3(1.22, 1.0, 0)).basis = screen_basis
@@ -830,6 +887,102 @@ func _build_barricade() -> void:
 
 ## A block of concrete under it, down into the rock, so it sits level on
 ## a slope.
+## A ring of dark rock round a glowing pit, breathing steam.
+func _build_vent() -> void:
+	var rock := _material(Color(0.2, 0.18, 0.17), 0.0, 0.95)
+	var lip := TorusMesh.new()
+	lip.inner_radius = 0.8
+	lip.outer_radius = 1.9
+	_add_mesh(lip, rock, Vector3(0, 0.05, 0)).scale = Vector3(1, 0.6, 1)
+	var magma := _material(Color(1.0, 0.4, 0.1), 0.0, 0.6)
+	magma.emission_enabled = true
+	magma.emission = Color(1.0, 0.35, 0.08)
+	magma.emission_energy_multiplier = 2.5
+	var pit := CylinderMesh.new()
+	pit.top_radius = 1.0
+	pit.bottom_radius = 1.0
+	pit.height = 0.05
+	_add_mesh(pit, magma, Vector3(0, 0.02, 0))
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(1.0, 0.5, 0.2)
+	glow.omni_range = 9.0
+	glow.light_energy = 1.6
+	glow.position = Vector3(0, 1.2, 0)
+	add_child(glow)
+	_add_steam(Vector3(0, 0.3, 0), 1.0)
+	var shape := CylinderShape3D.new()
+	shape.radius = 1.6
+	shape.height = 0.5
+	_add_collider(shape, Vector3(0, 0.1, 0))
+
+
+## A squat turbine housing over the vent, a stack venting steam, gold
+## pipework and an orange band.
+func _build_tap() -> void:
+	health = 50.0
+	var white := _material(Color(0.88, 0.88, 0.86), 0.3, 0.45)
+	var gold := _material(Color(0.85, 0.62, 0.22), 0.9, 0.3)
+	var orange := _material(Color(1.0, 0.45, 0.1), 0.1, 0.5)
+	var dark := _material(Color(0.16, 0.17, 0.19), 0.6, 0.4)
+	_add_mesh(_cylinder(1.3, 1.5, 1.4), white, Vector3(0, 0.7, 0))
+	_add_mesh(_cylinder(1.32, 1.32, 0.18), orange, Vector3(0, 1.1, 0))
+	_add_mesh(_cylinder(0.35, 0.45, 1.4), dark, Vector3(0, 2.0, 0))
+	_add_mesh(_cylinder(0.12, 0.12, 2.6), gold, Vector3(0.75, 1.3, 0.4))
+	_add_mesh(_cylinder(0.12, 0.12, 2.6), gold, Vector3(-0.75, 1.3, 0.4))
+	_add_mesh(_cylinder(0.1, 0.1, 0.4), white, Vector3(0, CABLE_HEIGHT.tap - 0.2, 0))
+	if !blueprint:
+		_add_steam(Vector3(0, 2.7, 0), 0.5)
+	var shape := CylinderShape3D.new()
+	shape.radius = 1.4
+	shape.height = 2.6
+	_add_collider(shape, Vector3(0, 1.3, 0))
+
+
+func _add_steam(at: Vector3, size: float) -> void:
+	var steam := CPUParticles3D.new()
+	steam.amount = 24
+	steam.lifetime = 3.0
+	var puff := QuadMesh.new()
+	puff.size = Vector2(1.2, 1.2) * size
+	var material := StandardMaterial3D.new()
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.85, 0.8, 0.75, 0.3)
+	material.vertex_color_use_as_albedo = true
+	var soft := Gradient.new()
+	soft.set_color(0, Color(1, 1, 1, 1))
+	soft.set_color(1, Color(1, 1, 1, 0))
+	var round_puff := GradientTexture2D.new()
+	round_puff.gradient = soft
+	round_puff.fill = GradientTexture2D.FILL_RADIAL
+	round_puff.fill_from = Vector2(0.5, 0.5)
+	round_puff.fill_to = Vector2(0.5, 0.0)
+	round_puff.width = 64
+	round_puff.height = 64
+	material.albedo_texture = round_puff
+	puff.material = material
+	steam.mesh = puff
+	steam.direction = Vector3.UP
+	steam.spread = 12.0
+	steam.gravity = Vector3.UP * 0.6
+	steam.initial_velocity_min = 1.2 * size + 0.4
+	steam.initial_velocity_max = 2.2 * size + 0.6
+	steam.scale_amount_min = 1.0
+	steam.scale_amount_max = 2.5
+	var grow := Curve.new()
+	grow.add_point(Vector2(0, 0.4))
+	grow.add_point(Vector2(1, 2.5))
+	steam.scale_amount_curve = grow
+	var fade := Gradient.new()
+	fade.set_color(0, Color(1, 1, 1, 0.9))
+	fade.set_color(1, Color(1, 1, 1, 0))
+	steam.color_ramp = fade
+	steam.position = at
+	steam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(steam)
+
+
 func _plinth(footprint: Vector2) -> void:
 	var block := BoxMesh.new()
 	block.size = Vector3(footprint.x + 0.3, 1.4, footprint.y + 0.3)

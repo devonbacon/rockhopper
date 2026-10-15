@@ -33,8 +33,8 @@ const TURN_SPEED := 1.8
 const EDGE := 12.0
 const MIN_HEIGHT := 18.0
 const MAX_HEIGHT := 140.0
-const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade", &"armory"]
-const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Wall", &"armory": "Armory"}
+const BUILD: Array[StringName] = [&"lamp", &"panel", &"battery", &"drill", &"lab", &"pylon", &"foundry", &"turret", &"barricade", &"armory", &"tap"]
+const SHORT := {&"lamp": "Lamp", &"panel": "Panel", &"battery": "Battery", &"drill": "Rig", &"lab": "Lab", &"pylon": "Pylon", &"foundry": "Foundry", &"turret": "Turret", &"barricade": "Wall", &"armory": "Armory", &"tap": "Vent tap"}
 const PICK := 26.0
 const SELECTED := Color(0.45, 1.0, 0.55)
 const SOLDIER := Color(0.45, 0.85, 1.0)
@@ -163,7 +163,7 @@ func _process(delta: float) -> void:
 	_toast.modulate.a = clampf(_toast_time, 0.0, 1.0)
 	var hit := _mouse_hit()
 	_hover = hit.collider if !hit.is_empty() and placing == &"" and hit.collider is Fixture else null
-	if _hover and _hover.kind == &"deposit" and _hover.rig:
+	if _hover and (_hover.kind == &"deposit" or _hover.kind == &"vent") and _hover.rig:
 		_hover = _hover.rig
 	if _hover and _hover.kind == &"ore":
 		_hover = null
@@ -241,7 +241,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				elif cabling:
 					_cable_click()
 				else:
-					focus = _hover if _hover and _hover.kind != &"deposit" and _hover.kind != &"ore" and !_hover.blueprint else null
+					focus = _hover if _hover and ![&"deposit", &"ore", &"vent"].has(_hover.kind) and !_hover.blueprint else null
 					_update_ui()
 			MOUSE_BUTTON_RIGHT:
 				if event.pressed:
@@ -266,8 +266,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		match event.physical_keycode:
 			KEY_X:
 				game.act(&"uncommand", [])
-			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0:
-				var kind := BUILD[9 if event.physical_keycode == KEY_0 else event.physical_keycode - KEY_1]
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS:
+				var kind := BUILD[10 if event.physical_keycode == KEY_MINUS else (9 if event.physical_keycode == KEY_0 else event.physical_keycode - KEY_1)]
 				_choose(&"" if placing == kind else kind)
 			KEY_P:
 				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
@@ -409,15 +409,16 @@ func _switch(fixture: Fixture) -> void:
 
 
 ## Where kind would go, from a mouse hit: a rig snaps to the deposit
-## nearest the mouse. Empty if it can't go anywhere there.
+## nearest the mouse, and a tap to the vent. Empty if it can't go anywhere
+## there.
 func _placement(hit: Dictionary, kind: StringName) -> Dictionary:
 	if hit.is_empty() or kind == &"":
 		return {}
-	if kind == &"drill":
+	if kind == &"drill" or kind == &"tap":
 		var best: Fixture = null
-		for deposit in game.deposits:
-			if deposit.global_position.distance_to(hit.position) < 4.0 and (best == null or deposit.global_position.distance_to(hit.position) < best.global_position.distance_to(hit.position)):
-				best = deposit
+		for site in (game.vents if kind == &"tap" else game.deposits):
+			if site.global_position.distance_to(hit.position) < 4.0 and (best == null or site.global_position.distance_to(hit.position) < best.global_position.distance_to(hit.position)):
+				best = site
 		if best:
 			return {position = best.global_position, normal = best.normal}
 		return {}
@@ -449,7 +450,7 @@ func _aim_ghost(hit: Dictionary) -> void:
 	_ghost.set_meta("kind", kind)
 	var ok := game.can_build(kind, spot.position, spot.normal)
 	_ghost_material.albedo_color = Color(0.3, 1.0, 0.5, 0.4) if ok else Color(1.0, 0.3, 0.25, 0.4)
-	var up: Vector3 = spot.normal if kind == &"drill" else Terrain.up_at(spot.position)
+	var up: Vector3 = spot.normal if kind == &"drill" or kind == &"tap" else Terrain.up_at(spot.position)
 	_ghost.global_transform = Transform3D(Basis.looking_at(-_facing(spot.position, up), up), spot.position + up * Fixture.GHOST_LIFT[kind])
 
 
@@ -470,7 +471,7 @@ func _place(keep_placing: bool) -> void:
 	if !game.can_build(placing, spot.position, spot.normal):
 		toast("Too steep there, or too close to something.")
 		return
-	var up: Vector3 = spot.normal if placing == &"drill" else Terrain.up_at(spot.position)
+	var up: Vector3 = spot.normal if placing == &"drill" or placing == &"tap" else Terrain.up_at(spot.position)
 	Sfx.play(&"place")
 	game.act(&"blueprint", [placing, spot.position, spot.normal, spot.position + _facing(spot.position, up) * 5.0])
 	_marks.append([spot.position, 0.0])
@@ -538,7 +539,7 @@ func _build_ui() -> void:
 	bar.add_theme_constant_override("separation", 6)
 	for i in BUILD.size():
 		var kind := BUILD[i]
-		var button := _button("", Vector2(96, 92))
+		var button := _button("", Vector2(88, 92))
 		button.draw.connect(func() -> void: _draw_build_button(button, kind, i))
 		button.pressed.connect(func() -> void: _choose(&"" if placing == kind else kind))
 		button.tooltip_text = "%s: %s, paid over %d hammer blows" % [Fixture.NAMES[kind], Game.price(Fixture.COST[kind], Fixture.ALLOY.get(kind, 0)), Fixture.BUILD_HITS[kind]]
@@ -553,7 +554,7 @@ func _build_ui() -> void:
 	bar.add_child(research)
 	_cable_button = _button("Cables\n[C]", Vector2(110, 92))
 	_cable_button.pressed.connect(func() -> void: _cable_tool(!cabling))
-	_cable_button.tooltip_text = "Run cables between pylons, rigs, foundries and the pod; on open ground, a new pylon"
+	_cable_button.tooltip_text = "Run cables between pylons, rigs, taps, foundries and the pod; on open ground, a new pylon"
 	bar.add_child(_cable_button)
 	_launch_button = _button("", Vector2(110, 92))
 	_launch_button.pressed.connect(_launch)
@@ -702,7 +703,9 @@ func _describe(fixture: Fixture) -> String:
 	var parts: Array[String] = []
 	match fixture.kind:
 		&"drill":
-			parts.append("hopper %d/%d, %s" % [fixture.stored, Fixture.HOPPER, "drilling" if fixture.stalled == "" else fixture.stalled])
+			parts.append("hopper %d/%d, %s, %d left in the deposit" % [fixture.stored, Fixture.HOPPER, "drilling" if fixture.stalled == "" else fixture.stalled, fixture.deposit.amount if fixture.deposit else 0])
+		&"tap":
+			parts.append("+%.1f power/s" % fixture.deposit.power if fixture.stalled == "" and fixture.deposit else ("off" if fixture.stalled == "off" else "NO CABLE BACK TO THE POD"))
 		&"foundry":
 			parts.append("ore %d/%d, alloy %d/%d, %s (%.0f power/s)" % [fixture.ore_in, Fixture.BIN, fixture.alloy_out, Fixture.BIN, "smelting" if fixture.stalled == "" else fixture.stalled, Game.FOUNDRY_DRAW])
 		&"pylon":
@@ -735,7 +738,7 @@ func _draw_build_button(button: Button, kind: StringName, index: int) -> void:
 		button.draw_rect(Rect2(Vector2.ZERO, size), Hud.DAY_COLOR, false, 2.0)
 	Hud.draw_icon(button, kind, Vector2(size.x * 0.5, 32), tint)
 	var font := button.get_theme_default_font()
-	button.draw_string(font, Vector2(0, 66), "%d  %s" % [(index + 1) % 10, SHORT[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
+	button.draw_string(font, Vector2(0, 66), "%s  %s" % ["-" if index == 10 else str((index + 1) % 10), SHORT[kind]], HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, tint)
 	var cost := "%d ore" % Fixture.COST[kind] + (" +%d al" % alloy_cost if alloy_cost > 0 else "")
 	button.draw_string(font, Vector2(0, 83), cost, HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Hud.ORE_COLOR if affordable else Hud.ALERT)
 
@@ -776,6 +779,9 @@ func _draw_overlay() -> void:
 		var text := ""
 		var color := Hud.ORE_COLOR
 		match fixture.kind:
+			&"tap":
+				text = "TAP +%.1f/s" % fixture.deposit.power if fixture.stalled == "" and fixture.deposit else "TAP  " + fixture.stalled.to_upper()
+				color = Hud.DAY_COLOR if fixture.stalled == "" else (OFF if fixture.stalled == "off" else Hud.ALERT)
 			&"drill":
 				text = "RIG %d/%d%s" % [fixture.stored, Fixture.HOPPER, "" if fixture.stalled == "" else "  " + fixture.stalled.to_upper()]
 				color = Hud.ORE_COLOR if fixture.stalled == "" else (Hud.COLD_COLOR if fixture.stalled == "dark" else (OFF if fixture.stalled == "off" else Hud.DAY_COLOR))
@@ -800,6 +806,16 @@ func _draw_overlay() -> void:
 			_text(font, at, text, 13, color)
 			if fixture.noise() > 0.0:
 				_text(font, at + Vector2(0, 14), "LOUD", 11, Color(SPIDER, 0.8))
+	for vent in game.vents:
+		if !vent.rig:
+			var at := _screen(vent.global_position + vent.normal * 2.0)
+			if at != Vector2.INF:
+				_text(font, at, "VENT +%.1f/s" % vent.power, 13, Color(1.0, 0.6, 0.3))
+	for deposit in game.deposits:
+		if !deposit.rig or deposit.amount <= 0:
+			var at := _screen(deposit.global_position + deposit.normal * 3.4)
+			if at != Vector2.INF:
+				_text(font, at, "ORE %d" % deposit.amount if deposit.amount > 0 else "SPENT", 12, Color(Hud.ORE_COLOR, 0.8) if deposit.amount > 0 else OFF)
 	for fixture: Fixture in game.built + [game.pod]:
 		if fixture.health < fixture.max_health - 0.5:
 			var bar := _screen(fixture.global_position + fixture.normal * Hud.bar_height(fixture))

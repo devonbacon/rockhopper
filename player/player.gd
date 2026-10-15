@@ -487,11 +487,20 @@ func _use(delta: float) -> void:
 		return
 	match target.kind:
 		&"deposit":
-			prompt = "[Hold E] Mine" + ("" if target.rig == null else "    a rig's on it")
+			if target.amount <= 0:
+				prompt = "Deposit: spent"
+				return
+			prompt = "Deposit: %d ore left\n[Hold E] Mine" % target.amount + ("" if target.rig == null else "    a rig's on it")
 			_hold(down, delta, MINE_TIME, func() -> void: game.act(&"mine", [target.net_id]))
+		&"vent":
+			prompt = "Vent: warm, and a tap on it would make %.1f power/s\nThe commander places taps" % target.power
+		&"tap":
+			var making: String = ("making %.1f power/s" % target.deposit.power if target.deposit else "working") if target.stalled == "" else ("switched off" if target.stalled == "off" else "NOT CABLED BACK TO THE POD")
+			prompt = "Geothermal tap: %s\n[Hold E] Pick up" % making
+			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
 		&"drill":
-			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full", "off": "switched off"}[target.stalled]
-			prompt = "Rig: %d / %d, %s\n[E] Empty hopper    [Hold E] Pick up" % [target.stored, Fixture.HOPPER, why]
+			var why: String = {"": "drilling", "dark": "too dark to drill", "full": "hopper full", "off": "switched off", "spent": "the deposit's spent"}.get(target.stalled, target.stalled)
+			prompt = "Rig: %d / %d, %s, %d left\n[E] Empty hopper    [Hold E] Pick up" % [target.stored, Fixture.HOPPER, why, target.deposit.amount if target.deposit else 0]
 			# A tap empties the hopper; holding on picks the rig up.
 			if released and _use_held < 0.3 and target.stored > 0:
 				game.act(&"empty_rig", [target.net_id])
@@ -627,6 +636,8 @@ func _smash() -> void:
 			return
 		game.act(&"construct", [fixture.net_id])
 		_say("%s %d / %d" % [Fixture.NAMES[fixture.kind], mini(fixture.hits + 1, fixture.hits_needed()), fixture.hits_needed()])
+	elif fixture.kind == &"deposit" and fixture.amount <= 0:
+		_say("Spent")
 	elif fixture.kind == &"deposit" or fixture.kind == &"ore":
 		game.act(&"mine", [fixture.net_id])
 		_say("+ore")
@@ -639,7 +650,7 @@ func _throw_flare() -> void:
 	if _flare_cooldown > 0.0:
 		return
 	if game.flares_left <= 0:
-		_say("Out of flares: one comes back every %ds" % Game.FLARE_RECHARGE)
+		_say("Out of flares: more at an armory's screen")
 		return
 	_flare_cooldown = FLARE_EVERY
 	var ahead := -camera.global_basis.z

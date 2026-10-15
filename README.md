@@ -6,10 +6,12 @@ dark is the enemy. It tests whether night coming round, with too few
 lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
-Each mission starts in a lobby over the map it'll be played on: the
-leader (whoever's been connected longest; you, solo) clicks where the pod
-should land, on level ground with room round it and away from the wall,
-or rolls a new map; everyone else says they're ready, and the leader
+Each mission starts in a lobby over the map it'll be played on, with
+its deposits (and the ore each holds) and vents (and the power a tap on
+each would make) already down: the leader (whoever's been connected
+longest; you, solo) clicks where the pod should land, on level ground
+with room round it, away from the wall, off the deposits and at least
+35 m from any vent (rings show where), or rolls a new map; everyone else says they're ready, and the leader
 drops the pod. It comes down out of the sky over 7 s, watched from
 nearby, and everyone starts beside it. The leader's pause menu can send
 everyone back to the lobby, on the same map, any time; a finished
@@ -25,25 +27,31 @@ rock turns every five minutes: three minutes of sun crossing the sky,
 then two of night. Low in the sky, it throws the hills' shadows long, so the
 hollows go dark first and the high ground holds the light longest. A
 range to the west brings dusk early, its shadow sweeping in across the
-floor; one to the east holds the dawn back. There's loose ore lying about, big
-deposits that never run out (one a short walk from the pod, the rest
-40 m off or more, spread out), and a few caves under the ground to
-shelter in. Craters are shallow bowls, never breaking into a cave.
+floor; one to the east holds the dawn back. There's loose ore lying about, eight
+big deposits spread out, each holding 30-70 ore (a deposit that's dug
+out is spent), four vents, out from the middle, and a few caves under
+the ground to shelter in. Craters are shallow bowls, never breaking into a cave.
 
 Power is one battery, shared by everything. Sunlight fills it, falling
 on the top of the pod or on panels you build (a panel makes more the
-more squarely it faces the sun). Lamps drain it, and they light
+more squarely it faces the sun). At night the only power is from vents:
+a geothermal tap (5 ore) built over one makes 1.4-2.8 a second (more
+the further out the vent is), day and night, while strung cables tie it
+back to the pod, through any number of pylons. A tap is loud, so
+spiders come for it, and a cable cut anywhere on the line cuts the power.
+Lamps (0.4 a second) drain the battery, as do the pod's lights (0.25)
+and the small light on everything built (0.08 each), all lighting
 themselves whenever the sun's off them. When the battery's flat they go
 out. It holds 100, and each battery bank you build adds 80.
 
-Your suit stays warm in light: sun, a lit lamp you can see, or beside
-the pod while there's power. In the dark it cools, and in 45 seconds
+Your suit stays warm in light: sun, a lit lamp you can see, within 7 m
+of a building's light, by a vent, or beside the pod while there's power. In the dark it cools, and in 45 seconds
 you freeze. The headlamp lets you see, but doesn't keep you warm.
 
 Ore is banked in the pod. What you carry counts once you hand it in.
 Lamps (1 ore), pylons (1), barricades (1), panels (2), batteries (2 ore
 and 1 alloy), drill rigs (3), research labs (4), armories (4), turrets
-(4 ore and 2 alloy) and foundries (5) are paid for from the bank, as are
+(4 ore and 2 alloy), foundries and taps (5) are paid for from the bank, as are
 research and gear, and picking something back up refunds it.
 Buildings are placed by the commander, from the pod, as blueprints:
 glowing blue holograms, free to place, that do nothing until soldiers
@@ -65,9 +73,10 @@ unless you hurt them. Hold the pod till lift-off. Calling the launch off
 closes those holes, but the spiders already out stay.
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
-a lamp, into a hopper of 12, which you can empty by hand. Cables carry
-it away. The commander lays the cables, free, from one pylon, rig or
-foundry to another or to the pod, up to 20 m, with clear air under it;
+a lamp, into a hopper of 12, which you can empty by hand, till the
+deposit's spent. Cables carry
+it away. The commander lays the cables, free, from one pylon, rig, tap
+or foundry to another or to the pod, up to 20 m, with clear air under it;
 one run to a blueprint, or to open ground (which puts a pylon blueprint
 there), waits as a hologram line and goes up once soldiers have built
 both its ends. Ore and alloy travel along it one way at 3 m/s, 1.5
@@ -94,9 +103,8 @@ Soldiers ride cables: E while looking at one grabs it, and you slide
 along underneath at 11 m/s, the way you're facing. E or Space lets go,
 keeping your speed, and you drop off at the end.
 
-The commander can switch lamps, rigs, labs, foundries and turrets off and
-on, to
-save power at night or to quiet them. A rig that's drilling is loud, a
+The commander can switch anything built off and on, to save power at
+night (off, it's dark too) or to quiet it. A rig that's drilling is loud, a
 foundry that's smelting louder, and a lab at work a little; the pod hums.
 Spiders hear them from further than they can see.
 
@@ -131,7 +139,7 @@ researched, each soldier orders their own at an armory (see below).
 
 Armories make gear, one piece at a time. Soldiers order their own on the
 screen on an armory's side: a button for each piece (once the
-commander's researched it), and one for an ammo box. Pressing an order
+commander's researched it), one for an ammo box, and one for flares. Pressing an order
 again takes it back, or cancels it under way for a refund. Each idle
 armory takes the first order it can, when the bank can pay: a rifle,
 blade runners, a grapple or a heated suit cost 2 ore, a jetpack 2 ore and
@@ -164,10 +172,11 @@ It mends itself slowly while there's power and nothing's bitten it for 8 s,
 and every hammer blow patches 25 (the hammer mends anything damaged that
 way).
 
-Each soldier carries 4 flares, and one comes back every 20 s. A flare
-burns for 35 s wherever it lands, lighting the ground round it, keeping
-you warm, and keeping spiders from climbing out near it (a rig by one
-keeps drilling, too).
+Each soldier lands with 4 flares, and can carry 6; they don't come back,
+but an armory's screen sells 3 for 1 ore. A flare burns for 35 s
+wherever it lands, lighting the ground round it and keeping spiders from
+climbing out near it (a rig by one keeps drilling, and turrets can see
+by it), but it doesn't keep you warm.
 
 ## Playing together
 
@@ -221,7 +230,7 @@ handed in, repairs, revives). `tools/fetch_sessions.sh` copies the
 server's into `sessions/`; `python tools/session_summary.py [file]`
 prints a mission's timeline, samples and tallies.
 
-Debug arguments skip the lobby, landing near the middle. `command`
+Debug arguments skip the lobby, landing a short walk from a deposit. `command`
 starts in the commander's seat (with `research`, the research panel
 open; `place=pylon` holds that to place); `relobby` has the leader send
 everyone back to the lobby once, 12 s in; `bitten` starts with the pod
@@ -238,10 +247,12 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 
 - **Camera:** WASD, the screen edges or dragging with the middle button
   pan, the wheel zooms, Q and E turn it.
-- **Building:** 1-9, 0 or the bar at the bottom picks a lamp, panel,
-  battery, rig, lab, pylon, foundry, turret, barricade or armory; left-click places it as a
+- **Building:** 1-9, 0, - or the bar at the bottom picks a lamp, panel,
+  battery, rig, lab, pylon, foundry, turret, barricade, armory or vent
+  tap; left-click places it as a
   blueprint (Shift keeps placing), right-click or Esc puts it away. A rig
-  snaps to the deposit nearest the mouse. Placing something that takes
+  snaps to the deposit nearest the mouse, and a tap to the vent. Vents
+  show what a tap would make, and deposits the ore they've left. Placing something that takes
   cables shows a ring for how far one reaches, and circles what's in
   reach. Damaged buildings show a health bar. Things face the pod to start
   with (barricades standing across the way to it); the wheel turns what
@@ -369,6 +380,9 @@ User arguments after `--`, e.g.
   you in a cave; `view=screen` in front of the pod's screen.
 - `rig` builds a rig on the deposit nearest the pod and stands you
   beside it.
+- `vent` stands you by the nearest vent, with a tap on the next
+  (`vent=tap`, by the tap).
+- `lobby` keeps the lobby (with `shot`, screenshots it).
 - `defence` builds a loaded turret, a lamp and three barricades on the
   side of you away from the pod.
 - `cables` builds a rig on the deposit nearest the pod and a foundry

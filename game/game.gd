@@ -4,9 +4,11 @@ extends Node3D
 ## be beside it when it launches.
 ##
 ## Power is one shared battery, filled by sunlight on the pod and on any
-## panels you build, and drained by lamps, which light themselves whenever
-## the sun's off them. Out of light, sun or lamp, your suit cools, and if
-## it runs out you freeze.
+## panels you build, and by geothermal taps on the vents out on the map,
+## day and night, while they're cabled back to the pod. Lamps, and the
+## small light on everything built, drain it, lighting themselves whenever
+## the sun's off them. Out of light (sun, lamp, the base's lights or a
+## vent) your suit cools, and if it runs out you freeze.
 ##
 ## Ore is banked in the pod: what you carry counts once you hand it in.
 ## Build a drill rig over a deposit and it drills while it's lit; cables
@@ -28,11 +30,12 @@ extends Node3D
 ## the more players there are, and go for soldiers, what's been built, and
 ## the pod. Sunlight sends them back
 ## under. If they tear the pod open, nobody's going home; hammering it
-## patches it up. Soldiers carry flares, which recharge, to light the dark
-## for a while.
+## patches it up. Soldiers carry flares, restocked at armories, which
+## light the dark for a while but don't keep you warm.
 ##
-## It starts in the lobby, over the map: the leader picks where the pod
-## lands, and it comes down there out of the sky (Net has the rest).
+## It starts in the lobby, over the map as it'll be played (deposits,
+## ore and vents already down): the leader picks where the pod lands, and
+## it comes down there out of the sky (Net has the rest).
 ##
 ## Networked, the server (or solo) runs all of that; clients mirror it from
 ## snapshots, and send what their soldier does as requests (act()). Every
@@ -62,6 +65,9 @@ const START_BATTERY := 60.0
 const POD_SOLAR := 0.8
 const PANEL_SOLAR := 1.6
 const LAMP_DRAW := 0.4
+## Each building's own light, and the pod's, while they're on.
+const GLOW_DRAW := 0.08
+const POD_NIGHT_DRAW := 0.25
 const BATTERY_BANK := 80.0
 const LAB_DRAW := 0.6
 const FOUNDRY_DRAW := 1.0
@@ -103,13 +109,23 @@ const WARM_RATE := 100.0 / 6.0
 const POD_RANGE := 6.0
 const SURFACE_ORE := 24
 const DEPOSITS := 8
-## One deposit's this near the pod, and the rest at least this far off,
-## this far apart; the first this many of them somewhere you can walk to
-## from the pod without climbing.
+## Deposits are this far apart, the first this many of them somewhere you
+## can walk to from the middle without climbing, each holding between
+## these much ore.
+const DEPOSIT_APART := 24.0
+const REACHABLE_DEPOSITS := 4
+const DEPOSIT_ORE := Vector2i(30, 70)
+## Debugging lands the pod this far from a deposit.
 const DEPOSIT_NEAR := Vector2(14.0, 26.0)
-const DEPOSIT_FAR := 40.0
-const DEPOSIT_APART := 26.0
-const REACHABLE_DEPOSITS := 3
+## Vents: how many, how far apart, between how far out from the middle,
+## and the power a tap makes on one (more further out).
+const VENTS := 4
+const VENT_APART := 45.0
+const VENT_RING := Vector2(26.0, 66.0)
+const VENT_POWER := Vector2(1.4, 2.8)
+## The pod can't land this near a vent, or this near a deposit.
+const VENT_CLEAR := 35.0
+const DEPOSIT_CLEAR := 7.0
 const START_STOCK := 10
 const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
@@ -147,8 +163,12 @@ const FLARE_ROW := 18
 const SLOW_EVERY := 0.25
 const MOVE_EVERY := 1.0 / 30.0
 const RESTART_AFTER := 15.0
+## Flares: how many you land with, can carry, and get for FLARE_COST ore
+## at an armory.
 const FLARES := 4
-const FLARE_RECHARGE := 20.0
+const FLARES_MAX := 6
+const FLARE_PACK := 3
+const FLARE_COST := 1
 const PING_TIME := 8.0
 const POD_ALERT_EVERY := 10.0
 const REPAIR := 25.0
@@ -232,6 +252,9 @@ var built: Array[Fixture] = []
 var blueprints: Array[Fixture] = []
 var ores: Array[Fixture] = []
 var deposits: Array[Fixture] = []
+var vents: Array[Fixture] = []
+## What's tied to the pod by strung cables, for the taps' power.
+var _grid := {}
 var spiders: Array[Spider] = []
 var flares: Array[Flare] = []
 var holes: Array[Hole] = []
@@ -294,8 +317,12 @@ func _ready() -> void:
 	sun.time = time
 	add_child(sun)
 	sun.set_time(time)
+	_rng.seed = seed_value
+	_place_vents()
+	_place_deposits()
+	_place_ore()
 	# Debug arguments, solo, skip the lobby.
-	if Net.landing == Vector3.INF and !Net.networked() and !_args.is_empty():
+	if Net.landing == Vector3.INF and !Net.networked() and !_args.is_empty() and !_args.has("lobby"):
 		Net.landing = default_landing()
 	if Net.landing != Vector3.INF:
 		begin_landing(Net.landing, false)
@@ -303,6 +330,8 @@ func _ready() -> void:
 		lobby = Lobby.new()
 		lobby.game = self
 		add_child(lobby)
+		if _args.has("shot"):
+			_screenshot()
 		if _args.has("probe"):
 			# A scripted client: the leader lands near the middle once the
 			# others have had a moment to say they're ready.
@@ -318,8 +347,8 @@ func _ready() -> void:
 					lobby_act(&"drop", []))
 
 
-## Somewhere open, flat and near the middle to land, for when nobody's
-## picked: the same for everyone on this map.
+## Somewhere to land for when nobody's picked (debugging): open, flat, a
+## short walk from a deposit, the same for everyone on this map.
 func default_landing() -> Vector3:
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	var rng := RandomNumberGenerator.new()
@@ -330,7 +359,10 @@ func default_landing() -> Vector3:
 		spots[i] = spots[j]
 		spots[j] = swap
 	for spot in spots:
-		if Vector2(spot[0].x, spot[0].z).length() < 20.0 and spot[1].y > 0.97 and can_land(spot[0]):
+		var nearest := INF
+		for deposit in deposits:
+			nearest = minf(nearest, deposit.global_position.distance_to(spot[0]))
+		if nearest > DEPOSIT_NEAR.x and nearest < DEPOSIT_NEAR.y and spot[1].y > 0.97 and can_land(spot[0]):
 			return spot[0]
 	for spot in spots:
 		if can_land(spot[0]):
@@ -338,19 +370,30 @@ func default_landing() -> Vector3:
 	return spots[0][0]
 
 
-## Whether the pod can come down at `at`: inside the wall, on level ground
-## with room round it.
 func can_land(at: Vector3) -> bool:
+	return landing_problem(at) == ""
+
+
+## Why the pod can't come down at `at`, or "" if it can: it needs level
+## ground with room round it, inside the wall, off the deposits and well
+## away from the vents.
+func landing_problem(at: Vector3) -> String:
 	if Vector2(at.x, at.z).length() > Terrain.FLOOR_RADIUS - 12.0:
-		return false
+		return "Too near the wall."
 	var centre: Array = terrain.surface_point(at)
 	if (centre[1] as Vector3).y < 0.95:
-		return false
+		return "Too steep."
 	for i in 8:
 		var round_it: Array = terrain.surface_point(at + Vector3(cos(i * TAU / 8.0), 0, sin(i * TAU / 8.0)) * LANDING_ROOM)
 		if absf((round_it[0] as Vector3).y - (centre[0] as Vector3).y) > 1.2:
-			return false
-	return true
+			return "Too rough: it needs level ground round it."
+	for vent in vents:
+		if vent.global_position.distance_to(at) < VENT_CLEAR:
+			return "Too near a vent: the ground's unstable within %d m." % VENT_CLEAR
+	for deposit in deposits:
+		if deposit.global_position.distance_to(at) < DEPOSIT_CLEAR:
+			return "Right on a deposit."
+	return ""
 
 
 ## Lobby choices go to the server (or are made here, solo).
@@ -403,10 +446,12 @@ func begin_landing(at: Vector3, animate := true) -> void:
 	if lobby:
 		lobby.queue_free()
 		lobby = null
-	_rng.seed = seed_value
 	_place_pod(at)
-	_place_deposits()
-	_place_ore()
+	for ore in ores.duplicate():
+		if ore.global_position.distance_to(at) < LANDING_ROOM + 2.5:
+			ores.erase(ore)
+			entities.erase(ore.net_id)
+			ore.queue_free()
 	_next_id = FIRST_SPAWNED_ID
 	if Net.authority() and (Net.networked() or _args.has("metrics")):
 		metrics = Metrics.new(self)
@@ -515,6 +560,7 @@ func _physics_process(delta: float) -> void:
 		if state == State.PLAYING:
 			time += delta
 		sun.set_time(time)
+		_light_pod()
 		for link in links:
 			link.advance(delta, cable_speed())
 		_move_in -= delta
@@ -536,18 +582,26 @@ func _simulate(delta: float) -> void:
 		pod.sunlit = sun.lights(pod.global_position + pod.normal * 3.6, space)
 		for fixture in built:
 			fixture.sunlit = sun.lights(fixture.global_position + fixture.normal * 1.6, space)
+		_grid = _tied_to_pod()
 	var sun_dir := Sun.dir_at(time)
 	power_in = POD_SOLAR if pod.sunlit else 0.0
 	power_out = 0.0
+	_light_pod()
+	if pod.on:
+		power_out += POD_NIGHT_DRAW
 	for fixture in built:
-		if fixture.kind == &"panel" and fixture.sunlit:
-			power_in += PANEL_SOLAR * maxf(0.0, fixture.normal.dot(sun_dir))
-		elif fixture.kind == &"lamp":
+		if fixture.light:
 			var want := fixture.enabled and !fixture.sunlit and battery > 0.0
 			if want != fixture.on:
 				fixture.set_on(want)
 			if fixture.on:
-				power_out += LAMP_DRAW * (0.5 if has(&"lamps") else 1.0)
+				power_out += LAMP_DRAW * (0.5 if has(&"lamps") else 1.0) if fixture.kind == &"lamp" else GLOW_DRAW
+		if fixture.kind == &"panel" and fixture.sunlit and fixture.enabled:
+			power_in += PANEL_SOLAR * maxf(0.0, fixture.normal.dot(sun_dir))
+		elif fixture.kind == &"tap":
+			fixture.stalled = "off" if !fixture.enabled else ("" if _grid.has(fixture) else "no cable")
+			if fixture.stalled == "" and fixture.deposit:
+				power_in += fixture.deposit.power
 		elif fixture.kind == &"foundry" and state == State.PLAYING:
 			fixture.smelt(delta, battery > 0.0)
 			if fixture.stalled == "":
@@ -624,6 +678,29 @@ func _simulate(delta: float) -> void:
 			_end(State.LOST, "The pod launched without anyone.")
 
 
+## The pod's lights: on from dusk to dawn while there's power.
+func _light_pod() -> void:
+	var want := Sun.dir_at(time).y < 0.05 and battery > 0.0
+	if want != pod.on:
+		pod.set_on(want)
+
+
+## Everything strung cables (either way) tie back to the pod.
+func _tied_to_pod() -> Dictionary:
+	var reached := {pod: true}
+	var frontier: Array[Fixture] = [pod]
+	while !frontier.is_empty():
+		var at: Fixture = frontier.pop_back()
+		for link in links:
+			if link.blueprint:
+				continue
+			var other: Fixture = link.to if link.from == at else (link.from if link.to == at else null)
+			if other and !reached.has(other):
+				reached[other] = true
+				frontier.push_back(other)
+	return reached
+
+
 ## Tells the soundtrack how things stand where you are (or at the pod,
 ## from the command chair).
 func _feed_music() -> void:
@@ -648,18 +725,13 @@ func _look_after(peer: int, delta: float) -> void:
 	if s.down >= 0.0:
 		return
 	var head := body.global_position + Terrain.up_at(body.global_position) * 1.65
-	var light := lit_at(head)
+	var light := lit_at(head, true)
 	if light == "" and battery > 0.0 and head.distance_to(pod.global_position) < POD_RANGE:
 		light = "pod"
 	s.lit_by = light
 	s.warmth = clampf(s.warmth + (WARM_RATE if light != "" else -COLD_RATE * (0.5 if equipped(&"heated", peer) else 1.0)) * delta, 0.0, 100.0)
 	s.since_hurt += delta
 	s.hurt = maxf(0.0, s.hurt - delta * 2.0)
-	if s.flares < FLARES:
-		s.flare_charge += delta
-		if s.flare_charge >= FLARE_RECHARGE:
-			s.flare_charge = 0.0
-			s.flares += 1
 	if s.since_hurt > HEAL_DELAY:
 		s.health = minf(max_health(peer), s.health + HEAL_RATE * delta)
 	if s.warmth <= 0.0:
@@ -712,7 +784,7 @@ func _me() -> Dictionary:
 
 
 func _new_stats() -> Dictionary:
-	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0, gear = [], ammo_box = false}
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, down = -1.0, gear = [], ammo_box = false}
 
 
 func _track(node: Node, id := 0) -> void:
@@ -1199,7 +1271,10 @@ func _slow_state() -> Array:
 	var worn := {}
 	for peer in stats:
 		worn[peer] = stats[peer].gear.duplicate()
-	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at, research_queue.duplicate(), orders.duplicate(true), racked.duplicate(true), worn]
+	var left := PackedInt32Array()
+	for deposit in deposits:
+		left.append(deposit.amount)
+	return [rows, alive, researched.keys(), plans, hole_rows, link_rows, launch_at, research_queue.duplicate(), orders.duplicate(true), racked.duplicate(true), worn, left]
 
 
 ## Client: the server's latest of everything that moves.
@@ -1311,6 +1386,11 @@ func apply_slow(data: Array) -> void:
 	for peer: int in data[10]:
 		if stats.has(peer):
 			stats[peer].gear = data[10][peer]
+	var left: PackedInt32Array = data[11]
+	for i in mini(left.size(), deposits.size()):
+		if deposits[i].amount != left[i]:
+			deposits[i].amount = left[i]
+			deposits[i].show_left()
 	var seen := {}
 	for row: Array in data[0]:
 		seen[row[0]] = true
@@ -1327,7 +1407,7 @@ func apply_slow(data: Array) -> void:
 			if fixture.screen:
 				_wire_armory_screen(fixture)
 		fixture.health = row[5]
-		if fixture.kind == &"lamp" and fixture.on != row[6]:
+		if fixture.light and fixture.on != row[6]:
 			fixture.set_on(row[6])
 		fixture.stored = row[7]
 		fixture.stalled = row[8]
@@ -1526,18 +1606,25 @@ func capacity() -> float:
 	return total
 
 
-## What light reaches a point: "sun", "lamp", or "" for none.
-func lit_at(pos: Vector3) -> String:
+## What light reaches a point: "sun", "lamp", "base" (a building's own
+## light), "vent", "flare", or "" for none. Flares don't keep you warm, so
+## they don't count for warming.
+func lit_at(pos: Vector3, warming := false) -> String:
 	var space := get_world_3d().direct_space_state
 	if sun.lights(pos, space):
 		return "sun"
 	for fixture in built:
-		if fixture.kind == &"lamp" and fixture.on:
+		if fixture.light and fixture.on:
 			var bulb := fixture.light.global_position
-			if bulb.distance_to(pos) < Fixture.LAMP_RANGE * 0.75:
+			if bulb.distance_to(pos) < (Fixture.LAMP_RANGE * 0.75 if fixture.kind == &"lamp" else Fixture.GLOW_WARM):
 				var query := PhysicsRayQueryParameters3D.create(bulb, pos, Terrain.ROCK_LAYER)
 				if space.intersect_ray(query).is_empty():
-					return "lamp"
+					return "lamp" if fixture.kind == &"lamp" else "base"
+	for vent in vents:
+		if vent.global_position.distance_to(pos) < Fixture.VENT_WARM:
+			return "vent"
+	if warming:
+		return ""
 	for flare in flares:
 		if flare.life > 0.0:
 			var glow := flare.light.global_position
@@ -1553,13 +1640,13 @@ func lit_at(pos: Vector3) -> String:
 func can_build(kind: StringName, pos: Vector3, normal := Vector3.UP) -> bool:
 	if !Fixture.BUILD_HITS.has(kind):
 		return false
-	if kind == &"drill":
-		var deposit := deposit_at(pos)
-		return deposit != null and deposit.rig == null
+	if kind == &"drill" or kind == &"tap":
+		var site := site_at(kind, pos)
+		return site != null and site.rig == null
 	if normal.angle_to(Terrain.up_at(pos)) > deg_to_rad(Fixture.MAX_SLOPE.get(kind, Fixture.SLOPE)):
 		return false
-	for fixture: Fixture in built + blueprints + ores + deposits + [pod]:
-		var room := 3.0 if fixture == pod else (2.6 if fixture.kind == &"deposit" or fixture.kind == &"drill" else 1.2)
+	for fixture: Fixture in built + blueprints + ores + deposits + vents + [pod]:
+		var room := 3.0 if fixture == pod else (2.6 if [&"deposit", &"drill", &"vent", &"tap"].has(fixture.kind) else 1.2)
 		if kind == &"barricade" and fixture.kind == &"barricade":
 			room = 2.9
 		if [&"lab", &"foundry", &"armory"].has(kind) or [&"lab", &"foundry", &"armory"].has(fixture.kind):
@@ -1588,15 +1675,15 @@ func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vecto
 	return fixture
 
 
-## Rigs stand on their deposit's slope; everything else stands upright,
-## on a plinth if the ground slopes.
+## Rigs stand on their deposit's slope, and taps on their vent's;
+## everything else stands upright, on a plinth if the ground slopes.
 func _make_fixture(kind: StringName, pos: Vector3, normal: Vector3, facing_from: Vector3) -> Fixture:
 	var fixture: Fixture
-	if kind == &"drill":
-		var deposit := deposit_at(pos)
-		fixture = Fixture.make(kind, deposit.global_position, deposit.normal)
-		fixture.deposit = deposit
-		deposit.rig = fixture
+	if kind == &"drill" or kind == &"tap":
+		var site := site_at(kind, pos)
+		fixture = Fixture.make(kind, site.global_position, site.normal)
+		fixture.deposit = site
+		site.rig = fixture
 	else:
 		normal = Terrain.up_at(pos)
 		fixture = Fixture.make(kind, pos, normal)
@@ -1662,10 +1749,11 @@ func _remove_blueprint(plan: Fixture) -> void:
 	plan.queue_free()
 
 
-func deposit_at(pos: Vector3) -> Fixture:
-	for deposit in deposits:
-		if deposit.global_position.distance_to(pos) < 0.5:
-			return deposit
+## The deposit a rig, or the vent a tap, would go on at pos.
+func site_at(kind: StringName, pos: Vector3) -> Fixture:
+	for site in (vents if kind == &"tap" else deposits):
+		if site.global_position.distance_to(pos) < 0.5:
+			return site
 	return null
 
 
@@ -1707,14 +1795,14 @@ func can_link(a: Fixture, b: Fixture) -> String:
 	if a == b:
 		return "Pick somewhere else to run it to."
 	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind):
-		return "Cables tie to pylons, rigs, foundries and the pod."
+		return "Cables tie to pylons, rigs, taps, foundries and the pod."
 	var ends := cable_ends(a, b)
 	a = ends[0]
 	b = ends[1]
 	if a == pod:
 		return "The pod only takes cables in."
-	if b.kind == &"drill":
-		return "A rig only sends."
+	if Fixture.SENDERS.has(b.kind):
+		return "Two senders: put a pylon between them."
 	for link in links:
 		if (link.from == a and link.to == b) or (link.from == b and link.to == a):
 			return "They're already linked."
@@ -1724,7 +1812,7 @@ func can_link(a: Fixture, b: Fixture) -> String:
 ## Which way a cable laid from a to b runs: that way, unless that'd be
 ## out of the pod or into a rig, which it turns round.
 func cable_ends(a: Fixture, b: Fixture) -> Array[Fixture]:
-	if a == pod or (b.kind == &"drill" and a != pod):
+	if a == pod or (Fixture.SENDERS.has(b.kind) and a != pod):
 		return [b, a]
 	return [a, b]
 
@@ -1732,7 +1820,7 @@ func cable_ends(a: Fixture, b: Fixture) -> Array[Fixture]:
 ## Why a cable can't run from a to a new pylon at pos, or "" if it can.
 func can_link_pylon(a: Fixture, pos: Vector3, normal: Vector3) -> String:
 	if !Fixture.CABLE_HEIGHT.has(a.kind):
-		return "Cables tie to pylons, rigs, foundries and the pod."
+		return "Cables tie to pylons, rigs, taps, foundries and the pod."
 	if !can_build(&"pylon", pos, normal):
 		return "No room for a pylon there."
 	return cable_clear(a.cable_point(), pos + Terrain.up_at(pos) * Fixture.CABLE_HEIGHT.pylon)
@@ -1741,8 +1829,8 @@ func can_link_pylon(a: Fixture, pos: Vector3, normal: Vector3) -> String:
 func can_flip(link: Link) -> String:
 	if link.to == pod:
 		return "The pod only takes cables in."
-	if link.from.kind == &"drill":
-		return "A rig only sends."
+	if Fixture.SENDERS.has(link.from.kind):
+		return "%s only sends." % ("A rig" if link.from.kind == &"drill" else "A tap")
 	return ""
 
 
@@ -1879,7 +1967,10 @@ func _tracer_for_all(from: Vector3, to: Vector3) -> void:
 ## time.
 func mine(ore: Fixture) -> void:
 	if ore.kind == &"deposit":
-		carried += 1
+		if ore.amount > 0:
+			ore.amount -= 1
+			ore.show_left()
+			carried += 1
 		return
 	carried += ore.amount
 	ores.erase(ore)
@@ -1917,6 +2008,8 @@ func _wire_armory_screen(armory: Fixture) -> void:
 	screen.describe = func(action: StringName) -> String:
 		if action == &"ammo":
 			return "[E] An ammo box (%d ore): carry it to a turret and E to fill it" % AMMO_COST
+		if action == &"flares":
+			return "[E] %d flares (%d ore): light, and keep spiders under, but not warm" % [FLARE_PACK, FLARE_COST]
 		return "[E] %s: %s" % [String(UPGRADES[action].name).capitalize(), UPGRADES[action].text]
 	screen.button = func(action: StringName) -> Array:
 		return _armory_button(action, Net.local_id())
@@ -1932,6 +2025,11 @@ func _armory_button(action: StringName, peer: int) -> Array:
 		if s.get("ammo_box", false):
 			return ["AMMO BOX       CARRYING ONE", false, true]
 		return ["AMMO BOX       %d ORE" % AMMO_COST, stock >= AMMO_COST, false]
+	if action == &"flares":
+		var flares_now: int = s.get("flares", 0)
+		if flares_now >= FLARES_MAX:
+			return ["FLARES %d/%d     FULL" % [flares_now, FLARES_MAX], false, true]
+		return ["FLARES %d/%d     %d ORE" % [flares_now, FLARES_MAX, FLARE_COST], stock >= FLARE_COST, false]
 	var label := ("%s" % UPGRADES[action].name).rpad(15)
 	var info: Dictionary = GEAR[action]
 	if equipped(action, peer):
@@ -1960,6 +2058,15 @@ func _armory_press(action: StringName, peer: int) -> String:
 		s.ammo_box = true
 		_tally(peer, &"ammo_boxes")
 		return "AMMO BOX: E ON A TURRET TO FILL IT."
+	if action == &"flares":
+		if s.get("flares", FLARES_MAX) >= FLARES_MAX:
+			return "YOU CAN'T CARRY MORE."
+		if stock < FLARE_COST:
+			return "NOT ENOUGH ORE IN THE BANK."
+		stock -= FLARE_COST
+		s.flares = mini(FLARES_MAX, s.flares + FLARE_PACK)
+		_tally(peer, &"flares_bought", FLARE_PACK)
+		return "FLARES: %d." % s.flares
 	if !GEAR.has(action):
 		return ""
 	for entry: Array in racked:
@@ -2311,32 +2418,51 @@ func _place_pod(at: Vector3) -> void:
 	_wire_pod_screen()
 
 
-## Big outcrops that never run out, on ground flat enough for a rig: one a
-## short walk from the pod, the rest spread out well away from it.
+## Vents, well out from the middle and spread round, on ground flat enough
+## for a tap: the further out, the more a tap on one makes.
+func _place_vents() -> void:
+	var spots: Array[Array] = terrain.surface_spots.duplicate()
+	_shuffle(spots)
+	for loose in [1.0, 0.8, 0.6]:
+		for spot in spots:
+			if vents.size() >= VENTS:
+				return
+			var p: Vector3 = spot[0]
+			var out := Vector2(p.x, p.z).length()
+			if out < VENT_RING.x * loose or out > VENT_RING.y or (spot[1] as Vector3).y < 0.94:
+				continue
+			if vents.any(func(v: Fixture) -> bool: return v.global_position.distance_to(p) < VENT_APART * loose):
+				continue
+			var vent := Fixture.make(&"vent", p - spot[1] * 0.1, spot[1])
+			var further := clampf((out - VENT_RING.x) / (VENT_RING.y - VENT_RING.x), 0.0, 1.0)
+			vent.power = snappedf(lerpf(VENT_POWER.x, VENT_POWER.y, further) + _rng.randf_range(-0.2, 0.2), 0.1)
+			add_child(vent)
+			_track(vent)
+			vents.push_back(vent)
+
+
+## Big outcrops of ore on ground flat enough for a rig, spread out, some
+## of them where you can walk to from the middle.
 func _place_deposits() -> void:
 	var spots: Array[Array] = terrain.surface_spots.duplicate()
 	_shuffle(spots)
-	for loose in [1.0, 0.7]:
-		_place_deposits_from(spots, 1, true, loose, DEPOSIT_NEAR.x, DEPOSIT_NEAR.y)
-	for loose in [1.0, 0.7, 0.5]:
-		_place_deposits_from(spots, 1, false, loose, DEPOSIT_NEAR.x, DEPOSIT_NEAR.y)
 	for loose in [1.0, 0.75]:
-		_place_deposits_from(spots, 1 + REACHABLE_DEPOSITS, true, loose, DEPOSIT_FAR, INF)
+		_place_deposits_from(spots, REACHABLE_DEPOSITS, true, loose)
 	for loose in [1.0, 0.75, 0.5]:
-		_place_deposits_from(spots, DEPOSITS, false, loose, DEPOSIT_FAR, INF)
+		_place_deposits_from(spots, DEPOSITS, false, loose)
 
 
-## Adds deposits till there are `want`, between near and far from the pod
-## (both eased by loose), and apart.
-func _place_deposits_from(spots: Array[Array], want: int, reachable_only: bool, loose: float, near: float, far: float) -> void:
+## Adds deposits till there are `want`, apart (eased by loose), and off
+## the vents.
+func _place_deposits_from(spots: Array[Array], want: int, reachable_only: bool, loose: float) -> void:
+	var middle: Vector3 = terrain.surface_point(Vector3.ZERO)[0]
 	for spot in spots:
 		if deposits.size() >= want:
 			break
 		var p: Vector3 = spot[0]
-		var from_pod := p.distance_to(pod.global_position)
-		if from_pod < near * loose or from_pod > far / loose:
+		if Vector2(p.x, p.z).length() > Terrain.FLOOR_RADIUS - 6.0:
 			continue
-		var crowded := false
+		var crowded := vents.any(func(v: Fixture) -> bool: return v.global_position.distance_to(p) < 10.0)
 		for deposit in deposits:
 			if deposit.global_position.distance_to(p) < DEPOSIT_APART * loose:
 				crowded = true
@@ -2344,11 +2470,13 @@ func _place_deposits_from(spots: Array[Array], want: int, reachable_only: bool, 
 		if crowded:
 			continue
 		if reachable_only:
-			var path := terrain.find_path(pod.global_position, p)
+			var path := terrain.find_path(middle, p)
 			if path.is_empty() or path[-1].distance_to(p) > 4.0:
 				continue
 		var up: Vector3 = (spot[1] + Terrain.up_at(p)).normalized()
 		var deposit := Fixture.make(&"deposit", p - up * 0.3, up)
+		deposit.amount = _rng.randi_range(DEPOSIT_ORE.x, DEPOSIT_ORE.y)
+		deposit.full_amount = deposit.amount
 		add_child(deposit)
 		_track(deposit)
 		deposits.push_back(deposit)
@@ -2361,10 +2489,8 @@ func _place_ore() -> void:
 		if ores.size() == SURFACE_ORE:
 			break
 		var p: Vector3 = spot[0]
-		if p.distance_to(pod.global_position) < 15.0:
-			continue
 		var crowded := false
-		for other: Fixture in ores + deposits:
+		for other: Fixture in ores + deposits + vents:
 			if other.global_position.distance_to(p) < 12.0:
 				crowded = true
 				break
@@ -2450,6 +2576,15 @@ func _debug_setup() -> void:
 		build(&"drill", nearest.global_position, nearest.normal)
 		var spot: Array = terrain.surface_point(nearest.global_position + Fixture.upright(nearest.normal).x * 7.0)
 		place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, nearest.global_position)
+	if _args.has("vent"):
+		# Debug: by the nearest vent, with a tap on the next nearest.
+		var near := vents.duplicate()
+		near.sort_custom(func(a: Fixture, b: Fixture) -> bool: return a.global_position.distance_to(pod.global_position) < b.global_position.distance_to(pod.global_position))
+		stock += Fixture.COST[&"tap"]
+		build(&"tap", near[1].global_position, near[1].normal)
+		var by: Fixture = near[1] if _args.vent == "tap" else near[0]
+		var spot: Array = terrain.surface_point(by.global_position + Fixture.upright(by.normal).x * 7.0)
+		place_player(spot[0] + Terrain.up_at(spot[0]) * 0.3, by.global_position)
 	await get_tree().physics_frame
 	var space := get_world_3d().direct_space_state
 	if _args.has("defence"):
@@ -2529,11 +2664,16 @@ func _debug_setup() -> void:
 		_relobbied = true
 		get_tree().create_timer(12.0).timeout.connect(func() -> void: lobby_act(&"to_lobby", []))
 	if _args.has("shot"):
-		await get_tree().create_timer(float(_args.get("shot_at", "3"))).timeout
-		var image := get_viewport().get_texture().get_image()
-		image.save_png(_args.shot)
-		print("saved ", _args.shot)
-		get_tree().quit()
+		_screenshot()
+
+
+## Debug: saves a screenshot a few seconds on, and quits.
+func _screenshot() -> void:
+	await get_tree().create_timer(float(_args.get("shot_at", "3"))).timeout
+	var image := get_viewport().get_texture().get_image()
+	image.save_png(_args.shot)
+	print("saved ", _args.shot)
+	get_tree().quit()
 
 
 ## Debug: a loaded turret at spot with a lamp beside it, and three

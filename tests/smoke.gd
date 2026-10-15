@@ -2,6 +2,7 @@ extends Node
 ## Headless smoke test. Generates a few maps and reports on them, then
 ## plays a mission roughly:
 ## - checks you stand on the ground;
+## - lands a short walk from a deposit, clear of the vents;
 ## - builds a drill rig on the deposit nearest the pod, cabled to a
 ##   foundry cabled to the pod, and lets them work for a minute and a half
 ##   in daylight, with a lab researching armour and an armory ordered to
@@ -14,6 +15,8 @@ extends Node
 ## - builds a loaded turret with a lamp and a row of barricades;
 ## - hammers up a blueprint, switches the rig off and on, and presses a
 ##   button on the pod's screen;
+## - builds a tap on a vent, which makes power only once it's cabled to
+##   the pod; digs a deposit out; buys flares;
 ## - falls with another soldier by, is revived, falls again and gives up
 ##   (losing the armour), then falls alone and goes straight back to the
 ##   pod;
@@ -63,7 +66,13 @@ func _step(delta: float) -> bool:
 				return false
 			var below: Array = _game.terrain.surface_point(player.global_position)
 			var height: float = player.global_position.y - below[0].y
-			print("mission seed %d: %d deposits, %d ore" % [_game.seed_value, _game.deposits.size(), _game.ores.size()])
+			print("mission seed %d: %d deposits (%s ore), %d ore, vents %s; landed %.0f m from the nearest vent" % [_game.seed_value, _game.deposits.size(), _game.deposits.map(func(d: Fixture) -> int: return d.amount), _game.ores.size(), _game.vents.map(func(v: Fixture) -> String: return "%.1f/s %.0f m out" % [v.power, Vector2(v.global_position.x, v.global_position.z).length()]), _game.vents.reduce(func(m: float, v: Fixture) -> float: return minf(m, v.global_position.distance_to(_game.pod.global_position)), INF)])
+			if _game.vents.size() < 3 or _game.deposits.size() < 6:
+				push_error("too few vents or deposits")
+			var by_vent: String = _game.landing_problem(_game.vents[0].global_position + Vector3(4, 0, 0))
+			print("landing by a vent: %s" % by_vent)
+			if !by_vent.contains("vent") and !by_vent.contains("steep") and !by_vent.contains("rough"):
+				push_error("the pod could land right by a vent")
 			print("after %.1fs: on floor %s, %.2f m above the ground, battery %.1f, warmth %.0f lit by '%s'" % [_elapsed, player.is_on_floor(), height, _game.battery, _game.warmth, _game.lit_by])
 			if !player.is_on_floor() or absf(height) > 1.5:
 				push_error("player isn't standing on the ground")
@@ -217,9 +226,9 @@ func _step(delta: float) -> bool:
 			var flipped := cable.from == far and cable.to == pylon
 			_game.handle(Net.local_id(), &"flip", [_game.links[1].net_id])
 			var links_before := _game.links.size()
-			_game.handle(Net.local_id(), &"link", [_game.pod.net_id, far.net_id])
+			_game.handle(Net.local_id(), &"link", [_game.pod.net_id, pylon.net_id])
 			var backwards: Link = _game.links[-1]
-			print("laid a cable from the pod to a pylon: it runs into the pod %s" % [_game.links.size() == links_before + 1 and backwards.from == far and backwards.to == _game.pod])
+			print("laid a cable from the pod to a pylon: it runs into the pod %s (%s)" % [_game.links.size() == links_before + 1 and backwards.from == pylon and backwards.to == _game.pod, _game.can_link(_game.pod, pylon)])
 			if _game.links.size() != links_before + 1 or backwards.to != _game.pod:
 				push_error("a cable laid from the pod didn't turn round into it")
 			_game.remove_link(backwards)
@@ -233,6 +242,39 @@ func _step(delta: float) -> bool:
 			print("switched the rig off and on: %s, %s" % [off, _rig.enabled])
 			if !off or !_rig.enabled:
 				push_error("the commander couldn't switch the rig")
+			var vent: Fixture = _game.vents[0]
+			_game.stock += Fixture.COST[&"tap"]
+			var tap := _game.build(&"tap", vent.global_position, vent.normal)
+			_game._light_check = 0.0
+			_game._simulate(0.0)
+			var alone := [tap.stalled, _game.power_in]
+			var tap_cable := _game.add_link(tap, _game.pod)
+			_game._light_check = 0.0
+			_game._simulate(0.0)
+			var tied := [tap.stalled, _game.power_in]
+			print("a tap on a %.1f/s vent: alone '%s', power in %.2f; cabled to the pod '%s', power in %.2f; can a cable run into it: %s" % [vent.power, alone[0], alone[1], tied[0], tied[1], _game.cable_ends(_game.pod, tap)[0] == tap])
+			if alone[0] != "no cable" or tied[0] != "" or absf(tied[1] - alone[1] - vent.power) > 0.01:
+				push_error("the tap's power went wrong")
+			_game.remove_link(tap_cable)
+			_game._remove_built(tap)
+			var deposit := _rig.deposit
+			var held := _game.carried
+			var had := deposit.amount
+			_game.mine(deposit)
+			var mined := [had - deposit.amount, _game.carried - held]
+			deposit.amount = 0
+			_game.mine(deposit)
+			_rig.drill(1.0, true)
+			print("mined a deposit with %d left: took %s; spent, mining gives %d more, the rig's %s" % [had, mined, _game.carried - held - 1, _rig.stalled])
+			if mined != [1, 1] or _game.carried != held + 1 or _rig.stalled != "spent":
+				push_error("deposits don't run out")
+			deposit.amount = had
+			_game.carried = held
+			_game._me().flares = 3
+			var flare_bank := _game.stock
+			print("flares at the armory: %s, now %d, %d ore" % [_game._armory_press(&"flares", Net.local_id()), _game.flares_left, flare_bank - _game.stock])
+			if _game.flares_left != Game.FLARES_MAX or flare_bank - _game.stock != Game.FLARE_COST:
+				push_error("buying flares went wrong")
 			_game.carried = 3
 			var stock := _game.stock
 			var screen := _game.pod.screen
@@ -296,6 +338,10 @@ func _step(delta: float) -> bool:
 			var walls := _game.built.filter(func(f: Fixture) -> bool: return f.kind == &"barricade")
 			print("defences: turret fired %d shots, barricades standing %d, worst hull %s" % [Fixture.MAGAZINE - turrets[0].ammo if !turrets.is_empty() else -1, walls.size(), walls.map(func(w: Fixture) -> int: return roundi(w.health)).min() if !walls.is_empty() else -1])
 			var flare_lit := _game.flares.any(func(f: Flare) -> bool: return f.global_position.distance_to(player.global_position) < 12.0)
+			var head: Vector3 = player.camera.global_position
+			print("by the flare: lit by '%s', warmed by '%s'" % [_game.lit_at(head), _game.lit_at(head, true)])
+			if _game.lit_at(head, true) == "flare":
+				push_error("a flare kept us warm")
 			print("flare thrown at our feet 30 s ago (we may have been shoved): still burning %s, flares left %d, pod hull %.0f" % [flare_lit, _game.flares_left, _game.pod.health])
 			if !flare_lit:
 				push_error("the flare didn't land and burn by us")

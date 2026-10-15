@@ -1,16 +1,19 @@
 class_name Lobby
 extends Node3D
-## Before the drop: the map from above, everyone who's in, and where the
-## pod will land. The leader clicks to pick the landing zone (somewhere
-## flat, away from the wall), can roll a new map, and drops the pod once
-## everyone's ready. WASD or dragging with the middle button pans, the
-## wheel zooms.
+## Before the drop: the map from above, as it'll be played, with its
+## deposits (and how much ore each holds) and vents (and what a tap on
+## each would make); everyone who's in; and where the pod will land. The
+## leader clicks to pick the landing zone (somewhere flat, away from the
+## wall, off the deposits and clear of the vents), can roll a new map, and
+## drops the pod once everyone's ready. WASD or dragging with the middle
+## button pans, the wheel zooms.
 
 const PAN_SPEED := 60.0
 const MIN_HEIGHT := 60.0
 const MAX_HEIGHT := 220.0
 const GOOD := Color(0.45, 1.0, 0.55)
 const BAD := Color(1.0, 0.35, 0.3)
+const VENT := Color(1.0, 0.6, 0.3)
 
 var game: Game
 var camera: Camera3D
@@ -46,6 +49,10 @@ func _ready() -> void:
 	add_child(_ring)
 	_pick_ring = RangeRing.new()
 	add_child(_pick_ring)
+	for vent in game.vents:
+		var clear := RangeRing.new()
+		add_child(clear)
+		clear.show_around(vent.global_position, Game.VENT_CLEAR, Color(VENT, 0.35), 0.4)
 	_place_camera()
 	game.terrain.wall_material.set_shader_parameter("reveal", 1.0e6)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -93,7 +100,7 @@ func _unhandled_input(event: InputEvent) -> void:
 						game.lobby_act(&"pick", [_hover])
 					else:
 						Sfx.play(&"cancel")
-						_note.text = "Too steep or rough there, or too near the wall."
+						_note.text = game.landing_problem(_hover)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		var scale := _height / get_viewport().get_visible_rect().size.y * 1.1
 		_move(Vector3(-event.relative.x, 0, -event.relative.y) * scale)
@@ -230,8 +237,22 @@ func _button(parent: Control, text: String, pressed: Callable) -> Button:
 
 
 func _draw_overlay() -> void:
-	if Net.pick == Vector3.INF or camera.is_position_behind(Net.pick):
-		return
-	var at := camera.unproject_position(Net.pick)
 	var font := _overlay.get_theme_default_font()
-	_overlay.draw_string(font, at + Vector2(-80, -28), "LANDING ZONE", HORIZONTAL_ALIGNMENT_CENTER, 160, 15, Hud.DAY_COLOR)
+	var from := _hover if _hover != Vector3.INF else Net.pick
+	for deposit in game.deposits:
+		_label(font, deposit.global_position + Vector3.UP * 3.0, "ORE %d" % deposit.amount, Hud.ORE_COLOR)
+	for vent in game.vents:
+		var text := "VENT +%.1f/s" % vent.power
+		if from != Vector3.INF:
+			text += "  %d m" % roundi(vent.global_position.distance_to(from))
+		_label(font, vent.global_position + Vector3.UP * 3.0, text, VENT)
+	if Net.pick != Vector3.INF:
+		_label(font, Net.pick + Vector3.UP * 6.0, "LANDING ZONE", Hud.DAY_COLOR)
+
+
+func _label(font: Font, at: Vector3, text: String, color: Color) -> void:
+	if camera.is_position_behind(at):
+		return
+	var spot := camera.unproject_position(at)
+	_overlay.draw_string_outline(font, spot + Vector2(-90, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 180, 14, 4, Color(0, 0, 0, 0.75))
+	_overlay.draw_string(font, spot + Vector2(-90, 0), text, HORIZONTAL_ALIGNMENT_CENTER, 180, 14, color)
