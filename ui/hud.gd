@@ -45,6 +45,7 @@ var _outcome_text: Label
 var _frost_material: ShaderMaterial
 var _hurt_material: ShaderMaterial
 var _pause: Control
+var _lobby_button: Button
 ## Where you stand, whether the sun reaches you at even steps over the next
 ## turn, refreshed every so often.
 var _forecast: Array[bool] = []
@@ -98,6 +99,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func set_paused(paused: bool) -> void:
 	get_tree().paused = paused and !Net.networked()
 	_pause.visible = paused
+	_lobby_button.visible = Net.leading()
 	var commanding := game.commander_view != null and game.commander_view.visible
 	if commanding:
 		visible = paused
@@ -150,13 +152,13 @@ func _build_pause() -> void:
 	effects.add_child(effects_slider)
 	column.add_child(effects)
 	for entry: Array in [["Resume", func() -> void: set_paused(false)],
-			["Leave" if Net.networked() else "New map", func() -> void:
+			["Back to the lobby", func() -> void:
 				get_tree().paused = false
-				if Net.networked():
-					Net.leave()
-					get_tree().change_scene_to_file("res://menu/menu.tscn")
-				else:
-					get_tree().reload_current_scene()],
+				game.lobby_act(&"to_lobby", [])],
+			["Leave" if Net.networked() else "Back to the menu", func() -> void:
+				get_tree().paused = false
+				Net.leave()
+				get_tree().change_scene_to_file("res://menu/menu.tscn")],
 			["Sound editor (F2)", func() -> void:
 				set_paused(false)
 				SoundEditor.toggle()],
@@ -167,6 +169,8 @@ func _build_pause() -> void:
 		button.add_theme_font_size_override("font_size", 20)
 		button.pressed.connect(entry[1])
 		column.add_child(button)
+		if entry[0] == "Back to the lobby":
+			_lobby_button = button
 	var panel := _panel(column, 24)
 	_place(panel, Vector2(0.5, 0.45), Vector2.ZERO, Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BOTH)
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -190,7 +194,7 @@ func _process(delta: float) -> void:
 	_notice.modulate.a = clampf(player.notice_time, 0.0, 1.0)
 	_outcome.visible = game.state != Game.State.PLAYING
 	if _outcome.visible:
-		_outcome_text.text = "%s\n\n[R] new asteroid    [Shift+R] same one" % game.outcome
+		_outcome_text.text = "%s\n\n%s" % [game.outcome, "Back to the lobby shortly, on a new asteroid." if Net.networked() else "[R] new asteroid    [Shift+R] same one"]
 	_overlay.queue_redraw()
 
 
@@ -337,7 +341,7 @@ func _update_bottom() -> void:
 	var labs := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"lab" and f.researching != &"").size()
 	_stock.custom_minimum_size.y = 92 + 22 * labs
 	_stock.queue_redraw()
-	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build    [RMB] cables"
+	var attack := "[LMB] fire    [RMB] aim" if game.player.weapon == &"gun" else "[LMB] smash / build"
 	_hint.text = "%s    %s%s[Q] flare    [G] ping    [E] use    [F] headlamp    [Esc] pause" % [attack, "[1/2/wheel] rifle/hammer    " if game.equipped(&"gun") else "", "[MMB] grapple    " if game.equipped(&"grapple") else ""]
 
 
@@ -377,7 +381,7 @@ func _draw_stock() -> void:
 	_stock.draw_string(font, Vector2(x, 12), "CARRYING", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
 	var carrying := ORE_COLOR if game.carried > 0 else DIM
 	_draw_gem(Vector2(x + 9, 34), 9.0, carrying)
-	_stock.draw_string(font, Vector2(x + 26, 44), "%d ore" % game.carried, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, carrying)
+	_stock.draw_string(font, Vector2(x + 26, 44), "%d ore%s" % [game.carried, "  + ammo box" if game.ammo_box else ""], HORIZONTAL_ALIGNMENT_LEFT, -1, 24, carrying if !game.ammo_box else DAY_COLOR)
 	_stock.draw_string(font, Vector2(x, 72), "FLARES", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
 	for i in Game.FLARES:
 		var at := Vector2(x + 7 + i * 18, 84)

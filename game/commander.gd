@@ -12,14 +12,18 @@ extends Node3D
 ## keeps placing), and right-click or Esc puts it away. Delete over a
 ## blueprint cancels it, refunding what's been paid.
 ##
-## Cables are the soldiers' to lay; here they show, arrowed the way they
-## run.
+## Cables: C (or the bar) picks up the cable tool. Click a pylon, rig,
+## foundry or the pod (built or a blueprint) to run one from it, then
+## another to tie it on, or open ground to put a pylon blueprint there for
+## it; either way it carries on from there, so a line of pylons is a click
+## each. Right-click lets go. A cable runs the way it's laid, turned round
+## if that'd be out of the pod or into a rig; F over one turns it, Delete
+## cuts it.
 ##
 ## Click something built to see how it's doing; P, or its button, switches
 ## it off or on. Right-click pings the spot for the soldiers. R opens the
-## research panel; G the armory's, to have gear made for each soldier. L,
-## twice, calls the launch: the pod lifts off a little later with
-## whoever's aboard; L again calls it off.
+## research panel. L, twice, calls the launch: the pod lifts off a little
+## later with whoever's aboard; L again calls it off.
 
 const PAN_SPEED := 40.0
 ## A cell of the research tree, and the gap left between its buttons.
@@ -63,11 +67,14 @@ var _research: Control
 var _research_buttons := {}
 var _research_note: Label
 var _research_queue: Label
-var _armory: Control
-var _armory_grid: GridContainer
-var _armory_note: Label
-## Whose rows the armory's grid has, to rebuild it when that changes.
-var _armory_peers: Array = []
+## The cable tool's out; what it's running a cable from, if anything; and
+## where a pylon's just been asked for, to carry on from once it's there.
+var cabling := false
+var _cable_from: Fixture
+var _cable_pending := Vector3.INF
+var _cable_button: Button
+## The cable under the mouse.
+var _hover_link: Link
 var _launch_button: Button
 ## Until when a second press of Launch goes ahead.
 var _launch_armed := 0.0
@@ -125,6 +132,7 @@ func leave() -> void:
 	_ghost.visible = false
 	_ring.hide_ring()
 	placing = &""
+	_cable_tool(false)
 	focus = null
 	game.terrain.wall_material.set_shader_parameter("reveal", 18.0)
 
@@ -157,6 +165,16 @@ func _process(delta: float) -> void:
 	_hover = hit.collider if !hit.is_empty() and placing == &"" and hit.collider is Fixture else null
 	if _hover and _hover.kind == &"deposit" and _hover.rig:
 		_hover = _hover.rig
+	if _hover and _hover.kind == &"ore":
+		_hover = null
+	_hover_link = _link_at(get_viewport().get_mouse_position()) if placing == &"" and !_hover else null
+	if !is_instance_valid(_cable_from):
+		_cable_from = null
+	if _cable_pending != Vector3.INF:
+		for plan in game.blueprints:
+			if plan.kind == &"pylon" and plan.global_position.distance_to(_cable_pending) < 0.5:
+				_cable_from = plan
+				_cable_pending = Vector3.INF
 	_aim_ghost(hit)
 	_refresh -= delta
 	if _refresh <= 0.0:
@@ -220,6 +238,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					return
 				if placing != &"":
 					_place(event.shift_pressed)
+				elif cabling:
+					_cable_click()
 				else:
 					focus = _hover if _hover and _hover.kind != &"deposit" and _hover.kind != &"ore" and !_hover.blueprint else null
 					_update_ui()
@@ -227,6 +247,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				if event.pressed:
 					if placing != &"":
 						_choose(&"")
+					elif cabling:
+						if _cable_from:
+							_cable_from = null
+							_cable_pending = Vector3.INF
+						else:
+							_cable_tool(false)
 					else:
 						var hit := _mouse_hit()
 						if !hit.is_empty():
@@ -247,21 +273,33 @@ func _unhandled_input(event: InputEvent) -> void:
 				_switch(_hover if _hover and Fixture.SWITCHED.has(_hover.kind) and !_hover.blueprint else focus)
 			KEY_R:
 				_show_panel(_research)
-			KEY_G:
-				_show_panel(_armory)
+			KEY_C:
+				_cable_tool(!cabling)
+			KEY_F:
+				if _hover_link:
+					var why := game.can_flip(_hover_link)
+					if why != "":
+						toast(why)
+					else:
+						Sfx.play(&"press")
+						game.act(&"flip", [_hover_link.net_id])
 			KEY_L:
 				_launch()
 			KEY_DELETE, KEY_BACKSPACE:
-				if _hover and _hover.blueprint:
+				if _hover_link:
+					Sfx.play(&"cancel")
+					game.act(&"unlink", [_hover_link.net_id])
+					toast("Cable cut.")
+				elif _hover and _hover.blueprint:
 					Sfx.play(&"cancel")
 					game.act(&"cancel", [_hover.net_id])
 					toast("%s blueprint cancelled, %s back." % [Fixture.NAMES[_hover.kind], Game.price(_hover.paid(), _hover.paid(true))])
 			KEY_ESCAPE:
-				if placing != &"" or focus or _research.visible or _armory.visible:
+				if placing != &"" or cabling or focus or _research.visible:
 					_choose(&"")
+					_cable_tool(false)
 					focus = null
 					_research.visible = false
-					_armory.visible = false
 				else:
 					return
 			_:
@@ -278,18 +316,75 @@ func _mouse_hit() -> Dictionary:
 	return get_world_3d().direct_space_state.intersect_ray(query)
 
 
-## Opens the research or armory panel, closing the other; or closes it.
 func _show_panel(panel: Control) -> void:
-	var open := !panel.visible
-	_research.visible = false
-	_armory.visible = false
-	panel.visible = open
+	panel.visible = !panel.visible
 	_update_ui()
 
 
 func _choose(kind: StringName) -> void:
 	placing = kind
 	_ghost.visible = false
+	if kind != &"":
+		_cable_tool(false)
+
+
+func _cable_tool(on: bool) -> void:
+	cabling = on
+	_cable_from = null
+	_cable_pending = Vector3.INF
+	if on:
+		_choose(&"")
+		toast("Click a pylon, rig, foundry or the pod to run a cable from it.")
+
+
+## A click with the cable tool: start a cable, tie it on, or put a pylon
+## down for it.
+func _cable_click() -> void:
+	if !_cable_from:
+		if _hover and Fixture.CABLE_HEIGHT.has(_hover.kind):
+			_cable_from = _hover
+			Sfx.play(&"latch")
+		else:
+			toast("Cables tie to pylons, rigs, foundries and the pod.")
+		return
+	if _hover and _hover != _cable_from:
+		var why := game.can_link(_cable_from, _hover)
+		if why != "":
+			toast(why)
+			return
+		Sfx.play(&"latch")
+		game.act(&"link", [_cable_from.net_id, _hover.net_id])
+		_marks.append([_hover.global_position, 0.0])
+		_cable_from = _hover
+		return
+	var hit := _mouse_hit()
+	if hit.is_empty() or hit.collider is Fixture:
+		return
+	var why := game.can_link_pylon(_cable_from, hit.position, hit.normal)
+	if why != "":
+		toast(why)
+		return
+	Sfx.play(&"place")
+	game.act(&"link_pylon", [_cable_from.net_id, hit.position, hit.normal])
+	_marks.append([hit.position, 0.0])
+	_cable_from = null
+	_cable_pending = hit.position
+
+
+## The cable nearest the mouse on screen, if one's close.
+func _link_at(mouse: Vector2) -> Link:
+	var best: Link = null
+	var nearest := 10.0
+	for link in game.links:
+		var a := _screen(link.start())
+		var b := _screen(link.end())
+		if a == Vector2.INF or b == Vector2.INF:
+			continue
+		var off := mouse.distance_to(Geometry2D.get_closest_point_to_segment(mouse, a, b))
+		if off < nearest:
+			nearest = off
+			best = link
+	return best
 
 
 ## Calls the launch, on a second press within a few seconds; or, counting
@@ -338,6 +433,8 @@ func _aim_ghost(hit: Dictionary) -> void:
 	var kind := placing
 	_ring.hide_ring()
 	_ghost_at = Vector3.INF
+	if cabling and _cable_from:
+		_ring.show_around(_cable_from.global_position, Link.RANGE, Color(Link.ORE, 0.8), 0.7)
 	if kind == &"":
 		_ghost.visible = false
 		return
@@ -454,10 +551,10 @@ func _build_ui() -> void:
 	var research := _button("Research\n[R]", Vector2(110, 92))
 	research.pressed.connect(func() -> void: _show_panel(_research))
 	bar.add_child(research)
-	var gear := _button("Armory\n[G]", Vector2(110, 92))
-	gear.pressed.connect(func() -> void: _show_panel(_armory))
-	gear.tooltip_text = "Have armories make gear for each soldier"
-	bar.add_child(gear)
+	_cable_button = _button("Cables\n[C]", Vector2(110, 92))
+	_cable_button.pressed.connect(func() -> void: _cable_tool(!cabling))
+	_cable_button.tooltip_text = "Run cables between pylons, rigs, foundries and the pod; on open ground, a new pylon"
+	bar.add_child(_cable_button)
 	_launch_button = _button("", Vector2(110, 92))
 	_launch_button.pressed.connect(_launch)
 	_launch_button.tooltip_text = "Lift off in %d s, with whoever's aboard. Whatever's banked then is the score; staying on gets you more, but every night's worse.
@@ -468,7 +565,7 @@ The engines spooling up tear bug holes open near the pod, and frenzied spiders c
 	column.add_child(bar_panel)
 
 	var help := _label(13, Hud.DIM)
-	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-0] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [L] launch  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
+	help.text = "[WASD / edges] pan  [wheel] zoom  [middle drag] pan  [Q/E] turn  |  [1-0] build  [wheel] turn it  [Ctrl+wheel] zoom  [Del] cancel blueprint  |  [C] cables  [F] turn one round  [Del] cut one  |  [L] launch  |  [click] inspect  [P] power  [right-click] ping  |  [X] leave the pod  [Esc] pause"
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(help)
 
@@ -500,7 +597,7 @@ The engines spooling up tear bug holes open near the pod, and frenzied spiders c
 		button.position = Vector2(at) * TREE_CELL
 		button.size = TREE_CELL - TREE_GAP
 		button.tooltip_text = Game.UPGRADES[upgrade].text + ("
-Gear: then made for each soldier at an armory (G)." if Game.GEAR.has(upgrade) else "")
+Gear: then each soldier gets their own at an armory." if Game.GEAR.has(upgrade) else "")
 		button.pressed.connect(func() -> void:
 			game.act(&"research", [upgrade])
 			Sfx.play(&"press"))
@@ -522,77 +619,6 @@ Gear: then made for each soldier at an armory (G)." if Game.GEAR.has(upgrade) el
 	_research.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_research.visible = false
 	_layer.add_child(_research)
-
-	var gear_rows := VBoxContainer.new()
-	gear_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	gear_rows.add_theme_constant_override("separation", 6)
-	var gear_title := _label(18)
-	gear_title.text = "ARMORY"
-	gear_rows.add_child(gear_title)
-	_armory_note = _label(13, Hud.DIM)
-	gear_rows.add_child(_armory_note)
-	_armory_grid = GridContainer.new()
-	_armory_grid.columns = 1 + Game.GEAR.size()
-	_armory_grid.add_theme_constant_override("h_separation", 6)
-	_armory_grid.add_theme_constant_override("v_separation", 6)
-	gear_rows.add_child(_armory_grid)
-	_armory = _panel(gear_rows)
-	_armory.anchor_left = 1.0
-	_armory.anchor_right = 1.0
-	_armory.offset_left = -24
-	_armory.offset_right = -24
-	_armory.offset_top = 20
-	_armory.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_armory.visible = false
-	_layer.add_child(_armory)
-
-
-## The armory's grid: a row per soldier, a button per piece of gear.
-func _build_armory_grid(peers: Array) -> void:
-	_armory_peers = peers
-	for child in _armory_grid.get_children():
-		child.queue_free()
-	_armory_grid.add_child(_label(13, Hud.DIM))
-	for item: StringName in Game.GEAR:
-		var head := _label(13, Hud.DIM)
-		head.text = Game.UPGRADES[item].name
-		head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_armory_grid.add_child(head)
-	for peer: int in peers:
-		var who := _label(15)
-		who.text = game.name_of(peer) + (" (you)" if peer == Net.local_id() else "")
-		who.set_meta("peer", peer)
-		_armory_grid.add_child(who)
-		for item: StringName in Game.GEAR:
-			var info: Dictionary = Game.GEAR[item]
-			var button := _button("", Vector2(118, 46))
-			button.add_theme_font_size_override("font_size", 12)
-			button.tooltip_text = "%s\nMade for one soldier: %s, %ds." % [Game.UPGRADES[item].text, Game.price(info.cost, info.alloy), info.time]
-			button.set_meta("item", item)
-			button.set_meta("peer", peer)
-			button.pressed.connect(func() -> void:
-				game.act(&"order", [item, peer])
-				Sfx.play(&"press"))
-			_armory_grid.add_child(button)
-
-
-## How a soldier's piece of gear stands: its button's text, and colour.
-func _gear_line(item: StringName, peer: int) -> Array:
-	var info: Dictionary = Game.GEAR[item]
-	if game.equipped(item, peer):
-		return ["WORN", Color(SELECTED, 0.8)]
-	if game.racked.any(func(entry: Array) -> bool: return entry[0] == item and entry[1] == peer):
-		return ["MADE\nwaiting at an armory", Hud.DAY_COLOR]
-	var armory := game.making(item, peer)
-	if armory:
-		return ["%d%%%s\nclick to cancel" % [roundi(armory.research_time / info.time * 100.0), "  NO POWER" if armory.unpowered else ("  OFF" if !armory.enabled else "")], Hud.DAY_COLOR]
-	var cost := Game.price(info.cost, info.alloy)
-	for i in game.orders.size():
-		if game.orders[i][0] == item and game.orders[i][1] == peer:
-			return ["ORDERED %d\n%s" % [i + 1, cost if game.has(item) else "awaiting research"], Hud.FUEL_COLOR]
-	if !game.has(item):
-		return [cost + "\nneeds research", Color(1, 1, 1, 0.5)]
-	return [cost, Color.WHITE]
 
 
 ## Lines from each upgrade to what it opens up.
@@ -647,6 +673,7 @@ func _update_ui() -> void:
 		_focus_label.text = "%s   %s" % [_name(focus).to_upper(), _describe(focus)]
 		_power_button.visible = Fixture.SWITCHED.has(focus.kind)
 		_power_button.text = "Switch off [P]" if focus.enabled else "Switch on [P]"
+	_cable_button.modulate = Hud.DAY_COLOR if cabling else Color.WHITE
 	_launch_button.text = "Call off\n[L]" if game.launch_at < INF else "Launch\n[L]"
 	_launch_button.modulate = Hud.ALERT if game.launch_at < INF or Time.get_ticks_msec() / 1000.0 < _launch_armed else Color.WHITE
 	for kind in _build_buttons:
@@ -664,20 +691,6 @@ func _update_ui() -> void:
 		var queued := game.research_queue.map(func(id: StringName) -> String: return String(Game.UPGRADES[id].name).capitalize())
 		_research_queue.text = "Queue: %s" % (" > ".join(queued) if !queued.is_empty() else "empty")
 		_research.get_child(0).get_child(2).queue_redraw()
-	if _armory.visible:
-		var peers := game.bodies.keys()
-		peers.sort()
-		if peers != _armory_peers:
-			_build_armory_grid(peers)
-		var armories := game.built.filter(func(f: Fixture) -> bool: return f.kind == &"armory")
-		var idle := armories.filter(func(f: Fixture) -> bool: return f.researching == &"" and f.enabled).size()
-		_armory_note.text = "Click to order gear for a soldier (researching it first, if need be); click again to take it back.\nIt waits at the armory for them. Fall and not get back up, and you lose what you wore.\n%s" % ("No armory yet: build one to make gear." if armories.is_empty() else "%d armor%s, %d idle." % [armories.size(), "y" if armories.size() == 1 else "ies", idle])
-		for child in _armory_grid.get_children():
-			if child is Button and child.has_meta("item"):
-				var line := _gear_line(child.get_meta("item"), child.get_meta("peer"))
-				(child as Button).text = line[0]
-				(child as Button).modulate = line[1]
-				(child as Button).disabled = line[0] == "WORN"
 
 
 func _name(fixture: Fixture) -> String:
@@ -796,7 +809,30 @@ func _draw_overlay() -> void:
 		var a := _screen(link.start())
 		var b := _screen(link.end())
 		if a != Vector2.INF and b != Vector2.INF:
+			if link == _hover_link:
+				_overlay.draw_line(a, b, Color(SELECTED, 0.7), 4.0)
+				_text(font, (a + b) * 0.5 + Vector2(0, -14), "[F] turn round   [Del] cut", 13, SELECTED)
 			_arrows(a, b, PLAN if link.blueprint else Color(Link.ORE, 0.8))
+	if cabling and _cable_from:
+		var a := _screen(_cable_from.cable_point())
+		var mouse := get_viewport().get_mouse_position()
+		var why := ""
+		if _hover and _hover != _cable_from:
+			why = game.can_link(_cable_from, _hover)
+			mouse = _screen(_hover.cable_point())
+		else:
+			var hit := _mouse_hit()
+			why = "" if hit.is_empty() else game.can_link_pylon(_cable_from, hit.position, hit.normal)
+		if a != Vector2.INF and mouse != Vector2.INF:
+			var color := Color(Link.ORE, 0.9) if why == "" else Color(Hud.ALERT, 0.8)
+			_overlay.draw_line(a, mouse, color, 2.5)
+			_text(font, mouse + Vector2(0, 24), "new pylon" if why == "" and !(_hover and _hover != _cable_from) else why, 13, color)
+	elif cabling:
+		for fixture: Fixture in game.built + game.blueprints + [game.pod]:
+			if Fixture.CABLE_HEIGHT.has(fixture.kind):
+				var at := _screen(fixture.cable_point())
+				if at != Vector2.INF:
+					_overlay.draw_arc(at, 9.0, 0, TAU, 20, Color(Link.ORE, 0.6), 2.0)
 	for mark: Array in _marks:
 		var at := _screen(mark[0])
 		if at != Vector2.INF:

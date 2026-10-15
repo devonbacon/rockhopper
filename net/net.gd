@@ -3,6 +3,12 @@ extends Node
 ## player; a dedicated server (--server) has none; clients mirror the
 ## server. Every RPC lives on this autoload, so its path is the same on
 ## every peer.
+##
+## Each mission starts in the lobby, on the map it'll be played on: the
+## leader (whoever's been connected longest) picks where the pod lands,
+## everyone says they're ready, and the leader drops it. The leader can
+## send everyone back to the lobby mid-mission, and a finished mission
+## goes back to it on a new map.
 
 enum Mode { SOLO, HOST, SERVER, CLIENT }
 
@@ -19,6 +25,13 @@ var role := &"soldier"
 ## peer id -> {name, role}
 var peers := {}
 var game: Game
+## The lobby: who leads, who's ready (peer id -> true), and where the
+## leader means to land; and where the pod's landed, once it has (INF in
+## the lobby).
+var leader := 0
+var ready_peers := {}
+var pick := Vector3.INF
+var landing := Vector3.INF
 ## A hash of the game's scripts and shaders: a client and server must match.
 var version := ""
 ## Why the last game ended, for the menu to show.
@@ -93,6 +106,7 @@ func start_server(port: int, dedicated: bool) -> Error:
 	peers.clear()
 	if !dedicated:
 		peers[1] = {name = player_name, role = role}
+	_update_leader()
 	print("serving on port %d, seed %d, build %s" % [port, seed_value, version])
 	_start_game()
 	return OK
@@ -120,16 +134,45 @@ func leave() -> void:
 	mode = Mode.SOLO
 	peers.clear()
 	seed_value = 0
+	leader = 0
+	ready_peers.clear()
+	pick = Vector3.INF
+	landing = Vector3.INF
 
 
-## Server: a new mission for everyone, on a new seed.
-func restart() -> void:
+func leading() -> bool:
+	return mode == Mode.SOLO or leader == local_id()
+
+
+## Server (or solo): everyone back to the lobby, on a new map.
+func new_map() -> void:
 	seed_value = randi()
+	to_lobby()
+
+
+## Server (or solo): everyone back to the lobby, on the same map.
+func to_lobby() -> void:
 	start_time = 0.0
-	for id in peers:
-		if id != 1:
-			welcome.rpc_id(id, seed_value, 0.0)
+	pick = Vector3.INF
+	landing = Vector3.INF
+	ready_peers.clear()
+	if networked():
+		for id in peers:
+			if id != 1:
+				welcome.rpc_id(id, seed_value, 0.0, Vector3.INF)
+		share_lobby()
 	_start_game()
+
+
+func _update_leader() -> void:
+	if !peers.has(leader):
+		leader = peers.keys()[0] if !peers.is_empty() else 0
+
+
+## Server: tells everyone how the lobby stands.
+func share_lobby() -> void:
+	if networked() and authority():
+		lobby_state.rpc(leader, ready_peers, pick)
 
 
 func _start_game() -> void:
@@ -163,9 +206,15 @@ func _on_peer_disconnected(id: int) -> void:
 	if !multiplayer.is_server() or !peers.has(id):
 		return
 	peers.erase(id)
+	ready_peers.erase(id)
+	_update_leader()
 	roster.rpc(peers)
+	share_lobby()
 	if is_instance_valid(game):
 		game.remove_soldier(id)
+	# Everyone's gone: a fresh lobby for whoever comes next.
+	if mode == Mode.SERVER and peers.is_empty() and landing != Vector3.INF:
+		new_map()
 
 
 @rpc("any_peer", "reliable")
@@ -179,9 +228,11 @@ func hello(name: String, chosen_role: StringName, client_version: String) -> voi
 				multiplayer.multiplayer_peer.disconnect_peer(id))
 		return
 	peers[id] = {name = name, role = chosen_role}
+	_update_leader()
 	print("%s joined as %s" % [name, chosen_role])
-	welcome.rpc_id(id, seed_value, game.time if game else 0.0)
+	welcome.rpc_id(id, seed_value, game.time if game else 0.0, landing)
 	roster.rpc(peers)
+	share_lobby()
 
 
 @rpc("authority", "reliable")
@@ -191,10 +242,33 @@ func turned_away(server_version: String) -> void:
 
 
 @rpc("authority", "reliable")
-func welcome(seed_from_server: int, time: float) -> void:
+func welcome(seed_from_server: int, time: float, landed_at: Vector3) -> void:
 	seed_value = seed_from_server
 	start_time = time
+	landing = landed_at
 	_start_game()
+
+
+@rpc("authority", "reliable")
+func lobby_state(new_leader: int, now_ready: Dictionary, picked: Vector3) -> void:
+	leader = new_leader
+	ready_peers = now_ready
+	pick = picked
+
+
+## Client to server: a lobby choice (or the leader's call back to it).
+@rpc("any_peer", "reliable")
+func lobby_request(action: StringName, args: Array) -> void:
+	if is_instance_valid(game):
+		game.lobby_handle(multiplayer.get_remote_sender_id(), action, args)
+
+
+## Server to clients: the pod's coming down here.
+@rpc("authority", "reliable")
+func land(at: Vector3) -> void:
+	landing = at
+	if is_instance_valid(game):
+		game.begin_landing(at)
 
 
 @rpc("authority", "reliable")

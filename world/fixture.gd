@@ -62,7 +62,7 @@ const SLOPE := 20.0
 const NOISE := {&"pod": 5.0, &"drill": 20.0, &"foundry": 30.0, &"lab": 8.0, &"turret": 25.0, &"armory": 12.0}
 const SWITCHED: Array[StringName] = [&"lamp", &"drill", &"lab", &"foundry", &"turret", &"armory"]
 ## Where cables tie on, above the base.
-const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4, &"turret": 3.4}
+const CABLE_HEIGHT := {&"pod": 3.7, &"drill": 3.8, &"foundry": 3.4, &"pylon": 4.4}
 
 var kind: StringName
 var net_id := 0
@@ -250,7 +250,6 @@ func accepts(item: StringName) -> bool:
 	match kind:
 		&"foundry": return item == &"ore" and ore_in < BIN
 		&"pylon": return holding.size() < PYLON_HOLDS
-		&"turret": return item == &"ore" and ammo <= MAGAZINE - ROUNDS_PER_ORE
 		&"pod": return true
 	return false
 
@@ -651,6 +650,30 @@ func _build_armory() -> void:
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(2.4, 1.9, 1.6)
 	_add_collider(shape, Vector3(0, 0.95, 0))
+	# Ammo boxes stacked on the left side.
+	var olive := _material(Color(0.32, 0.36, 0.2), 0.3, 0.6)
+	for i in 3:
+		var crate := BoxMesh.new()
+		crate.size = Vector3(0.45, 0.32, 0.6)
+		_add_mesh(crate, olive, Vector3(-1.45, 0.16 + i * 0.33, -0.3 + (i % 2) * 0.4))
+	if blueprint:
+		return
+	# Soldiers order their own gear, and grab ammo, at the screen on the
+	# right side.
+	var out := Vector3.RIGHT
+	var screen_basis := Basis(Vector3.UP.cross(out), Vector3.UP, out)
+	screen = Screen.new()
+	screen.title = "ARMORY  //  FAB-7"
+	screen.size_m = Vector2(1.3, 1.02)
+	screen.pixels = Vector2i(640, 500)
+	screen.button_height = 34.0
+	screen.button_font = 20
+	screen.buttons.assign(Game.GEAR.keys() + [&"ammo"])
+	var frame := BoxMesh.new()
+	frame.size = Vector3(screen.size_m.x + 0.1, screen.size_m.y + 0.1, 0.05)
+	_add_mesh(frame, dark, Vector3(1.22, 1.0, 0)).basis = screen_basis
+	screen.transform = Transform3D(screen_basis, Vector3(1.22, 1.0, 0) + out * 0.03)
+	add_child(screen)
 
 
 func _build_battery() -> void:

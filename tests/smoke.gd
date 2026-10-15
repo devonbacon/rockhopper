@@ -87,15 +87,10 @@ func _step(delta: float) -> bool:
 						break
 			if _lab and _armory:
 				print("lab: %s" % _game.queue_research(&"armour"))
-				var me := Net.local_id()
-				_game.handle(me, &"order", [&"armour", me])
-				var by_soldier := _game.orders.size()
-				_game.commander_peer = me
-				_game.handle(me, &"order", [&"armour", me])
-				_game.commander_peer = 0
-				print("armour ordered by a soldier: %d orders; by the commander: %s" % [by_soldier, _game.orders])
-				if by_soldier != 0 or _game.orders != [[&"armour", me]]:
-					push_error("ordering gear went wrong")
+				var early: String = _game._armory_press(&"armour", Net.local_id())
+				print("armour ordered at the armory before it's researched: %s; orders %s" % [early, _game.orders])
+				if !_game.orders.is_empty():
+					push_error("ordered gear that wasn't researched")
 			else:
 				push_error("couldn't place a lab and an armory by the pod")
 			_stock_before = _game.stock
@@ -126,6 +121,14 @@ func _step(delta: float) -> bool:
 			if player.zip != _game.links[1]:
 				push_error("didn't carry on through the junction")
 			player.let_go()
+			_phase = 7
+		7:
+			if _elapsed < 50.0:
+				return false
+			var reply: String = _game._armory_press(&"armour", Net.local_id())
+			print("armour researched %s; ordered at the armory: %s; orders %s" % [_game.has(&"armour"), reply, _game.orders])
+			if _game.orders.is_empty() and _game.making(&"armour", Net.local_id()) == null:
+				push_error("ordering researched gear at the armory went wrong")
 			_phase = 2
 		2:
 			if _elapsed < 94.0:
@@ -135,7 +138,7 @@ func _step(delta: float) -> bool:
 				push_error("no alloy reached the pod")
 			var racked := _game.racked.duplicate(true)
 			var health_before := _game.max_health()
-			_game.handle(Net.local_id(), &"gear_up", [_armory.net_id])
+			print("collecting: %s" % _game._armory_press(&"armour", Net.local_id()))
 			print("research: armour %s; then made: racked %s, orders %s; geared up: wearing %s, max health %.0f -> %.0f" % [_game.has(&"armour"), racked, _game.orders, _game._me().gear, health_before, _game.max_health()])
 			if !_game.has(&"armour"):
 				push_error("the lab didn't finish its research")
@@ -157,22 +160,25 @@ func _step(delta: float) -> bool:
 			_game.health = -10.0
 			_game._look_after(me, 0.01)
 			var fell := _game.down_left
+			_game._look_after(me, 600.0)
+			var still_down := _game.down_left >= 0.0
 			_game.handle(me, &"mine", [0])
 			_game.handle(999, &"revive", [me])
 			var revived := [_game.down_left, _game.health]
 			_game.health = -10.0
 			_game._look_after(me, 0.01)
-			var wore := _game.equipped(&"armour")
-			_game.handle(me, &"give_up", [])
-			var gave_up := [_game.down_left, _game.health]
-			print("wearing armour when we gave up: %s; after: %s" % [wore, _game.equipped(&"armour")])
-			if !wore or _game.equipped(&"armour"):
-				push_error("giving up didn't cost the armour")
+			_game.stats[999].health = -10.0
+			_game._look_after(999, 0.01)
+			_game._simulate(0.01)
+			var wiped := [_game.state, _game.outcome]
+			_game.state = Game.State.PLAYING
+			_game.outcome = ""
+			_game._end_in = INF
 			_game.remove_soldier(999)
-			_game.health = -10.0
-			_game._look_after(me, 0.01)
-			print("fell with a second soldier by: down %.0f s; revived: down %s, health %.0f; fell and gave up: down %s, health %.0f; alone, fell: down %s" % [fell, revived[0], revived[1], gave_up[0], gave_up[1], _game.down_left])
-			if fell <= 0.0 or revived[0] >= 0.0 or revived[1] <= 0.0 or gave_up[0] >= 0.0 or gave_up[1] < Game.HEALTH or _game.down_left >= 0.0:
+			_game.stats[me].down = -1.0
+			_game.health = Game.HEALTH
+			print("fell with a second soldier by: down %s, still down 10 min on %s; revived: down %s, health %.0f; both down: %s" % [fell >= 0.0, still_down, revived[0], revived[1], wiped])
+			if fell < 0.0 or !still_down or revived[0] >= 0.0 or revived[1] <= 0.0 or wiped[0] != Game.State.LOST:
 				push_error("falling and reviving went wrong")
 			var plan_spot: Array = _game.terrain.surface_point(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 12.0)
 			var plan := _game.place_blueprint(&"pylon", plan_spot[0], plan_spot[1])
@@ -183,6 +189,10 @@ func _step(delta: float) -> bool:
 			if !built:
 				push_error("hammering didn't put the blueprint up")
 			var pylon: Fixture = _game.built[-1]
+			_game.handle(Net.local_id(), &"link_pylon", [pylon.net_id, pylon.global_position + Vector3(6, 0, 0), Vector3.UP])
+			if _game.links.size() != 2:
+				push_error("a soldier laid a cable")
+			_game.commander_peer = Net.local_id()
 			var reached := false
 			for i in 16:
 				var out := pylon.global_position + (Fixture.upright(pylon.normal).x * cos(i * 0.4) + Fixture.upright(pylon.normal).z * sin(i * 0.4)) * 10.0
@@ -216,10 +226,6 @@ func _step(delta: float) -> bool:
 			print("flipped it: %s; the pod's cable stays in: %s" % [flipped, _game.links[1].to == _game.pod])
 			if !flipped or _game.links[1].to != _game.pod:
 				push_error("flipping went wrong")
-			_game.commander_peer = Net.local_id()
-			_game.handle(Net.local_id(), &"flip", [cable.net_id])
-			if cable.from != far:
-				push_error("the commander turned a cable round")
 			_game.handle(Net.local_id(), &"switch", [_rig.net_id])
 			var off := !_rig.enabled
 			_game.handle(Net.local_id(), &"switch", [_rig.net_id])
@@ -240,11 +246,40 @@ func _step(delta: float) -> bool:
 			if _game.stock != stock + 3:
 				push_error("pressing the pod's screen didn't hand in what we carried")
 			print(_game.debug_defence(_game.pod.global_position + Fixture.upright(_game.pod.normal).z * 8.0, _game.pod.global_position))
+			var turret: Fixture = null
+			for fixture in _game.built:
+				if fixture.kind == &"turret":
+					turret = fixture
+			var around := Fixture.upright(_game.pod.normal)
+			for i in 32:
+				if turret:
+					break
+				var spot: Array = _game.terrain.surface_point(_game.pod.global_position + (around.x * cos(i * 0.7) + around.z * sin(i * 0.7)) * (7.0 + i * 0.4))
+				if _game.can_build(&"turret", spot[0], spot[1]):
+					_game.stock += Fixture.COST[&"turret"]
+					_game.alloy += Fixture.ALLOY[&"turret"]
+					turret = _game.build(&"turret", spot[0], spot[1])
+			if !turret:
+				push_error("couldn't place a turret to load")
+			else:
+				turret.ammo = 0
+				_game.handle(Net.local_id(), &"load", [turret.net_id])
+				var empty_handed: int = turret.ammo
+				_game.stock += Game.AMMO_COST
+				var bank: int = _game.stock
+				print("ammo box: %s" % _game._armory_press(&"ammo", Net.local_id()))
+				var paid: int = bank - _game.stock
+				_game.handle(Net.local_id(), &"load", [turret.net_id])
+				print("turret loaded with nothing: %d; with an ammo box (%d ore): %d, still carrying one %s" % [empty_handed, paid, turret.ammo, _game.ammo_box])
+				if empty_handed != 0 or paid != Game.AMMO_COST or turret.ammo != Fixture.MAGAZINE or _game.ammo_box:
+					push_error("loading a turret from an ammo box went wrong")
 			var midnight := Sun.time_of(1.5 * PI)
 			while midnight < _game.time:
 				midnight += Sun.TURN
 			_game.time = midnight
 			_game.sun.set_time(_game.time)
+			# Nobody to get us up if we fall, and that'd end it.
+			_game.health = 1.0e6
 			print("skipped to midnight, t=%.0f, dark here: %s" % [_game.time, _game.lit_at(player.camera.global_position) == ""])
 			_game.handle(Net.local_id(), &"flare", [player.global_position + Vector3.UP * 1.6, Vector3.DOWN])
 			_phase = 3

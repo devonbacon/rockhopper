@@ -31,6 +31,9 @@ extends Node3D
 ## patches it up. Soldiers carry flares, which recharge, to light the dark
 ## for a while.
 ##
+## It starts in the lobby, over the map: the leader picks where the pod
+## lands, and it comes down there out of the sky (Net has the rest).
+##
 ## Networked, the server (or solo) runs all of that; clients mirror it from
 ## snapshots, and send what their soldier does as requests (act()). Every
 ## soldier has their own health, warmth and pockets (stats); health and the
@@ -79,9 +82,9 @@ const UPGRADES := {
 	&"cables": {name = "FAST CABLES", cost = 3, alloy = 2, time = 40.0, needs = &"drills", at = Vector2i(1, 6), text = "Cables carry ore and alloy twice as fast"},
 	&"lamps": {name = "EFFICIENT LAMPS", cost = 4, alloy = 0, time = 30.0, at = Vector2i(0, 7), text = "Lamps draw half the power"},
 }
-## Personal gear: once researched, the commander has an armory make it
-## for each soldier, one at a time, for this much; it waits there for
-## them to collect. Lost if you're not got back up when you fall.
+## Personal gear: once the commander's researched it, each soldier orders
+## their own at an armory's screen, paid from the bank when an armory
+## starts on it; it waits there for them to collect.
 const GEAR := {
 	&"gun": {cost = 2, alloy = 0, time = 12.0},
 	&"runners": {cost = 2, alloy = 0, time = 10.0},
@@ -91,6 +94,8 @@ const GEAR := {
 	&"armour": {cost = 1, alloy = 2, time = 18.0},
 }
 const ARMORY_DRAW := 0.6
+## An ammo box off an armory: what it costs, and it fills a turret.
+const AMMO_COST := 2
 ## Suit warmth, out of 100: how fast it's lost in the dark and regained in
 ## light.
 const COLD_RATE := 100.0 / 45.0
@@ -110,10 +115,9 @@ const HEALTH := 100.0
 ## Health comes back this fast once nothing's hurt you for a while.
 const HEAL_RATE := 4.0
 const HEAL_DELAY := 4.0
-## Seconds a fallen soldier lies down for, waiting to be revived, before
-## they're back at the pod; how long E's held on them to revive them, from
-## how near, and what they get back up with.
-const DOWN_TIME := 30.0
+## A fallen soldier lies where they fell till another gets them up: how
+## long E's held on them to, from how near, and what they get back up
+## with. With nobody left standing, the mission's lost.
 const REVIVE_TIME := 2.5
 const REVIVE_REACH := 2.5
 const REVIVE_HEALTH := 0.5
@@ -135,7 +139,7 @@ const SWEEP := 30.0
 const SNAPSHOT_EVERY := 0.05
 ## What soldiers and the commander ask for that goes in the playtest log
 ## as it happens; the rest is only counted.
-const NOTED_ACTIONS: Array[StringName] = [&"blueprint", &"cancel", &"switch", &"link", &"link_pylon", &"flip", &"unlink", &"pick_up", &"research", &"order", &"gear_up", &"launch", &"uncommand", &"ping"]
+const NOTED_ACTIONS: Array[StringName] = [&"blueprint", &"cancel", &"switch", &"link", &"link_pylon", &"flip", &"unlink", &"pick_up", &"research", &"launch", &"uncommand", &"ping"]
 ## Bytes per soldier, spider and flare in a fast snapshot.
 const SOLDIER_ROW := 23
 const SPIDER_ROW := 26
@@ -154,9 +158,13 @@ const POD_MEND := 1.5
 const POD_MEND_DELAY := 8.0
 ## Net ids below this are the world as generated, the same on every peer.
 const FIRST_SPAWNED_ID := 1000
+## The pod's drop: how long it takes, from how high; and how much flat,
+## level ground it needs round where it lands.
+const DROP_TIME := 7.0
+const DROP_HEIGHT := 150.0
+const LANDING_ROOM := 4.0
 
 ## Kept across a restart that keeps the seed.
-static var _last_seed := 0
 
 var state := State.PLAYING
 var outcome := ""
@@ -207,7 +215,9 @@ var hurt: float:
 	set(value): _me().hurt = value
 var flares_left: int:
 	get: return _me().flares
-## Seconds left lying down before you're back at the pod, or -1 standing.
+var ammo_box: bool:
+	get: return _me().get("ammo_box", false)
+## Whether you're lying down (0 or more) or standing (-1).
 var down_left: float:
 	get: return _me().get("down", -1.0)
 
@@ -251,6 +261,15 @@ var _link_turn := 0
 ## When the pod was last bitten, for the music.
 var _pod_hurt_at := -INF
 var _args := {}
+## Whether the pod's down and the mission's on; till then, the lobby (or
+## the drop).
+var landed := false
+static var _relobbied := false
+var lobby: Lobby
+var _drop_left := 0.0
+var _drop_to := Vector3.ZERO
+var _drop_fx: Node3D
+var _drop_camera: Camera3D
 ## Server: the playtest log, if it's keeping one.
 var metrics: Metrics
 
@@ -264,10 +283,9 @@ func _ready() -> void:
 		seed_value = Net.seed_value
 		time = Net.start_time
 	else:
-		seed_value = int(_args.seed) if _args.has("seed") else (_last_seed if _last_seed != 0 else randi())
+		seed_value = int(_args.seed) if _args.has("seed") else (Net.seed_value if Net.seed_value != 0 else randi())
+		Net.seed_value = seed_value
 		time = float(_args.get("time", "0"))
-	_last_seed = 0
-	_rng.seed = seed_value
 	_add_environment()
 	terrain = Terrain.new()
 	add_child(terrain)
@@ -275,12 +293,192 @@ func _ready() -> void:
 	sun = Sun.new()
 	sun.time = time
 	add_child(sun)
-	_place_pod()
+	sun.set_time(time)
+	# Debug arguments, solo, skip the lobby.
+	if Net.landing == Vector3.INF and !Net.networked() and !_args.is_empty():
+		Net.landing = default_landing()
+	if Net.landing != Vector3.INF:
+		begin_landing(Net.landing, false)
+	else:
+		lobby = Lobby.new()
+		lobby.game = self
+		add_child(lobby)
+		if _args.has("probe"):
+			# A scripted client: the leader lands near the middle once the
+			# others have had a moment to say they're ready.
+			get_tree().create_timer(2.0).timeout.connect(func() -> void:
+				if !lobby:
+					return
+				if !Net.leading():
+					lobby_act(&"ready", [true])
+					return
+				await get_tree().create_timer(3.0).timeout
+				if lobby:
+					lobby_act(&"pick", [default_landing()])
+					lobby_act(&"drop", []))
+
+
+## Somewhere open, flat and near the middle to land, for when nobody's
+## picked: the same for everyone on this map.
+func default_landing() -> Vector3:
+	var spots: Array[Array] = terrain.surface_spots.duplicate()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	for i in range(spots.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var swap: Array = spots[i]
+		spots[i] = spots[j]
+		spots[j] = swap
+	for spot in spots:
+		if Vector2(spot[0].x, spot[0].z).length() < 20.0 and spot[1].y > 0.97 and can_land(spot[0]):
+			return spot[0]
+	for spot in spots:
+		if can_land(spot[0]):
+			return spot[0]
+	return spots[0][0]
+
+
+## Whether the pod can come down at `at`: inside the wall, on level ground
+## with room round it.
+func can_land(at: Vector3) -> bool:
+	if Vector2(at.x, at.z).length() > Terrain.FLOOR_RADIUS - 12.0:
+		return false
+	var centre: Array = terrain.surface_point(at)
+	if (centre[1] as Vector3).y < 0.95:
+		return false
+	for i in 8:
+		var round_it: Array = terrain.surface_point(at + Vector3(cos(i * TAU / 8.0), 0, sin(i * TAU / 8.0)) * LANDING_ROOM)
+		if absf((round_it[0] as Vector3).y - (centre[0] as Vector3).y) > 1.2:
+			return false
+	return true
+
+
+## Lobby choices go to the server (or are made here, solo).
+func lobby_act(action: StringName, args: Array) -> void:
+	if Net.authority():
+		lobby_handle(Net.local_id(), action, args)
+	else:
+		Net.lobby_request.rpc_id(1, action, args)
+
+
+## Server: a lobby choice from peer, or the leader's call back to the
+## lobby.
+func lobby_handle(peer: int, action: StringName, args: Array) -> void:
+	var leads := Net.mode == Net.Mode.SOLO or peer == Net.leader
+	var in_lobby := pod == null
+	match action:
+		&"ready":
+			if in_lobby and !args.is_empty():
+				Net.ready_peers[peer] = bool(args[0])
+		&"pick":
+			if leads and in_lobby and !args.is_empty() and args[0] is Vector3 and can_land(args[0]):
+				Net.pick = args[0]
+		&"reroll":
+			if leads and in_lobby:
+				Net.new_map()
+				return
+		&"drop":
+			if leads and in_lobby and Net.pick != Vector3.INF:
+				var at := Net.pick
+				Net.landing = at
+				if Net.networked():
+					for id in Net.peers:
+						if id != Net.local_id():
+							Net.land.rpc_id(id, at)
+				begin_landing(at)
+		&"to_lobby":
+			if leads and !in_lobby:
+				_note(&"back_to_lobby", {by = name_of(peer)})
+				Net.to_lobby()
+				return
+	Net.share_lobby()
+
+
+## The pod comes down at `at`: everything that depends on where it lands
+## goes down, the same on every peer; and, unless it's already down (a
+## late joiner, or debugging), it drops out of the sky first.
+func begin_landing(at: Vector3, animate := true) -> void:
+	if pod:
+		return
+	if lobby:
+		lobby.queue_free()
+		lobby = null
+	_rng.seed = seed_value
+	_place_pod(at)
 	_place_deposits()
 	_place_ore()
 	_next_id = FIRST_SPAWNED_ID
 	if Net.authority() and (Net.networked() or _args.has("metrics")):
 		metrics = Metrics.new(self)
+	if !animate:
+		_touchdown()
+		return
+	_drop_left = DROP_TIME
+	_drop_to = pod.position
+	pod.position = _drop_to + Vector3.UP * DROP_HEIGHT
+	_drop_fx = Node3D.new()
+	var flame := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 1.4
+	cone.bottom_radius = 0.1
+	cone.height = 6.0
+	flame.mesh = cone
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = Color(1.0, 0.6, 0.2, 0.7)
+	glow.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	flame.material_override = glow
+	flame.position = Vector3(0, -3.2, 0)
+	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_drop_fx.add_child(flame)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.6, 0.25)
+	light.light_energy = 6.0
+	light.omni_range = 30.0
+	light.position = Vector3(0, -3.0, 0)
+	_drop_fx.add_child(light)
+	pod.add_child(_drop_fx)
+	if Net.has_local_player():
+		var out := Vector3(-_drop_to.x, 0, -_drop_to.z)
+		out = out.normalized() if out.length() > 1.0 else Vector3.FORWARD
+		var spot: Array = terrain.surface_point(_drop_to + out * 26.0)
+		_drop_camera = Camera3D.new()
+		_drop_camera.far = 2000.0
+		add_child(_drop_camera)
+		_drop_camera.global_position = (spot[0] as Vector3) + Vector3.UP * 3.0
+		_drop_camera.make_current()
+		Sfx.play(&"alarm")
+		Music.in_game = true
+
+
+## The pod's coming down: eases in over DROP_TIME, then it's down.
+func _drop(delta: float) -> void:
+	_drop_left -= delta
+	var t := clampf(1.0 - _drop_left / DROP_TIME, 0.0, 1.0)
+	var fall := 1.0 - pow(1.0 - t, 3.0)
+	pod.position = _drop_to + Vector3.UP * DROP_HEIGHT * (1.0 - fall)
+	pod.rotation.y = (1.0 - fall) * 1.5
+	if _drop_fx:
+		_drop_fx.scale = Vector3.ONE * (0.6 + 0.6 * (1.0 - fall))
+	if _drop_camera:
+		_drop_camera.look_at(pod.global_position + Vector3.UP * 2.0, Vector3.UP)
+	if _drop_left <= 0.0:
+		pod.position = _drop_to
+		pod.rotation.y = 0.0
+		sound(&"built", pod.global_position)
+		_touchdown()
+
+
+## Down: the mission starts, and everyone's beside the pod.
+func _touchdown() -> void:
+	landed = true
+	if _drop_fx:
+		_drop_fx.queue_free()
+		_drop_fx = null
+	if _drop_camera:
+		_drop_camera.queue_free()
+		_drop_camera = null
 	if Net.has_local_player():
 		var me := Net.local_id()
 		player = Player.new()
@@ -300,6 +498,10 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if !landed:
+		if pod:
+			_drop(delta)
+		return
 	if player:
 		_feed_music()
 	for ping in pings:
@@ -372,7 +574,8 @@ func _simulate(delta: float) -> void:
 					if armory.research_time >= GEAR[armory.researching].time:
 						racked.append([armory.researching, armory.made_for])
 						_note(&"gear_made", {item = armory.researching, soldier = name_of(armory.made_for)})
-						_announce("%s made for %s: collect it at the armory" % [String(UPGRADES[armory.researching].name).capitalize(), name_of(armory.made_for)], &"built")
+						_say_to(armory.made_for, "Your %s is made: collect it at the armory's screen" % String(UPGRADES[armory.researching].name).to_lower())
+						sound(&"built", armory.global_position)
 						armory.researching = &""
 	if state == State.PLAYING:
 		_run_queue()
@@ -386,7 +589,7 @@ func _simulate(delta: float) -> void:
 		_end_in -= delta
 		if _end_in <= 0.0 and Net.networked():
 			_end_in = INF
-			Net.restart()
+			Net.new_map()
 		return
 	for fixture in built:
 		if fixture.kind == &"drill":
@@ -407,6 +610,9 @@ func _simulate(delta: float) -> void:
 	for peer in bodies.keys():
 		if peer != commander_peer:
 			_look_after(peer, delta)
+	if !bodies.is_empty() and bodies.keys().all(func(peer: int) -> bool: return peer != commander_peer and is_down(bodies[peer])):
+		_end(State.LOST, "Everyone's down. Nobody's going home.")
+		return
 	if time >= launch_at:
 		var aboard := 1 if commander_peer != 0 else 0
 		for peer in bodies:
@@ -440,9 +646,6 @@ func _look_after(peer: int, delta: float) -> void:
 	var s: Dictionary = stats[peer]
 	var body: Node3D = bodies[peer]
 	if s.down >= 0.0:
-		s.down -= delta
-		if s.down <= 0.0:
-			_respawn(peer, "Nobody got to you in time. Back at the pod, without what you carried or wore.")
 		return
 	var head := body.global_position + Terrain.up_at(body.global_position) * 1.65
 	var light := lit_at(head)
@@ -465,18 +668,14 @@ func _look_after(peer: int, delta: float) -> void:
 		_fall(peer, "The spiders got you.")
 
 
-## A soldier's fallen: down where they are for DOWN_TIME, for another to
-## revive; or, with nobody else on their feet to, straight back to the pod.
+## A soldier's fallen: down where they are till another gets them up.
 func _fall(peer: int, why: String) -> void:
 	_tally(peer, &"falls")
 	_note(&"fell", {soldier = name_of(peer), why = why, position = bodies[peer].global_position, gear = stats[peer].gear})
-	var helpers := bodies.keys().filter(func(other: int) -> bool: return other != peer and other != commander_peer and !is_down(bodies[other]))
-	if helpers.is_empty():
-		_respawn(peer, why + " Back at the pod, without what you carried or wore.")
-		return
 	var s: Dictionary = stats[peer]
-	s.down = DOWN_TIME
+	s.down = 1.0
 	s.health = 0.0
+	_say_to(peer, why)
 	_show_down(peer, true)
 	sound(&"bite", bodies[peer].global_position)
 	_announce("%s is down! Hold E on them to get them up." % name_of(peer), &"alarm")
@@ -498,31 +697,14 @@ func name_of(peer: int) -> String:
 	return info.get("name", Net.player_name if peer == Net.local_id() else "Soldier")
 
 
-func _respawn(peer: int, why: String) -> void:
-	_tally(peer, &"respawns")
-	_note(&"respawned", {soldier = name_of(peer), why = why, carried = stats[peer].carried, gear = stats[peer].gear})
-	stats[peer] = _new_stats()
-	_show_down(peer, false)
-	var spot := _spawn_spot_by_pod(peer)
-	if peer == Net.local_id() and player:
-		place_player(spot, pod.global_position)
-		player._say(why)
-		Sfx.play(&"respawn")
-	else:
-		var body: Node3D = bodies[peer]
-		body.global_position = spot
-		if body is Avatar:
-			(body as Avatar).target_position = spot
-		Net.event.rpc_id(peer, &"respawn", [spot, why])
-
-
 func _unhandled_input(event: InputEvent) -> void:
 	if Net.networked():
 		return
 	if event is InputEventKey and event.pressed and !event.echo and event.physical_keycode == KEY_R and state != State.PLAYING:
 		if event.shift_pressed:
-			_last_seed = seed_value
-		get_tree().reload_current_scene()
+			Net.to_lobby()
+		else:
+			Net.new_map()
 
 
 func _me() -> Dictionary:
@@ -530,7 +712,7 @@ func _me() -> Dictionary:
 
 
 func _new_stats() -> Dictionary:
-	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0, gear = []}
+	return {health = HEALTH, warmth = 100.0, carried = 0, lit_by = "", hurt = 0.0, since_hurt = 99.0, flares = FLARES, flare_charge = 0.0, down = -1.0, gear = [], ammo_box = false}
 
 
 func _track(node: Node, id := 0) -> void:
@@ -603,10 +785,6 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 	if !stats.has(peer):
 		return
 	if stats[peer].get("down", -1.0) >= 0.0:
-		# Lying down, all you can do is give up.
-		if action == &"give_up":
-			_note(&"give_up", {by = name_of(peer)})
-			_respawn(peer, "Back at the pod, without what you carried or wore.")
 		return
 	_acting = peer
 	var target: Node = entities.get(args[0], null) if !args.is_empty() and args[0] is int else null
@@ -628,9 +806,10 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				sound(&"pick_up", target.global_position)
 				empty_rig(target)
 		&"load":
-			if target is Fixture and built.has(target) and target.kind == &"turret":
+			if target is Fixture and built.has(target) and target.kind == &"turret" and stats[peer].ammo_box and target.ammo < Fixture.MAGAZINE:
 				sound(&"pick_up", target.global_position)
-				load_turret(target)
+				stats[peer].ammo_box = false
+				target.ammo = Fixture.MAGAZINE
 		&"hand_in":
 			sound(&"hand_in", pod.global_position)
 			_tally(peer, &"ore_handed_in", stats[peer].carried)
@@ -649,20 +828,20 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 				target.enabled = !target.enabled
 		&"link":
 			var onto: Node = entities.get(args[1], null)
-			if peer != commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
+			if peer == commander_peer and target is Fixture and onto is Fixture and can_link(target, onto) == "":
 				sound(&"clank", onto.global_position)
 				var ends := cable_ends(target, onto)
 				add_link(ends[0], ends[1], 0, target.blueprint or onto.blueprint)
 		&"link_pylon":
-			if peer != commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
+			if peer == commander_peer and target is Fixture and can_link_pylon(target, args[1], args[2]) == "":
 				var new_pylon := place_blueprint(&"pylon", args[1], args[2], target.global_position)
 				var ends := cable_ends(target, new_pylon)
 				add_link(ends[0], ends[1], 0, true)
 		&"flip":
-			if peer != commander_peer and target is Link and can_flip(target) == "":
+			if peer == commander_peer and target is Link and can_flip(target) == "":
 				flip(target)
 		&"unlink":
-			if peer != commander_peer and target is Link:
+			if peer == commander_peer and target is Link:
 				sound(&"clank", (target.start() + target.end()) * 0.5)
 				remove_link(target)
 		&"string":
@@ -711,27 +890,6 @@ func handle(peer: int, action: StringName, args: Array) -> void:
 						commander_view.toast(reply)
 				else:
 					Net.event.rpc_id(peer, &"toast", [reply])
-		&"order":
-			if peer == commander_peer and args.size() == 2 and GEAR.has(args[0]) and stats.has(args[1]):
-				var reply := order_gear(args[0], args[1])
-				if peer == Net.local_id():
-					if commander_view:
-						commander_view.toast(reply)
-				else:
-					Net.event.rpc_id(peer, &"toast", [reply])
-		&"gear_up":
-			if target is Fixture and built.has(target) and target.kind == &"armory":
-				var s: Dictionary = stats[peer]
-				var got: Array[String] = []
-				for entry: Array in racked.duplicate():
-					if entry[1] == peer:
-						racked.erase(entry)
-						if !s.gear.has(entry[0]):
-							s.gear.append(entry[0])
-							got.append(String(UPGRADES[entry[0]].name).capitalize())
-				if !got.is_empty():
-					sound(&"pick_up", target.global_position)
-					_say_to(peer, "Geared up: %s" % ", ".join(got))
 		&"launch":
 			if peer == commander_peer:
 				if launch_at == INF:
@@ -784,11 +942,6 @@ func on_event(kind: StringName, args: Array) -> void:
 			var owner: Node = entities.get(args[0], null)
 			if owner and "screen" in owner and owner.screen:
 				_show_reply(owner, args[1])
-		&"respawn":
-			if player:
-				place_player(args[0], pod.global_position)
-				player._say(args[1])
-				Sfx.play(&"respawn")
 		&"toast":
 			if commander_view:
 				commander_view.toast(args[0])
@@ -828,7 +981,7 @@ func _say_to(peer: int, text: String) -> void:
 	if peer == Net.local_id():
 		if player:
 			player._say(text)
-	else:
+	elif Net.peers.has(peer):
 		Net.event.rpc_id(peer, &"say", [text])
 
 
@@ -837,7 +990,7 @@ func _announce(text: String, sound_name := &"announce") -> void:
 		hud.announce(text)
 	if Net.has_local_player():
 		Sfx.play(sound_name)
-	if Net.networked():
+	if Net.networked() and Net.authority():
 		for id in Net.peers:
 			if id != Net.local_id():
 				Net.event.rpc_id(id, &"announce", [text, sound_name])
@@ -847,7 +1000,7 @@ func _announce(text: String, sound_name := &"announce") -> void:
 func sound(sound_name: StringName, at := Vector3.INF) -> void:
 	if Net.has_local_player():
 		Sfx.play(sound_name, at)
-	if Net.networked():
+	if Net.networked() and Net.authority():
 		for id in Net.peers:
 			if id != Net.local_id():
 				Net.effect.rpc_id(id, &"sound", [sound_name, at])
@@ -973,7 +1126,7 @@ func _send_snapshots(delta: float) -> void:
 			continue
 		if !fast.is_empty():
 			var s: Dictionary = stats[id]
-			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt, s.flares, s.down]])
+			Net.snapshot.rpc_id(id, [fast, [s.health, s.warmth, s.carried, s.lit_by, s.hurt, s.flares, s.down, s.ammo_box]])
 		if !slow.is_empty():
 			Net.slow_snapshot.rpc_id(id, slow)
 
@@ -1051,6 +1204,8 @@ func _slow_state() -> Array:
 
 ## Client: the server's latest of everything that moves.
 func apply_snapshot(data: Array) -> void:
+	if !landed:
+		return
 	var f: Array = data[0]
 	time = f[0]
 	battery = f[1]
@@ -1141,11 +1296,14 @@ func apply_snapshot(data: Array) -> void:
 	s.hurt = mine[4]
 	s.flares = mine[5]
 	s.down = mine[6]
+	s.ammo_box = mine[7]
 
 
 ## Client: the server's latest of what's built, what ore's left, and what's
 ## been researched.
 func apply_slow(data: Array) -> void:
+	if !landed:
+		return
 	launch_at = data[6]
 	research_queue.assign(data[7])
 	orders = data[8]
@@ -1166,6 +1324,8 @@ func apply_slow(data: Array) -> void:
 			add_child(fixture)
 			_track(fixture, row[0])
 			built.push_back(fixture)
+			if fixture.screen:
+				_wire_armory_screen(fixture)
 		fixture.health = row[5]
 		if fixture.kind == &"lamp" and fixture.on != row[6]:
 			fixture.set_on(row[6])
@@ -1313,10 +1473,10 @@ func order_gear(item: StringName, peer: int) -> String:
 	var info: Dictionary = GEAR[item]
 	var gear_name := String(UPGRADES[item].name).capitalize()
 	if equipped(item, peer):
-		return "%s already has a %s." % [name_of(peer), gear_name]
+		return "You've got one."
 	for entry: Array in racked:
 		if entry[0] == item and entry[1] == peer:
-			return "It's made: %s can collect it at an armory." % name_of(peer)
+			return "It's made: collect it at an armory."
 	var armory := making(item, peer)
 	if armory:
 		armory.researching = &""
@@ -1328,10 +1488,7 @@ func order_gear(item: StringName, peer: int) -> String:
 			orders.erase(entry)
 			return "Order taken back."
 	orders.append([item, peer])
-	if !has(item) and !research_queue.has(item) and !researching(item):
-		queue_research(item)
-		return "Ordered; %s queued for research first." % gear_name
-	return "Ordered %s for %s." % [gear_name, name_of(peer)]
+	return "Ordered: the %s's made when an armory's free and the bank can pay." % gear_name.to_lower()
 
 
 ## Which armory's making item for peer, if any.
@@ -1425,6 +1582,8 @@ func build(kind: StringName, pos: Vector3, normal: Vector3, facing_from := Vecto
 	add_child(fixture)
 	_track(fixture)
 	built.push_back(fixture)
+	if fixture.screen:
+		_wire_armory_screen(fixture)
 	_light_check = 0.0
 	return fixture
 
@@ -1516,7 +1675,7 @@ func deposit_at(pos: Vector3) -> Fixture:
 func pick_up(fixture: Fixture) -> void:
 	stock += Fixture.COST[fixture.kind]
 	alloy += Fixture.ALLOY.get(fixture.kind, 0) + fixture.alloy_out
-	carried += fixture.stored + fixture.ore_in + fixture.ammo / Fixture.ROUNDS_PER_ORE
+	carried += fixture.stored + fixture.ore_in
 	if fixture.researching != &"" and fixture.kind == &"lab":
 		stock += UPGRADES[fixture.researching].cost
 		alloy += UPGRADES[fixture.researching].alloy
@@ -1548,7 +1707,7 @@ func can_link(a: Fixture, b: Fixture) -> String:
 	if a == b:
 		return "Pick somewhere else to run it to."
 	if !Fixture.CABLE_HEIGHT.has(a.kind) or !Fixture.CABLE_HEIGHT.has(b.kind):
-		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
+		return "Cables tie to pylons, rigs, foundries and the pod."
 	var ends := cable_ends(a, b)
 	a = ends[0]
 	b = ends[1]
@@ -1573,7 +1732,7 @@ func cable_ends(a: Fixture, b: Fixture) -> Array[Fixture]:
 ## Why a cable can't run from a to a new pylon at pos, or "" if it can.
 func can_link_pylon(a: Fixture, pos: Vector3, normal: Vector3) -> String:
 	if !Fixture.CABLE_HEIGHT.has(a.kind):
-		return "Cables tie to pylons, rigs, foundries, turrets and the pod."
+		return "Cables tie to pylons, rigs, foundries and the pod."
 	if !can_build(&"pylon", pos, normal):
 		return "No room for a pylon there."
 	return cable_clear(a.cable_point(), pos + Terrain.up_at(pos) * Fixture.CABLE_HEIGHT.pylon)
@@ -1660,8 +1819,6 @@ func _take_in(fixture: Fixture, item: StringName) -> void:
 			fixture.ore_in += 1
 		&"pylon":
 			fixture.holding.push_back(item)
-		&"turret":
-			fixture.ammo += Fixture.ROUNDS_PER_ORE
 
 
 ## A turret: when it's ready, turns on the nearest spider in range that
@@ -1718,13 +1875,6 @@ func _tracer_for_all(from: Vector3, to: Vector3) -> void:
 
 
 ## Loads a turret from your pockets, as much as it'll take.
-func load_turret(turret: Fixture) -> void:
-	var room := (Fixture.MAGAZINE - turret.ammo) / Fixture.ROUNDS_PER_ORE
-	var given := mini(room, carried)
-	carried -= given
-	turret.ammo += given * Fixture.ROUNDS_PER_ORE
-
-
 ## Mining by hand: an ore cluster comes away whole, a deposit a piece at a
 ## time.
 func mine(ore: Fixture) -> void:
@@ -1748,7 +1898,82 @@ func hand_in() -> void:
 
 
 func screens() -> Array[Screen]:
-	return [pod.screen]
+	var all: Array[Screen] = [pod.screen]
+	for fixture in built:
+		if fixture.screen:
+			all.append(fixture.screen)
+	return all
+
+
+## An armory's screen: each soldier orders their own gear on it, collects
+## it once it's made, and grabs ammo boxes for the turrets.
+func _wire_armory_screen(armory: Fixture) -> void:
+	var screen := armory.screen
+	screen.info = func() -> String:
+		var doing := "IDLE" if armory.researching == &"" else "MAKING %s FOR %s  %d%%" % [UPGRADES[armory.researching].name, name_of(armory.made_for).to_upper(), roundi(armory.research_time / GEAR[armory.researching].time * 100.0)]
+		if !armory.enabled:
+			doing = "SWITCHED OFF"
+		return "BANK %d ORE  %d ALLOY\n%s" % [stock, alloy, doing]
+	screen.describe = func(action: StringName) -> String:
+		if action == &"ammo":
+			return "[E] An ammo box (%d ore): carry it to a turret and E to fill it" % AMMO_COST
+		return "[E] %s: %s" % [String(UPGRADES[action].name).capitalize(), UPGRADES[action].text]
+	screen.button = func(action: StringName) -> Array:
+		return _armory_button(action, Net.local_id())
+	screen.pressed = func(action: StringName) -> String:
+		return _armory_press(action, _acting if _acting != 0 else Net.local_id())
+	_send_presses(armory)
+
+
+## How an armory's button reads for peer: [text, enabled, current].
+func _armory_button(action: StringName, peer: int) -> Array:
+	var s: Dictionary = stats.get(peer, _nobody)
+	if action == &"ammo":
+		if s.get("ammo_box", false):
+			return ["AMMO BOX       CARRYING ONE", false, true]
+		return ["AMMO BOX       %d ORE" % AMMO_COST, stock >= AMMO_COST, false]
+	var label := ("%s" % UPGRADES[action].name).rpad(15)
+	var info: Dictionary = GEAR[action]
+	if equipped(action, peer):
+		return [label + "WORN", false, true]
+	if racked.any(func(entry: Array) -> bool: return entry[0] == action and entry[1] == peer):
+		return [label + "READY: COLLECT", true, true]
+	var armory := making(action, peer)
+	if armory:
+		return [label + "MAKING %d%%" % roundi(armory.research_time / info.time * 100.0), true, true]
+	if orders.any(func(entry: Array) -> bool: return entry[0] == action and entry[1] == peer):
+		return [label + "QUEUED", true, true]
+	if !has(action):
+		return [label + "NEEDS RESEARCH", false, false]
+	return [label + price(info.cost, info.alloy).to_upper(), stock >= info.cost and alloy >= info.alloy, false]
+
+
+## Server: peer's press on an armory's button. Says how it went.
+func _armory_press(action: StringName, peer: int) -> String:
+	var s: Dictionary = stats.get(peer, _nobody)
+	if action == &"ammo":
+		if s.get("ammo_box", false):
+			return "YOU'VE GOT ONE ALREADY."
+		if stock < AMMO_COST:
+			return "NOT ENOUGH ORE IN THE BANK."
+		stock -= AMMO_COST
+		s.ammo_box = true
+		_tally(peer, &"ammo_boxes")
+		return "AMMO BOX: E ON A TURRET TO FILL IT."
+	if !GEAR.has(action):
+		return ""
+	for entry: Array in racked:
+		if entry[0] == action and entry[1] == peer:
+			racked.erase(entry)
+			if !s.gear.has(action):
+				s.gear.append(action)
+			_note(&"geared_up", {soldier = name_of(peer), item = action})
+			return "GEARED UP: %s." % UPGRADES[action].name
+	if !has(action) and !equipped(action, peer):
+		return "NEEDS RESEARCH: ASK THE COMMANDER."
+	var reply := order_gear(action, peer)
+	_note(&"order", {soldier = name_of(peer), item = action, reply = reply})
+	return reply.to_upper()
 
 
 func _wire_pod_screen() -> void:
@@ -2078,16 +2303,9 @@ func _add_environment() -> void:
 	add_child(world_env)
 
 
-## The pod comes down on open, flat ground near the middle.
-func _place_pod() -> void:
-	var spots: Array[Array] = terrain.surface_spots.duplicate()
-	_shuffle(spots)
-	var landing: Array = spots[0]
-	for spot in spots:
-		if Vector2(spot[0].x, spot[0].z).length() < 20.0 and spot[1].y > 0.97:
-			landing = spot
-			break
-	pod = Fixture.make(&"pod", landing[0] - Vector3.UP * 0.4, Vector3.UP)
+func _place_pod(at: Vector3) -> void:
+	var ground: Array = terrain.surface_point(at)
+	pod = Fixture.make(&"pod", (ground[0] as Vector3) - Vector3.UP * 0.4, Vector3.UP)
 	add_child(pod)
 	_track(pod)
 	_wire_pod_screen()
@@ -2297,18 +2515,19 @@ func _debug_setup() -> void:
 	if _args.has("command"):
 		_take_command(Net.local_id())
 		commander_view._research.visible = _args.has("research")
-		commander_view._armory.visible = _args.has("armory_panel")
 		if _args.has("place"):
 			commander_view.placing = StringName(_args.place)
 			get_viewport().warp_mouse(get_viewport().get_visible_rect().size * Vector2(0.56, 0.42))
-	if _args.has("reel"):
-		player.reel = pod
 	if _args.has("bitten"):
 		pod.health *= 0.6
 		for fixture in built:
 			fixture.health *= 0.35
 	if _args.has("probe"):
 		_probe(_args.probe)
+	if _args.has("relobby") and Net.leading() and !_relobbied:
+		# Debug: once, the leader sends everyone back to the lobby.
+		_relobbied = true
+		get_tree().create_timer(12.0).timeout.connect(func() -> void: lobby_act(&"to_lobby", []))
 	if _args.has("shot"):
 		await get_tree().create_timer(float(_args.get("shot_at", "3"))).timeout
 		var image := get_viewport().get_texture().get_image()
@@ -2398,9 +2617,13 @@ func _probe(kind: String) -> void:
 		act(&"blueprint", [&"pylon", spot[0], spot[1], pod.global_position])
 		await tree.create_timer(1.0).timeout
 		print("[commander] blueprints %d, stock %d -> %d" % [blueprints.size(), stock_before, stock])
-		act(&"order", [&"gun", Net.local_id()])
+		act(&"research", [&"gun"])
 		await tree.create_timer(1.0).timeout
-		print("[commander] ordered a rifle for myself: orders %s, research queue %s" % [orders, research_queue])
+		print("[commander] queued the rifle's research: queue %s" % [research_queue])
+		if !blueprints.is_empty():
+			act(&"link", [blueprints[0].net_id, pod.net_id])
+			await tree.create_timer(1.0).timeout
+			print("[commander] cabled the pylon blueprint to the pod: links %d, a blueprint %s" % [links.size(), !links.is_empty() and links[-1].blueprint])
 		act(&"uncommand", [])
 		await tree.create_timer(1.0).timeout
 		if !blueprints.is_empty():
@@ -2409,11 +2632,7 @@ func _probe(kind: String) -> void:
 				act(&"construct", [plan.net_id])
 			await tree.create_timer(1.0).timeout
 			var pylons := built.filter(func(f: Fixture) -> bool: return f.kind == &"pylon")
-			print("[commander] hammered it: blueprints %d, pylons %d" % [blueprints.size(), pylons.size()])
-			if !pylons.is_empty():
-				act(&"link", [pylons[0].net_id, pod.net_id])
-				await tree.create_timer(1.0).timeout
-				print("[commander] out of the pod, cabled the pylon to it: links %d, strung %s" % [links.size(), !links.is_empty() and !links[-1].blueprint])
+			print("[commander] hammered it: blueprints %d, pylons %d; its cable strung %s" % [blueprints.size(), pylons.size(), !links.is_empty() and !links[-1].blueprint])
 		await tree.create_timer(2.0).timeout
 		print("[commander] out: commander %d, view %s, player visible %s" % [commander_peer, commander_view != null and commander_view.visible, player.visible])
 	elif kind == "stander":

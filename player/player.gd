@@ -14,13 +14,6 @@ extends CharacterBody3D
 ## the right; at a junction you carry on down whichever cable's nearest
 ## the way you're looking, and you drop off short of a dead end. E again
 ## or Space lets go. F toggles the headlamp.
-##
-## Soldiers lay the cables, with the hammer out: right mouse on a pylon,
-## rig, foundry, turret or the pod (built or a blueprint) pays one out
-## behind you; on another, it ties it on, and on open ground it puts a
-## pylon blueprint there for it. A cable to a blueprint goes up once both
-## ends are built. Right mouse on a cable turns it round; held, it cuts
-## it.
 
 const LAYER := 4
 const GRAVITY := 5.0
@@ -51,10 +44,6 @@ const JET_DRAIN := 35.0
 const JET_RISE := 5.0
 const JET_REFILL := 45.0
 const REACH := 4.5
-## How far off you can aim at what a cable ties to, and how long R's held
-## to cut one.
-const CABLE_REACH := 10.0
-const CUT_TIME := 0.8
 const BUILD_REACH := 8.0
 const MINE_TIME := 1.5
 const PICK_UP_TIME := 0.5
@@ -147,18 +136,6 @@ var _rope: MeshInstance3D
 var _rope_flash := 0.0
 var _yank_from := Vector3.ZERO
 var _flare_cooldown := 0.0
-## Where the cable you're paying out runs from, if you are.
-var reel: Fixture
-var _reel_line: MeshInstance3D
-## How far the cable you're paying out reaches.
-var _reach_ring: RangeRing
-var _r_was_down := false
-var _cut_held := 0.0
-## The cable lit up under the crosshair.
-var _lit: Link
-## What R would do, added to the prompt.
-var _cable_hint := ""
-var _space_was_down := false
 
 
 func _ready() -> void:
@@ -193,9 +170,6 @@ func _ready() -> void:
 	_gun.visible = false
 	_hammer.visible = true
 	_rope = _line(Color(1.0, 0.6, 0.2))
-	_reel_line = _line(Link.ORE)
-	_reach_ring = RangeRing.new()
-	add_child(_reach_ring)
 
 
 ## Turns the body so its up points away from the centre, keeping where it
@@ -267,26 +241,11 @@ func _physics_process(delta: float) -> void:
 	if !is_on_floor():
 		rest += 2.0
 	spread = move_toward(spread, rest, SETTLE * delta) if spread > rest else rest
-	if !playing or !is_instance_valid(reel):
-		reel = null
-	var space := Input.is_physical_key_pressed(KEY_SPACE)
 	if downed:
-		prompt = "DOWN  %d s\nHold on: another soldier can hold E on you to get you up\n[Space] Give up and go back to the pod" % ceili(game.down_left)
+		prompt = "DOWN\nHold on: another soldier can hold E on you to get you up.\nIf everyone's down, it's over."
 		progress = 0.0
-		if space and !_space_was_down and !SoundEditor.open:
-			game.act(&"give_up", [])
-	_space_was_down = space
-	_reel_line.visible = reel != null
-	if reel:
-		_stretch(_reel_line, reel.cable_point(), camera.global_transform * Vector3(0.2, -0.3, -0.3))
-		_reach_ring.show_around(reel.global_position, Link.RANGE, Color(Link.ORE, 0.9))
-	else:
-		_reach_ring.hide_ring()
 	if playing:
-		_cable_hint = ""
 		_use(delta)
-		if _cable_hint != "":
-			prompt = _cable_hint if prompt == "" else prompt + "\n" + _cable_hint
 		var trigger := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if trigger and _cooldown <= 0.0:
 			if weapon == &"gun":
@@ -498,8 +457,6 @@ func _use(delta: float) -> void:
 		prompt = "%s is down\n[Hold E] Get them up" % game.name_of(fallen)
 		_hold(down, delta, Game.REVIVE_TIME, func() -> void: game.act(&"revive", [fallen]))
 		return
-	if _lay_cable(delta):
-		return
 	if _aim_screen():
 		if _screen.hover != &"":
 			var described: String = _screen.describe.call(_screen.hover)
@@ -555,23 +512,17 @@ func _use(delta: float) -> void:
 			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
 		&"turret":
 			var state: String = "ready" if target.stalled == "" else target.stalled
-			prompt = "Turret: %d / %d shots, %s\n%s[Hold E] Pick up" % [target.ammo, Fixture.MAGAZINE, state, "[E] Load ore    " if game.carried > 0 else ""]
+			var loading := "[E] Load the ammo box    " if game.ammo_box and target.ammo < Fixture.MAGAZINE else ("" if game.ammo_box else "Ammo boxes are at the armory    ")
+			prompt = "Turret: %d / %d shots, %s\n%s[Hold E] Pick up" % [target.ammo, Fixture.MAGAZINE, state, loading]
 			# A tap loads it; holding on picks it up.
-			if released and _use_held < 0.3 and game.carried > 0:
+			if released and _use_held < 0.3 and game.ammo_box and target.ammo < Fixture.MAGAZINE:
 				game.act(&"load", [target.net_id])
 			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
 			if progress < 0.3 / (PICK_UP_TIME * 2.0):
 				progress = 0.0
 		&"armory":
-			var mine := game.racked.filter(func(entry: Array) -> bool: return entry[1] == Net.local_id()).map(func(entry: Array) -> String: return String(Game.UPGRADES[entry[0]].name).capitalize())
-			var busy := "idle" if target.researching == &"" else "making a %s for %s" % [String(Game.UPGRADES[target.researching].name).capitalize(), game.name_of(target.made_for)]
-			prompt = "Armory: %s\n%s[Hold E] Pick up" % [busy, ("[E] Gear up: %s    " % ", ".join(mine)) if !mine.is_empty() else ""]
-			# A tap gears you up; holding on picks it up.
-			if released and _use_held < 0.3 and !mine.is_empty():
-				game.act(&"gear_up", [target.net_id])
+			prompt = "Armory: gear and ammo on the screen round the side\n[Hold E] Pick up"
 			_hold(down, delta, PICK_UP_TIME * 2.0, func() -> void: game.act(&"pick_up", [target.net_id]))
-			if progress < 0.3 / (PICK_UP_TIME * 2.0):
-				progress = 0.0
 		&"lamp", &"panel", &"battery", &"lab", &"pylon", &"barricade":
 			prompt = "[Hold E] Pick up %s" % target.kind
 			_hold(down, delta, PICK_UP_TIME, func() -> void: game.act(&"pick_up", [target.net_id]))
@@ -590,90 +541,6 @@ func _fallen_ahead() -> int:
 		if to.length() < Game.REVIVE_REACH and (to.length() < 0.6 or look.normalized().dot(to.normalized()) > 0.5):
 			return peer
 	return 0
-
-
-## Right mouse, with the hammer out: paying a cable out, tying it on, or
-## putting a pylon down for it; and turning cables round or cutting them.
-## True while a cable's being paid out, which is all the prompt's about
-## then.
-func _lay_cable(delta: float) -> bool:
-	var down := weapon == &"hammer" and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	var pressed := down and !_r_was_down
-	var released := !down and _r_was_down
-	_r_was_down = down
-	if !is_instance_valid(reel) or weapon != &"hammer":
-		reel = null
-	if is_instance_valid(_lit):
-		_lit.highlight = false
-	_lit = null
-	if weapon != &"hammer":
-		_cut_held = 0.0
-		return false
-	var hit := _aim(CABLE_REACH)
-	var target: Fixture = hit.collider if !hit.is_empty() and hit.collider is Fixture else null
-	if target and target.kind == &"deposit" and target.rig:
-		target = target.rig
-	if reel:
-		var start := "pod" if reel == game.pod else Fixture.NAMES[reel.kind] as String
-		if reel.cable_point().distance_to(global_position) > Link.RANGE + 4.0:
-			reel = null
-			_say("Too far: the cable slipped off the %s" % start)
-			return false
-		if target and target != reel and Fixture.CABLE_HEIGHT.has(target.kind):
-			var to_name := "pod" if target == game.pod else Fixture.NAMES[target.kind] as String
-			var why := game.can_link(reel, target)
-			prompt = "Cable from the %s\n%s" % [start, ("[RMB] Tie it to the %s" % to_name) if why == "" else why]
-			if pressed and why == "":
-				Sfx.play(&"latch")
-				game.act(&"link", [reel.net_id, target.net_id])
-				reel = null
-		elif target == reel:
-			prompt = "Cable from the %s\n[RMB] Let it go" % start
-			if pressed:
-				reel = null
-		elif !hit.is_empty() and !target:
-			var why := game.can_link_pylon(reel, hit.position, hit.normal)
-			prompt = "Cable from the %s\n%s" % [start, "[RMB] A new pylon here" if why == "" else why]
-			if pressed and why == "":
-				Sfx.play(&"place")
-				game.act(&"link_pylon", [reel.net_id, hit.position, hit.normal])
-				reel = null
-		else:
-			prompt = "Cable from the %s\n[RMB] on a pylon, rig, foundry, turret or the pod ties it on;\non open ground, a new pylon" % start
-		return true
-	var cable := _aim_cable(REACH + 2.0)
-	if cable.is_empty():
-		cable = _aim_cable(REACH + 2.0, true)
-	if !cable.is_empty() and (!target or cable[2] < camera.global_position.distance_to(hit.position)):
-		var link: Link = cable[0]
-		_lit = link
-		link.highlight = true
-		_cable_hint = "[RMB] Turn it round    [Hold RMB] Cut it"
-		if released and _cut_held > 0.0 and _cut_held < 0.3:
-			var why := game.can_flip(link)
-			if why != "":
-				_say(why)
-			else:
-				Sfx.play(&"press")
-				game.act(&"flip", [link.net_id])
-				_say("Cable turned round")
-		_cut_held = _cut_held + delta if down else 0.0
-		if down:
-			progress = maxf(_cut_held, 0.0) / CUT_TIME
-		if _cut_held >= CUT_TIME:
-			# Held on past the cut: letting go mustn't flip what's next.
-			_cut_held = -100.0
-			Sfx.play(&"cancel")
-			game.act(&"unlink", [link.net_id])
-			_say("Cable cut")
-		return false
-	_cut_held = 0.0
-	if target and Fixture.CABLE_HEIGHT.has(target.kind):
-		_cable_hint = "[RMB] Run a cable from it"
-		if pressed:
-			reel = target
-			Sfx.play(&"latch")
-	return false
 
 
 ## Whether the crosshair's on a screen within reach; if so it's _screen.
@@ -713,7 +580,7 @@ func _unequipped(item: StringName) -> String:
 	var gear_name := String(Game.UPGRADES[item].name).capitalize()
 	if !game.has(item):
 		return "No %s: it needs researching, then making at an armory" % gear_name.to_lower()
-	return "No %s: the commander can have an armory make you one" % gear_name.to_lower()
+	return "No %s: order one at an armory's screen" % gear_name.to_lower()
 
 
 ## Takes up the gun or the hammer; the gun only once you've been given one.

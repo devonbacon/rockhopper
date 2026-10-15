@@ -6,6 +6,15 @@ dark is the enemy. It tests whether night coming round, with too few
 lamps built, is tense on its own, and how drilling, hauling and the
 spiders that come with the dark sit alongside it.
 
+Each mission starts in a lobby over the map it'll be played on: the
+leader (whoever's been connected longest; you, solo) clicks where the pod
+should land, on level ground with room round it and away from the wall,
+or rolls a new map; everyone else says they're ready, and the leader
+drops the pod. It comes down out of the sky over 7 s, watched from
+nearby, and everyone starts beside it. The leader's pause menu can send
+everyone back to the lobby, on the same map, any time; a finished
+mission goes back to it 15 s later on a new map.
+
 You drop onto a turning asteroid, into a round patch of rolling hills,
 rises and hollows 160 m across, marked out by a blue hologram wall you can't go past (it shows when
 you're within about 18 m of it, and always from the pod); beyond it
@@ -57,26 +66,26 @@ closes those holes, but the spiders already out stay.
 
 A drill rig goes over a deposit. It drills while it's lit, by the sun or
 a lamp, into a hopper of 12, which you can empty by hand. Cables carry
-it away. Soldiers lay the cables, free, from one pylon, rig, foundry or
-turret to another or to the pod, up to 20 m, with clear air under it;
+it away. The commander lays the cables, free, from one pylon, rig or
+foundry to another or to the pod, up to 20 m, with clear air under it;
 one run to a blueprint, or to open ground (which puts a pylon blueprint
-there), waits as a hologram line and goes up once both its ends are
-built. Ore and alloy travel along it one way at 3 m/s, 1.5
+there), waits as a hologram line and goes up once soldiers have built
+both its ends. Ore and alloy travel along it one way at 3 m/s, 1.5
 m apart. Rigs send ore, foundries send alloy, pylons pass on whatever
-reaches them (holding 4), turrets take ore as ammunition, and the pod
+reaches them (holding 4), and the pod
 takes everything into the bank. A
 place with several cables out takes turns between them. When something
 can't take any more, what's on the cable waits at the end.
 
 A foundry smelts 2 ore into 1 alloy every 6 s, drawing 1 power a second
 while it works, with bins of 10 for each. Alloy pays for batteries and
-the bigger upgrades and turrets.
+the bigger upgrades, batteries and turrets.
 
 A turret shoots the nearest spider within 22 m that it can see, if the
 spider's in light (sun, lamp or flare), a shot every 0.9 s, 10 damage
-each. Each shot spends a round and 0.3 of the battery. A piece of ore
-makes 10 rounds and a turret holds 40: feed it by cable, or tap E on it
-with ore in your pockets. It's loud for 2 s after it fires, and a spider
+each. Each shot spends a round and 0.3 of the battery. It holds 40
+rounds, and soldiers fill it: an ammo box from an armory's screen costs
+2 ore, you carry one at a time, and E on a turret loads it, full. It's loud for 2 s after it fires, and a spider
 it shoots comes for it. Spiders can't get past a barricade (a wall 3 m
 long and 2 m high, 120 hull, set across the way to the pod); one that
 walks into it chews through instead.
@@ -102,7 +111,7 @@ can pay. Each costs ore, the bigger ones alloy too, paid when a lab
 starts it, takes 25-45 s, and draws power while it works (it stalls when
 the battery's flat, or it's switched off). Researched upgrades apply to
 everything, already built or not, except gear (marked *): that, once
-researched, has to be made at an armory for each soldier (see below).
+researched, each soldier orders their own at an armory (see below).
 
 - Rifle*: soldiers start with only the hammer.
   - Overcharged rounds: double damage, so two shots kill a spider, not
@@ -120,16 +129,15 @@ researched, has to be made at an armory for each soldier (see below).
   - Fast cables: cables carry twice as fast.
 - Efficient lamps: lamps draw half the power.
 
-Armories make gear, for one soldier at a time. In the armory panel (G),
-the commander clicks a soldier's row under a piece of gear to order it
-(queueing its research too, if that's not done); clicking again takes
-the order back, or cancels it under way for a refund. Each idle armory
-takes the first order it can: researched, and the bank can pay. A rifle,
+Armories make gear, one piece at a time. Soldiers order their own on the
+screen on an armory's side: a button for each piece (once the
+commander's researched it), and one for an ammo box. Pressing an order
+again takes it back, or cancels it under way for a refund. Each idle
+armory takes the first order it can, when the bank can pay: a rifle,
 blade runners, a grapple or a heated suit cost 2 ore, a jetpack 2 ore and
 1 alloy, armour 1 ore and 2 alloy; each takes 10-18 s, drawing power
-(0.6/s) and making some noise. What's made waits at any armory for that
-soldier: tap E on one to gear up. Gear's lost if you fall and nobody
-gets you back up, so a downed soldier is worth going back for.
+(0.6/s) and making some noise. What's made waits for you: its button
+reads READY, and pressing it puts it on.
 
 At nightfall, bug holes tear open in the ground, 34-62 m from the
 pod: one the first night, two the second, and so on, and one more with three or
@@ -173,12 +181,12 @@ in to plan, climb out to build. The server runs the
 world: spiders, building, cables, power, research, the bank and the
 clock. Each client moves its own soldier and asks the server for
 everything else. Every client generates the same map from the server's
-seed. Freezing or being killed doesn't end the mission: you go down
-where you fell for 30 s, and spiders leave you be. Another soldier
-holding E on you for 2.5 s gets you back up with half your health and
-what you carried. If nobody does, or you press Space to give up, or
-there's nobody else on their feet to, you're back at the pod without
-what you carried. A new mission starts 15 s after one ends.
+seed. Freezing or being killed puts you down where you fell, and
+spiders leave you be: you stay down, for good, till another soldier
+holds E on you for 2.5 s, which gets you back up with half your health,
+and what you carried and wore. With nobody left standing (the commander,
+safe in the pod, counts as standing, and can climb out to help), the
+mission's lost.
 
 The server turns away a client on a different build. The build is a hash
 of the game's scripts and shaders (everything but `addons`, `tests` and
@@ -213,9 +221,10 @@ handed in, repairs, revives). `tools/fetch_sessions.sh` copies the
 server's into `sessions/`; `python tools/session_summary.py [file]`
 prints a mission's timeline, samples and tallies.
 
-Debug: `command` starts in the commander's seat (with `research`, the
-research panel open, or `armory_panel`, the armory's; `place=pylon` holds
-that to place); `reel` starts you paying a cable out from the pod; `bitten` starts with the pod
+Debug arguments skip the lobby, landing near the middle. `command`
+starts in the commander's seat (with `research`, the research panel
+open; `place=pylon` holds that to place); `relobby` has the leader send
+everyone back to the lobby once, 12 s in; `bitten` starts with the pod
 and everything built damaged;
 `probe=builder|walker|stander|commander` scripts a joined client, for
 checking a server headlessly.
@@ -239,8 +248,14 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   you're placing, and Ctrl and the wheel zooms meanwhile. Delete over a
   blueprint cancels it, refunding what its blows have
   paid.
-- **Cables** are the soldiers' to lay; they show here, arrowed the way
-  they run.
+- **Cables (C, or the bar):** click a pylon, rig, foundry or the pod
+  (built or a blueprint) to run one from it, then another to tie it on,
+  or open ground to put a pylon blueprint there for it; either way it
+  carries on from there, so a line of pylons is a click each.
+  Right-click lets go; a ring shows how far it reaches (20 m). A cable
+  runs the way you laid it, except that it always runs into the pod and
+  out of a rig. Over a cable, F turns it round and Delete cuts it.
+  They show arrowed the way they run.
 - **Inspect:** click something built to see how it's doing (a foundry's
   bins, a rig's hopper, its hull, whether it's loud). P, or the button
   beside it, switches it off or on; P over a building does the same.
@@ -251,7 +266,6 @@ under the ones spiders can hear), and OFF on whatever's switched off.
 - **The pod's hull** is on the readout; when spiders bite it, the edges
   flash red.
 - **Research (R):** the tech tree; click to queue (see above).
-- **Armory (G):** gear for each soldier; click to order (see above).
 - **X** climbs out; **Esc** pauses.
 
 ## Controls
@@ -263,21 +277,12 @@ under the ones spiders can hear), and OFF on whatever's switched off.
   out of it keeps the momentum (up to 8 m/s, easing back to running speed
   in the air, until blade runners). Land
   with it held to slide on. You can steer well in the air.
-- **Weapons:** you start with the hammer; once an armory's made you a
-  rifle, 1, 2 or the wheel switch between them.
+- **Weapons:** you start with the hammer; once you've a rifle from an
+  armory, 1, 2 or the wheel switch between them.
   The hammer smashes everything in a short arc in front, hurting
   spiders (two blows kill one), knocking each back a little and
   stunning it for a second, chips ore off a deposit, and puts up the
   commander's blueprints a blow at a time.
-- **Cables (right mouse, with the hammer out):** right-click a pylon,
-  rig, foundry, turret or the pod, built or a blueprint, to pay a cable
-  out behind you; right-click another to tie it on, or open ground to put
-  a pylon blueprint there for it. Right-click where it started to let it
-  go. A cable runs the way you laid it, except that it always runs into
-  the pod and out of a rig, whichever end you started from. Right-click
-  a cable to turn it round; hold right mouse
-  to cut it. While you pay one out, a ring on the ground shows how far
-  it reaches (20 m).
 - **Repairs:** anything built that's been bitten shows a health bar over
   it, green to red; hammer it to patch it up.
 - **Grapple (middle mouse, once you've one):** a spider gets tugged
@@ -418,6 +423,7 @@ User arguments after `--`, e.g.
 - `ui/sound_editor/` (autoload `SoundEditor`): the sound editor.
 - `game/metrics.gd`: the playtest log.
 - `game/commander.gd`: the commander's view.
+- `lobby/lobby.gd`: the lobby, before the drop.
 - `ui/hud.gd`: readouts.
 - `tests/smoke.gd`: headless,
   `Godot --headless --fixed-fps 60 --path . res://tests/smoke.tscn`. It plays
