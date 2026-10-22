@@ -11,9 +11,6 @@
 # to its local port. AWS credentials for the challenge live only on the box,
 # in ~/caddy/aws.env (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION).
 #
-# Finally publishes the address to the Pages repo as rockhopper-server.json,
-# where the web build looks for it.
-#
 #   tools/proxy_server.sh [user@host]            set up / update
 #   tools/proxy_server.sh stop [user@host]       remove rockhopper's route
 set -euo pipefail
@@ -28,7 +25,6 @@ if [ "${1:-}" = stop ]; then
 fi
 HOST=${1:-devon@192.168.1.27}
 NAME=$GAME.$BASE
-PAGES=${PAGES:-$(cd "$(dirname "$0")/../.." && pwd)/game-demo-test}
 
 ssh "$HOST" "bash -s $BASE $PUBLIC $GAME $GAME_PORT" <<'REMOTE'
 set -euo pipefail
@@ -105,9 +101,3 @@ if [ "$CODE" = 000 ]; then
 	exit 1
 fi
 echo "https://$NAME:$PUBLIC is up (HTTP $CODE)"
-WSS="wss://$NAME:$PUBLIC"
-git -C "$PAGES" pull -q --rebase
-printf '{"url": "%s", "updated": "%s"}\n' "$WSS" "$(date -u +%FT%TZ)" > "$PAGES/rockhopper-server.json"
-git -C "$PAGES" add rockhopper-server.json
-git -C "$PAGES" commit -q -m "Rockhopper server address" && git -C "$PAGES" push -q || echo "address unchanged"
-echo "published $WSS to rockhopper-server.json"
