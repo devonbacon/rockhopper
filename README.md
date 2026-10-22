@@ -1,5 +1,7 @@
 # Rockhopper
 
+Play it in a browser: https://play.devoncoleman.com/rockhopper/
+
 A spike for a first-person game shaped like Deep Rock Galactic, but with
 less combat and more automation: short missions on asteroids, where the
 dark is the enemy. It tests whether night coming round, with too few
@@ -180,7 +182,8 @@ by it), but it doesn't keep you warm.
 
 ## Playing together
 
-The menu offers solo, hosting, or joining a server. Everyone starts as a
+The menu offers solo, hosting, or joining a server (in a browser, solo or
+joining). Everyone starts as a
 soldier. The commander's seat is in the pod: "Take command" on the pod's
 screen climbs in (one commander at a time), out of harm's way and the
 cold, counted aboard at launch, with an overhead view of the area (WASD,
@@ -207,14 +210,39 @@ From the command line, after `--`:
 - `server` (with `port=`, default 7777, and `seed=`): a dedicated server,
   headless, with no player of its own.
 - `host`: a server with you playing on it.
-- `join=address:port`, with `name=`.
+- `join=address:port` (or a `ws://` or `wss://` URL), with `name=`.
+
+Godot's multiplayer runs over WebSockets (`WebSocketMultiplayerPeer`), so
+browsers can join; the port is TCP. The menu's Server field takes
+`host:port` (plain `ws://`) or a `wss://` URL, and remembers what you
+joined. Left empty, it's filled from `rockhopper-server.json` at the root
+of the Pages site, and in a browser `?server=` and `?name=` on the page's
+address fill the fields in. In a browser, Esc frees the mouse before the
+game hears the key, so losing the mouse mid-mission pauses.
 
 The dedicated server runs on a Debian box: `tools/deploy_server.sh
 [user@host] [port]` (from a machine with ssh access) installs Godot's
 Linux build there, clones or pulls this repo, and runs it headless as a
 systemd user service, restarting on failure. Run it again after pushing
-to update. Logs: `journalctl --user -u rockhopper -f` on the box. The
-port is UDP.
+to update. Logs: `journalctl --user -u rockhopper -f` on the box.
+
+Browsers on the HTTPS site need `wss://`: `tools/proxy_server.sh` puts the
+server behind the shared Caddy on the box at
+`wss://rockhopper.play.devoncoleman.com:9443` (the same one as
+Sloprunner's: a wildcard certificate for `*.play.devoncoleman.com` from the
+Route 53 DNS challenge, port 9443 forwarded on the router, a route file per
+game in `~/caddy/sites/`), and publishes that address to
+`rockhopper-server.json`. `tools/proxy_server.sh stop` takes the route
+down.
+
+The web build: push to `main`, and `.github/workflows/deploy-pages.yml`
+exports the `rockhopper` preset and publishes it to
+`devonbacon/game-demo-test` under `rockhopper/`, beside Sloprunner, RTL and
+Skiff. It has no threads (so no special headers): the music renders a few
+milliseconds a frame instead of on a worker. It draws with the
+Compatibility renderer (`rendering_method.web`), while desktop keeps
+Forward+, so the browser's nights look a little warmer and brighter. The
+build hash is the same as the desktop's, so both join the same server.
 
 To share a build: `tools/export_windows.sh` exports a Windows build and
 zips it as `build/rockhopper-<build>.zip`, named for the hash the server

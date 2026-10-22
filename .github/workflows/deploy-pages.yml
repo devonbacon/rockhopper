@@ -1,0 +1,112 @@
+name: Deploy Godot Web Export
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: game-demo-test-deploy-rockhopper
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7.2-stable
+  GODOT_TEMPLATES_VERSION: 4.7.2.stable
+  EXPORT_PRESET: rockhopper
+  EXPORT_DIR: build/web
+  TARGET_REPOSITORY: devonbacon/game-demo-test
+  TARGET_BRANCH: main
+  # Where in the Pages repository the build goes: other games sit beside it.
+  TARGET_DIR: rockhopper
+
+jobs:
+  deploy:
+    name: Build and deploy web export
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cache Godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            .godot-ci/godot
+            ~/.local/share/godot/export_templates/${{ env.GODOT_TEMPLATES_VERSION }}
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Download Godot
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -x ".godot-ci/godot" ]; then
+            echo "Using cached Godot ${GODOT_VERSION}."
+            exit 0
+          fi
+          mkdir -p .godot-ci
+          curl -L \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip" \
+            -o godot.zip
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}_linux.x86_64" .godot-ci/godot
+          chmod +x .godot-ci/godot
+
+      - name: Install export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "${HOME}/.local/share/godot/export_templates/${GODOT_TEMPLATES_VERSION}/web_release.zip" ]; then
+            echo "Using cached Godot export templates ${GODOT_TEMPLATES_VERSION}."
+            exit 0
+          fi
+          curl -L \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz" \
+            -o export_templates.tpz
+          unzip -q export_templates.tpz
+          mkdir -p "${HOME}/.local/share/godot/export_templates/${GODOT_TEMPLATES_VERSION}"
+          cp -r templates/* "${HOME}/.local/share/godot/export_templates/${GODOT_TEMPLATES_VERSION}/"
+
+      - name: Import project assets
+        shell: bash
+        run: .godot-ci/godot --headless --editor --quit --path .
+
+      - name: Export web build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EXPORT_DIR}"
+          .godot-ci/godot --headless --path . --export-release "${EXPORT_PRESET}" "${EXPORT_DIR}/index.html"
+
+      - name: Check out Pages repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_BRANCH }}
+          ssh-key: ${{ secrets.GAME_DEMO_TEST_DEPLOY_KEY }}
+          path: pages-repo
+
+      - name: Publish build to Pages repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "pages-repo/${TARGET_DIR}"
+          mkdir -p "pages-repo/${TARGET_DIR}"
+          cp -R "${EXPORT_DIR}/." "pages-repo/${TARGET_DIR}/"
+          touch pages-repo/.nojekyll
+          cd pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "No changes to deploy."
+            exit 0
+          fi
+          git commit -m "Deploy ${TARGET_DIR} web export"
+          # Another game may have deployed since checkout.
+          git pull --rebase origin "${TARGET_BRANCH}"
+          git push origin "${TARGET_BRANCH}"

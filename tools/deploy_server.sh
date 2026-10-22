@@ -59,11 +59,11 @@ systemctl --user restart rockhopper.service
 loginctl enable-linger "$USER" 2>/dev/null || echo "note: run 'sudo loginctl enable-linger $USER' so it keeps running after you log out"
 sleep 2
 systemctl --user --no-pager status rockhopper.service | head -6
-echo "listening on UDP $PORT"
+echo "listening on TCP $PORT"
 REMOTE
 ssh "$HOST" "cd ~/rockhopper-server && rm -f setup.log && setsid nohup bash setup.sh $VERSION $PORT > setup.log 2>&1 < /dev/null &"
 echo "setting up on $HOST; following ~/rockhopper-server/setup.log"
-until ssh -o ConnectTimeout=8 "$HOST" 'grep -q "listening on UDP\|needs \|rror\|fatal" ~/rockhopper-server/setup.log' 2>/dev/null; do
+until ssh -o ConnectTimeout=8 "$HOST" 'grep -q "listening on TCP\|needs \|rror\|fatal" ~/rockhopper-server/setup.log' 2>/dev/null; do
 	sleep 5
 done
 ssh "$HOST" 'cat ~/rockhopper-server/setup.log'

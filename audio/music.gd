@@ -598,6 +598,8 @@ func _make_player(bus_name: String) -> AudioStreamGeneratorPlayback:
 	var player := AudioStreamPlayer.new()
 	player.stream = stream
 	player.bus = bus_name
+	# Generated, so it can't be a web build's sample.
+	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 	add_child(player)
 	player.play()
 	return player.get_stream_playback()
@@ -636,16 +638,24 @@ class Voice:
 
 
 ## Renders sounds on a worker thread, one after another in the order asked
-## for, handing them back as they're done.
+## for, handing them back as they're done. Where there are no threads (the
+## web build), it renders on the main thread instead, a few milliseconds a
+## frame, so the game doesn't stop while a sound is made.
 class Renderer:
+	## Milliseconds a frame to spend rendering without a thread.
+	const FRAME_BUDGET_MSEC := 4
 	const PAD_STRETCH := 2048
 	var synth: Instruments
+	var _threaded := !OS.has_feature("nothreads")
 	var _mutex := Mutex.new()
 	## [[name, Callable]] waiting. A Callable gives the sound, or a Pad to
 	## render it.
 	var _queue: Array = []
 	var _done: Dictionary[String, PackedVector2Array] = {}
 	var _task := -1
+	## Without a thread: the pad being rendered, and its name.
+	var _pad: Instruments.Pad
+	var _pad_name := ""
 
 	func _init(rate: float) -> void:
 		synth = Instruments.new(rate)
@@ -657,7 +667,9 @@ class Renderer:
 
 	## Returns what's finished since last time, and keeps the work going.
 	func poll() -> Dictionary[String, PackedVector2Array]:
-		if _task >= 0 and WorkerThreadPool.is_task_completed(_task):
+		if !_threaded:
+			_work_for(FRAME_BUDGET_MSEC)
+		elif _task >= 0 and WorkerThreadPool.is_task_completed(_task):
 			WorkerThreadPool.wait_for_task_completion(_task)
 			_task = -1
 		_mutex.lock()
@@ -665,7 +677,7 @@ class Renderer:
 		_done = {}
 		var waiting := !_queue.is_empty()
 		_mutex.unlock()
-		if _task < 0 and waiting:
+		if _threaded and _task < 0 and waiting:
 			_task = WorkerThreadPool.add_task(_work, false, "Render music")
 		return done
 
@@ -685,3 +697,23 @@ class Renderer:
 			_mutex.lock()
 			_done[job[0]] = sound
 			_mutex.unlock()
+
+	## Without a thread: renders for about `msec`, a sound or a stretch of
+	## a pad at a time.
+	func _work_for(msec: int) -> void:
+		var until := Time.get_ticks_msec() + msec
+		while Time.get_ticks_msec() < until:
+			if _pad:
+				if _pad.render(PAD_STRETCH):
+					_done[_pad_name] = _pad.out
+					_pad = null
+				continue
+			if _queue.is_empty():
+				return
+			var job: Array = _queue.pop_front()
+			var sound: Variant = job[1].call()
+			if sound is Instruments.Pad:
+				_pad = sound
+				_pad_name = job[0]
+			else:
+				_done[job[0]] = sound

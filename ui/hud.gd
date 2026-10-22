@@ -50,6 +50,9 @@ var _lobby_button: Button
 ## turn, refreshed every so often.
 var _forecast: Array[bool] = []
 var _forecast_age := 99.0
+## Whether the mouse was captured last frame. In a browser, Esc frees it
+## before the game hears the key, so losing it mid-game pauses instead.
+var _captured := false
 
 
 func _ready() -> void:
@@ -163,6 +166,8 @@ func _build_pause() -> void:
 				set_paused(false)
 				SoundEditor.toggle()],
 			["Quit", func() -> void: get_tree().quit()]]:
+		if entry[0] == "Quit" and OS.has_feature("web"):
+			continue
 		var button := Button.new()
 		button.text = entry[0]
 		button.custom_minimum_size = Vector2(260, 48)
@@ -178,6 +183,10 @@ func _build_pause() -> void:
 
 
 func _process(delta: float) -> void:
+	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	if OS.has_feature("web") and _captured and !captured and !_pause.visible and game.state == Game.State.PLAYING and !SoundEditor.open and !(game.commander_view and game.commander_view.visible):
+		set_paused(true)
+	_captured = captured
 	_forecast_age += delta
 	if _forecast_age > 0.4:
 		_forecast_age = 0.0

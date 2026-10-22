@@ -1,8 +1,16 @@
 extends Control
 ## The front door: play solo, host, or join a server. Everyone starts as a
 ## soldier; the commander's seat is in the pod. On the command line (after
-## --): server [port=], join=host:port, host, name=; any other argument goes
-## straight into a solo game, so the debug arguments keep working.
+## --): server [port=], join=host:port (or a ws:// or wss:// URL), host,
+## name=; any other argument goes straight into a solo game, so the debug
+## arguments keep working. In a browser, ?server= and ?name= on the page's
+## address fill the fields in.
+
+## Where the server's public address is published, beside the web build.
+const SERVER_INFO := "https://play.devoncoleman.com/rockhopper-server.json"
+## If that can't be had: the proxy's address in a browser (an HTTPS page
+## can't open a plain ws://), the LAN's elsewhere.
+var _fallback_server := "wss://rockhopper.play.devoncoleman.com:9443" if OS.has_feature("web") else "192.168.1.27:7777"
 
 var _name: LineEdit
 var _address: LineEdit
@@ -19,7 +27,9 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		args[parts[0]] = parts[1] if parts.size() > 1 else ""
-	Net.player_name = args.get("name", Net.player_name)
+	var saved := ConfigFile.new()
+	saved.load("user://settings.cfg")
+	Net.player_name = args.get("name", _query().get("name", saved.get_value("net", "name", Net.player_name)))
 	Net.role = StringName(args.get("role", Net.role))
 	if args.has("seed"):
 		Net.seed_value = int(args.seed)
@@ -33,8 +43,7 @@ func _ready() -> void:
 		return
 	if args.has("join"):
 		_build()
-		var target := String(args.join).split(":")
-		Net.join(target[0], int(target[1]) if target.size() > 1 else Net.PORT)
+		Net.join(args.join)
 		return
 	if !args.is_empty():
 		get_tree().change_scene_to_file.call_deferred("res://game/game.tscn")
@@ -60,9 +69,17 @@ func _build() -> void:
 	title.add_theme_font_size_override("font_size", 48)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	column.add_child(title)
+	var saved := ConfigFile.new()
+	saved.load("user://settings.cfg")
 	_name = _field(column, "Name", Net.player_name)
-	_address = _field(column, "Server", "192.168.1.27:%d" % Net.PORT)
-	for entry: Array in [["Join", _on_join], ["Host here", _on_host], ["Play solo", _on_solo], ["Quit", func() -> void: get_tree().quit()]]:
+	_address = _field(column, "Server", _query().get("server", saved.get_value("net", "server", "")))
+	_address.placeholder_text = "wss://... or host:port"
+	if _address.text == "":
+		_fetch_server()
+	var entries: Array = [["Join", _on_join], ["Host here", _on_host], ["Play solo", _on_solo], ["Quit", func() -> void: get_tree().quit()]]
+	if OS.has_feature("web"):
+		entries = [entries[0], entries[2]]
+	for entry: Array in entries:
 		var button := Button.new()
 		button.text = entry[0]
 		button.custom_minimum_size.y = 44
@@ -97,14 +114,46 @@ func _field(parent: Control, label: String, value: String) -> LineEdit:
 	return edit
 
 
+## The page's ?key=value pairs, in a browser.
+func _query() -> Dictionary:
+	var query := {}
+	if !OS.has_feature("web"):
+		return query
+	for part in str(JavaScriptBridge.eval("window.location.search")).trim_prefix("?").split("&", false):
+		var pair := part.split("=", true, 1)
+		if pair.size() == 2:
+			query[pair[0].uri_decode()] = pair[1].uri_decode()
+	return query
+
+
+## Fills the server in from where it's published.
+func _fetch_server() -> void:
+	var url := SERVER_INFO
+	if OS.has_feature("web"):
+		url = str(JavaScriptBridge.eval("new URL('../rockhopper-server.json', window.location.href).href"))
+	var request := HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(func(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+		request.queue_free()
+		var info: Variant = JSON.parse_string(body.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS and code == 200 else null
+		if _address.text == "":
+			_address.text = info.url if info is Dictionary and info.has("url") else _fallback_server)
+	if request.request(url + "?t=%d" % Time.get_unix_time_from_system()) != OK:
+		_address.text = _fallback_server
+
+
 func _take_settings() -> void:
 	Net.player_name = _name.text.strip_edges() if _name.text.strip_edges() != "" else "Soldier"
+	var saved := ConfigFile.new()
+	saved.load("user://settings.cfg")
+	saved.set_value("net", "name", Net.player_name)
+	saved.set_value("net", "server", _address.text.strip_edges())
+	saved.save("user://settings.cfg")
 
 
 func _on_join() -> void:
 	_take_settings()
-	var target := _address.text.strip_edges().split(":")
-	Net.join(target[0], int(target[1]) if target.size() > 1 else Net.PORT)
+	Net.join(_address.text.strip_edges())
 
 
 func _on_host() -> void:

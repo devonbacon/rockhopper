@@ -1,8 +1,8 @@
 extends Node
-## Networking. Solo needs none of it; a host is a server with a local
-## player; a dedicated server (--server) has none; clients mirror the
-## server. Every RPC lives on this autoload, so its path is the same on
-## every peer.
+## Networking, over WebSockets so browsers can join. Solo needs none of
+## it; a host is a server with a local player; a dedicated server
+## (--server) has none; clients mirror the server. Every RPC lives on this
+## autoload, so its path is the same on every peer.
 ##
 ## Each mission starts in the lobby, on the map it'll be played on: the
 ## leader (whoever's been connected longest) picks where the pod lands,
@@ -94,8 +94,8 @@ func has_local_player() -> bool:
 
 
 func start_server(port: int, dedicated: bool) -> Error:
-	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_server(port, MAX_PEERS)
+	var peer := _socket()
+	var err := peer.create_server(port, "*")
 	if err != OK:
 		status.emit("Couldn't listen on port %d (%s)" % [port, error_string(err)])
 		return err
@@ -112,18 +112,30 @@ func start_server(port: int, dedicated: bool) -> Error:
 	return OK
 
 
-func join(address: String, port: int) -> Error:
-	var peer := ENetMultiplayerPeer.new()
-	var err := peer.create_client(address, port)
+## `url` is ws://host:port, wss://..., or just host[:port].
+func join(url: String) -> Error:
+	if !url.contains("://"):
+		url = "ws://" + url
+	if url.begins_with("ws://") and url.count(":") < 2:
+		url += ":%d" % PORT
+	var peer := _socket()
+	var err := peer.create_client(url)
 	if err != OK:
 		status.emit("Couldn't connect (%s)" % error_string(err))
 		return err
 	multiplayer.multiplayer_peer = peer
 	mode = Mode.CLIENT
-	_target = "%s:%d" % [address, port]
+	_target = url
 	last_error = ""
-	status.emit("Connecting to %s:%d..." % [address, port])
+	status.emit("Connecting to %s..." % url)
 	return OK
+
+
+func _socket() -> WebSocketMultiplayerPeer:
+	var peer := WebSocketMultiplayerPeer.new()
+	peer.inbound_buffer_size = 1 << 20
+	peer.outbound_buffer_size = 1 << 20
+	return peer
 
 
 ## Back to solo, as after leaving a game.
@@ -193,6 +205,10 @@ func _on_server_gone() -> void:
 func _on_peer_connected(id: int) -> void:
 	print("peer %d connected" % id)
 	if !authority():
+		return
+	if multiplayer.get_peers().size() > MAX_PEERS:
+		print("full; dropping peer %d" % id)
+		multiplayer.multiplayer_peer.disconnect_peer(id)
 		return
 	get_tree().create_timer(HELLO_WITHIN).timeout.connect(func() -> void:
 		if multiplayer.multiplayer_peer and !peers.has(id) and multiplayer.get_peers().has(id):
