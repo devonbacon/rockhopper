@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<defs>
+<radialGradient id="halo" cx="64" cy="50" r="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffd9a0" stop-opacity="0.95"/><stop offset="0.25" stop-color="#ffb060" stop-opacity="0.45"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/></radialGradient>
+<radialGradient id="rock" cx="64" cy="96" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#8a6f55"/><stop offset="0.45" stop-color="#3b322a"/><stop offset="1" stop-color="#16130f"/></radialGradient>
+<clipPath id="card"><rect x="4" y="4" width="120" height="120" rx="26"/></clipPath>
+</defs>
+<rect x="4" y="4" width="120" height="120" rx="26" fill="#05060c"/>
+<g clip-path="url(#card)">
+<g fill="#fff"><circle cx="22" cy="24" r="1.6"/><circle cx="104" cy="20" r="1.4"/><circle cx="96" cy="44" r="1.1"/><circle cx="30" cy="52" r="1.1"/><circle cx="14" cy="38" r="0.9"/><circle cx="112" cy="62" r="1"/></g>
+<circle cx="64" cy="50" r="58" fill="url(#halo)"/>
+<path d="M-10 128V100Q30 82 64 88T138 98V128z" fill="url(#rock)"/>
+<path d="M60 90V54h8v36z" fill="#b9b1a6"/>
+<circle cx="64" cy="48" r="12" fill="#fff3d6"/>
+</g>
+</svg>
